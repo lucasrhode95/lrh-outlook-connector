@@ -1,6 +1,6 @@
 """Command-line entry point: ``outlook-connector <command>``.
 
-Commands import their dependencies lazily, so that ``mcp`` (later) never loads the web stack.
+Commands import their dependencies lazily, so that ``mcp`` never loads the web stack.
 """
 
 from __future__ import annotations
@@ -47,6 +47,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--json", action="store_true", help="Machine-readable output.")
     _add_unsecure(status)
+
+    mcp = sub.add_parser("mcp", help="Run the MCP server over stdio (started by your MCP client).")
+    _add_unsecure(mcp)
     return parser
 
 
@@ -64,6 +67,11 @@ def main(argv: list[str] | None = None, *, provider_factory: type[TokenProvider]
             f"{config.token_cache_path(unsecure=True)}. Do not share it; delete it when done.",
             file=sys.stderr,
         )
+    if args.command == "mcp":
+        from outlook_connector.surfaces import mcp_main
+
+        mcp_main.run(unsecure=args.unsecure)  # stdout belongs to the MCP protocol from here on
+        return EXIT_OK
     try:
         if provider_factory is None:
             from outlook_connector.auth.tokens import TokenProvider as provider_factory
