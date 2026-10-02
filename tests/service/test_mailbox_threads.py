@@ -75,6 +75,23 @@ async def test_server_deleted_messages_are_retained_and_labelled(mailbox: Mailbo
     assert page.coverage.source == "remote+local" and "deleted on the server" in page.coverage.notes[0]
 
 
+async def test_received_only_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
+    page = await mailbox.list_messages(received_only=True)
+    assert [m.id for m in page.items] == ["m5", "m3", "m1"]
+    assert any("received_only" in n for n in page.coverage.notes)
+
+
+async def test_received_only_scans_past_filtered_pages_and_keeps_it_in_the_cursor(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    for i in range(3):
+        fake.add(FakeMessage(f"j{i}", "spam", "f-junk", f"2026-10-01T0{i}:00:00Z", conversation=f"cj{i}"))
+    first = await mailbox.list_messages(received_only=True, limit=2)
+    assert [m.id for m in first.items] == ["m5"] and first.cursor  # pages of junk skipped
+    second = await mailbox.list_messages(limit=2, cursor=first.cursor)
+    assert [m.id for m in second.items] == ["m3"]  # m4 (junk) and m2 (sent) left out
+
+
 async def test_local_only_listing_says_so(mailbox: Mailbox) -> None:
     await mailbox.list_messages()
     page = await mailbox.list_messages(refresh=False)
@@ -153,8 +170,50 @@ async def test_thread_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> None:
     threads = Threads(mailbox)
     first = await threads.get_thread("c-rel", max_chars=15)  # "First report" fits, "Thanks!" does not
     assert [t.message.id for t in first.messages] == ["m1"] and first.cursor
+    # the cursor restores the original options: max_chars=1000 here is ignored
     second = await threads.get_thread("c-rel", max_chars=1000, cursor=first.cursor)
-    assert [t.message.id for t in second.messages] == ["m2", "m3"] and second.cursor is None
+    assert [t.message.id for t in second.messages] == ["m2"] and second.cursor
+    third = await threads.get_thread("c-rel", cursor=second.cursor)
+    assert [t.message.id for t in third.messages] == ["m3"] and third.cursor is None
+
+
+async def test_thread_cursor_keeps_include_deleted_items(mailbox: Mailbox) -> None:
+    threads = Threads(mailbox)
+    first = await threads.get_thread("c-rel", include_deleted_items=True, max_chars=15)
+    rest = []
+    cursor = first.cursor
+    while cursor:  # continue without repeating include_deleted_items
+        page = await threads.get_thread("c-rel", cursor=cursor)
+        rest += [t.message.id for t in page.messages]
+        cursor = page.cursor
+    assert [t.message.id for t in first.messages] + rest == ["m1", "m2", "m3", "m4"]
+
+
+async def test_thread_cursor_belongs_to_its_conversation(mailbox: Mailbox) -> None:
+    first = await Threads(mailbox).get_thread("c-rel", max_chars=15)
+    assert first.cursor
+    with pytest.raises(InvalidRequest, match="different conversation"):
+        await Threads(mailbox).get_thread("c-lunch", cursor=first.cursor)
+
+
+async def test_truncated_conversation_is_not_reported_complete(
+    mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
+    thread = await Threads(mailbox).get_thread("c-rel", include_bodies=False)
+    assert not thread.coverage.complete and any("listing limit" in n for n in thread.coverage.notes)
+
+
+async def test_thread_sizes_count_like_get_thread(mailbox: Mailbox, fake: FakeGraph) -> None:
+    threads = Threads(mailbox)
+    sizes = {s.conversation_id: s.messages for s in await threads.sizes(["c-rel", "c-lunch"])}
+    assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_thread
+    with_junk = await threads.sizes(["c-rel"], include_deleted_items=True)
+    assert with_junk[0].messages == 4 and not with_junk[0].at_least
+    await threads.get_thread("c-rel")
+    del fake.messages["m2"]
+    await threads.get_thread("c-rel")  # m2 is now retained as deleted on the server
+    assert (await threads.sizes(["c-rel"]))[0].messages == 3
 
 
 async def test_single_oversized_message_is_truncated_not_skipped(mailbox: Mailbox, fake: FakeGraph) -> None:

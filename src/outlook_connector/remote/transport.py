@@ -4,17 +4,22 @@
 - No redirects, and only allowlisted hosts.
 - Retries only when the caller marks the request idempotent (GETs by default), honoring
   429 / Retry-After.
-- Concurrency limiter to keep parallel fetches polite.
+- Concurrency limiter: Exchange Online allows 4 concurrent requests per app and mailbox.
 - Logs metadata only: no URLs with query text, no bodies, no tokens.
+- Errors name the operation in progress (``operation()``), the service error code and message
+  (shortened), and the request id, so a failure can be traced without exposing mail content.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
+import re
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextvars import ContextVar
 from typing import Any, BinaryIO, Protocol
 from urllib.parse import urlsplit
 
@@ -27,6 +32,20 @@ log = logging.getLogger(__name__)
 ALLOWED_HOSTS = frozenset({"graph.microsoft.com", "outlook.cloud.microsoft", "outlook.office.com"})
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 MAX_JSON_BYTES = 32 * 1024 * 1024
+MAX_CONCURRENCY = 4  # Exchange Online: concurrent requests per app per mailbox
+MAX_ERROR_TEXT = 200
+
+_operation: ContextVar[str | None] = ContextVar("operation", default=None)
+
+
+@contextlib.contextmanager
+def operation(name: str) -> Iterator[None]:
+    """Name what the code below is doing; errors raised inside it say so ("fetching message bodies")."""
+    token = _operation.set(name)
+    try:
+        yield
+    finally:
+        _operation.reset(token)
 
 
 class _Token(Protocol):
@@ -43,7 +62,7 @@ class Transport:
         tokens: TokenSource,
         *,
         client: httpx.AsyncClient | None = None,
-        max_concurrency: int = 6,
+        max_concurrency: int = MAX_CONCURRENCY,
         max_attempts: int = 4,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -57,6 +76,10 @@ class Transport:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    async def sleep(self, seconds: float) -> None:
+        """Wait before a retry (injectable for tests)."""
+        await self._sleep(seconds)
 
     async def request(
         self,
@@ -161,30 +184,79 @@ def _retry_after(response: httpx.Response, attempt: int) -> float:
         return float(min(2**attempt, 20))
 
 
+def service_error(body: Any) -> tuple[str | None, str | None]:
+    """(code, message) of a Microsoft error body ``{"error": {"code", "message"}}``."""
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return None, None
+    code = error.get("code") if isinstance(error.get("code"), str) else None
+    message = error.get("message") if isinstance(error.get("message"), str) else None
+    return code, message
+
+
 def error_code(response: httpx.Response) -> str | None:
     owa = response.headers.get("x-owa-error")
     if owa:
         return owa[:120]
     try:
-        data = response.json()
+        return service_error(response.json())[0]
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
-    error = data.get("error") if isinstance(data, dict) else None
-    if isinstance(error, dict) and isinstance(error.get("code"), str):
-        return error["code"]
-    return None
+
+
+def request_id(headers: Mapping[str, str]) -> str | None:
+    lowered = {k.lower(): v for k, v in headers.items()}
+    value = lowered.get("request-id") or lowered.get("client-request-id")
+    return value[:64] if value else None
+
+
+def describe_failure(
+    *,
+    status: int,
+    code: str | None,
+    message: str | None,
+    request: str | None,
+    host: str | None = None,
+    detail: str | None = None,
+) -> Exception:
+    """The domain error for a failed Microsoft response, with sanitized diagnostics.
+
+    The service message is shortened and flattened to one line; it never contains tokens, and
+    Graph error messages do not echo mail content.
+    """
+    where = host or "Microsoft Graph"
+    parts = [f"HTTP {status}", code or "no error code"]
+    text = ", ".join(parts)
+    if message:
+        text += ": " + re.sub(r"\s+", " ", message).strip()[:MAX_ERROR_TEXT]
+    if request:
+        text += f"; request-id {request}"
+    prefix = f"While {_operation.get()}: " if _operation.get() else ""
+    suffix = f" {detail}" if detail else ""
+    if status == 404:
+        return NotFound(f"{prefix}Not found ({text}).{suffix}")
+    if status == 429:
+        return Throttled(
+            f"{prefix}{where} is throttling requests ({text}).{suffix} Outlook allows about 4 "
+            "concurrent requests and 10,000 requests per 10 minutes per mailbox; wait and retry, "
+            "and avoid parallel calls."
+        )
+    if status == 400:
+        return InvalidRequest(f"{prefix}{where} rejected the request ({text}).{suffix}")
+    if status in (401, 403):
+        return Upstream(f"{prefix}{where} refused access ({text}).{suffix}")
+    return Upstream(f"{prefix}{where} returned an error ({text}).{suffix}")
 
 
 def _error_for(response: httpx.Response) -> Exception:
-    code = error_code(response) or "no error code"
-    status = response.status_code
-    host = urlsplit(str(response.request.url)).hostname if response.request else "server"
-    if status == 404:
-        return NotFound(f"Not found ({code}).")
-    if status == 429:
-        return Throttled(f"{host} is throttling requests ({code}). Retry later.")
-    if status == 400:
-        return InvalidRequest(f"{host} rejected the request ({code}).")
-    if status in (401, 403):
-        return Upstream(f"{host} refused access (HTTP {status}, {code}).")
-    return Upstream(f"{host} returned HTTP {status} ({code}).")
+    host = urlsplit(str(response.request.url)).hostname if response.request else None
+    message = None
+    with contextlib.suppress(json.JSONDecodeError, UnicodeDecodeError):
+        message = service_error(response.json())[1]
+    return describe_failure(
+        status=response.status_code,
+        code=error_code(response),
+        message=message,
+        request=request_id(response.headers),
+        host=host,
+    )

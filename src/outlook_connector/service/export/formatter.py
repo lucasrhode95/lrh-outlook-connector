@@ -24,7 +24,8 @@ def stamp(value: datetime | None) -> str:
 
 
 def people(values: Sequence[Recipient]) -> str:
-    return ", ".join(r.display() for r in values)
+    # "; " as in Outlook: display names are often "Last, First", so a comma would be ambiguous
+    return "; ".join(r.display() for r in values)
 
 
 def body_text(message: Message | None, kind: str) -> str:
@@ -44,6 +45,11 @@ def render_message(item: RenderedMessage, *, position: str) -> str:
     lines.append(f"Subject: {m.subject or '(no subject)'}")
     if m.folder:
         lines.append(f"Folder:  {m.folder}")
+    lines.append(f"Message id:      {m.id}")
+    if m.conversation_id:
+        lines.append(f"Conversation id: {m.conversation_id}")
+    if m.internet_message_id:
+        lines.append(f"Internet id:     {m.internet_message_id}")
     if m.is_deleted:
         deleted = f" on {stamp(m.deleted_at)}" if m.deleted_at else ""
         lines.append(f"!! DELETED on the server{deleted}. This is the copy retained by outlook-connector.")
@@ -54,8 +60,19 @@ def render_message(item: RenderedMessage, *, position: str) -> str:
     return "\n".join(lines)
 
 
-def render_file(title: str, items: list[RenderedMessage], *, body_kind: str, sections: bool) -> str:
-    """One TXT file. With ``sections``, consecutive messages of different conversations get a header."""
+def render_file(
+    title: str,
+    items: list[RenderedMessage],
+    *,
+    body_kind: str,
+    sections: bool,
+    notes: Sequence[str] = (),
+) -> str:
+    """One TXT file. With ``sections``, consecutive messages of different conversations get a header.
+
+    ``notes`` (what the export left out or could not fetch) go in the header. Every message carries
+    its ids, which get_message/get_thread accept, so an export can be traced back to its source.
+    """
     dates = [m.message.received_at or m.message.sent_at for m in items]
     known = [d for d in dates if d]
     span = f"{stamp(min(known))} to {stamp(max(known))}" if known else "no dates"
@@ -64,6 +81,7 @@ def render_file(title: str, items: list[RenderedMessage], *, body_kind: str, sec
         f"Messages: {len(items)} ({span})",
         f"Exported: {stamp(datetime.now(UTC))} by outlook-connector; body: "
         + ("without quoted history" if body_kind == "unique" else "full, including quoted history"),
+        *notes,
         "",
     ]
     parts = ["\n".join(head)]

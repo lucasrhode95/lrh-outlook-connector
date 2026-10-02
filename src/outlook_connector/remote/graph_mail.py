@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import functools
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ParamSpec, TypeVar
 
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary
 from outlook_connector.remote import graph_mapping as mapping
-from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph, raise_for_sub_status, relative
-from outlook_connector.remote.ports import BodyFormat
+from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph, raise_for_failures, relative, sub_failure
+from outlook_connector.remote.ports import BodyFormat, FetchedMessages
+from outlook_connector.remote.transport import operation
 
 WELL_KNOWN = (
     "inbox", "sentitems", "drafts", "outbox", "deleteditems", "junkemail", "archive",
@@ -26,10 +30,29 @@ def _odata_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def _named(name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+    """Errors raised inside the decorated call say what was being done."""
+
+    def wrap(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+        @functools.wraps(func)
+        async def run(*args: P.args, **kwargs: P.kwargs) -> R:
+            with operation(name):
+                return await func(*args, **kwargs)
+
+        return run
+
+    return wrap
+
+
 class GraphMailReader:
     def __init__(self, graph: Graph) -> None:
         self._graph = graph
 
+    @_named("listing folders")
     async def list_folders(self) -> list[Folder]:
         params = {"$top": 100, "includeHiddenFolders": "true", "$select": mapping.FOLDER_FIELDS}
 
@@ -52,10 +75,9 @@ class GraphMailReader:
         responses = await self._graph.batch(
             {alias: relative(f"/me/mailFolders/{alias}", {"$select": "id"}) for alias in WELL_KNOWN}
         )
-        return {
-            body["id"]: alias for alias, (status, body) in responses.items() if status == 200 and "id" in body
-        }
+        return {r.body["id"]: alias for alias, r in responses.items() if r.status == 200 and "id" in r.body}
 
+    @_named("listing messages")
     async def list_messages(
         self,
         *,
@@ -83,6 +105,7 @@ class GraphMailReader:
             items, link = await self._graph.page(path, params)
         return [mapping.summary(i) for i in items], link
 
+    @_named("searching the mailbox")
     async def search(
         self, *, query: str, folder_id: str | None, page_size: int, page: str | None
     ) -> tuple[list[MessageSummary], str | None]:
@@ -98,6 +121,7 @@ class GraphMailReader:
             items, link = await self._graph.page(path, params)
         return [mapping.summary(i) for i in items], link
 
+    @_named("counting search results")
     async def search_total(self, query: str) -> int | None:
         body = {
             "requests": [{"entityTypes": ["message"], "query": {"queryString": query}, "from": 0, "size": 1}]
@@ -109,16 +133,44 @@ class GraphMailReader:
                     return container["total"]
         return None
 
-    async def conversation(self, conversation_id: str) -> list[MessageSummary]:
+    @_named("listing a conversation")
+    async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
         # $orderby cannot be combined with this filter (InefficientFilter, research §3.4): sort locally.
         params = {
             "$filter": f"conversationId eq {_odata_string(conversation_id)}",
             "$select": mapping.SUMMARY_FIELDS,
             "$top": 100,
         }
-        items, _ = await self._graph.collect("/me/messages", params, max_items=MAX_CONVERSATION)
-        return [mapping.summary(i) for i in items]
+        items, truncated = await self._graph.collect("/me/messages", params, max_items=MAX_CONVERSATION)
+        return [mapping.summary(i) for i in items], truncated
 
+    @_named("counting conversation messages")
+    async def conversation_folders(
+        self, conversation_ids: list[str]
+    ) -> dict[str, tuple[list[str | None], bool]]:
+        requests = {
+            str(index): relative(
+                "/me/messages",
+                {
+                    "$filter": f"conversationId eq {_odata_string(cid)}",
+                    "$select": "id,parentFolderId",
+                    "$top": MAX_CONVERSATION,
+                },
+            )
+            for index, cid in enumerate(conversation_ids)
+        }
+        out: dict[str, tuple[list[str | None], bool]] = {}
+        responses = await self._graph.batch(requests)
+        raise_for_failures(responses)
+        for key, response in responses.items():
+            items = [i for i in response.body.get("value", []) if isinstance(i, dict)]
+            out[conversation_ids[int(key)]] = (
+                [i.get("parentFolderId") for i in items],
+                "@odata.nextLink" in response.body,
+            )
+        return out
+
+    @_named("reading a message")
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message:
         prefer = (PREFER_TEXT_BODY,) if body_format == "text" else ()
         data = await self._graph.get(
@@ -129,42 +181,65 @@ class GraphMailReader:
             result.attachments = await self.list_attachments(message_id)
         return result
 
+    @_named("fetching message bodies")
     async def get_messages(
         self, message_ids: list[str], *, body_format: BodyFormat = "text"
-    ) -> dict[str, Message | None]:
+    ) -> FetchedMessages:
         prefer = (PREFER_TEXT_BODY,) if body_format == "text" else ()
         requests = {
             mid: relative(f"/me/messages/{mid}", {"$select": mapping.MESSAGE_FIELDS}) for mid in message_ids
         }
         responses = await self._graph.batch(requests, prefer=prefer)
-        out: dict[str, Message | None] = {}
-        for mid, (status, body) in responses.items():
-            if status == 404:
-                out[mid] = None
-                continue
-            raise_for_sub_status(status, body)
-            out[mid] = mapping.message(body, html=body_format == "html")
+        out = FetchedMessages()
+        for mid, response in responses.items():
+            if response.status == 404:
+                out.messages[mid] = None
+            elif response.ok:
+                out.messages[mid] = mapping.message(response.body, html=body_format == "html")
+            else:
+                out.failed[mid] = str(sub_failure(response))
         return out
 
+    @_named("checking for moved or deleted messages")
     async def locate(self, message_ids: list[str]) -> dict[str, str | None]:
         requests = {
             mid: relative(f"/me/messages/{mid}", {"$select": "id,parentFolderId"}) for mid in message_ids
         }
-        out: dict[str, str | None] = {}
-        for mid, (status, body) in (await self._graph.batch(requests)).items():
-            if status == 404:
-                out[mid] = None
-            else:
-                raise_for_sub_status(status, body)
-                out[mid] = body.get("parentFolderId")
-        return out
+        responses = await self._graph.batch(requests)
+        raise_for_failures(responses, allow=(404,))
+        return {
+            mid: None if r.status == 404 else r.body.get("parentFolderId") for mid, r in responses.items()
+        }
 
+    @_named("listing attachments")
     async def list_attachments(self, message_id: str) -> list[Attachment]:
         items, _ = await self._graph.collect(
             f"/me/messages/{message_id}/attachments", {"$select": mapping.ATTACHMENT_FIELDS}, max_items=500
         )
         return [mapping.attachment(i, message_id) for i in items]
 
+    @_named("listing attachments")
+    async def list_attachments_many(
+        self, message_ids: list[str]
+    ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
+        requests = {
+            mid: relative(f"/me/messages/{mid}/attachments", {"$select": mapping.ATTACHMENT_FIELDS})
+            for mid in message_ids
+        }
+        responses = await self._graph.batch(requests)
+        out: dict[str, list[Attachment]] = {}
+        failed: dict[str, str] = {}
+        for mid, response in responses.items():
+            if not response.ok:
+                failed[mid] = str(sub_failure(response))
+            elif "@odata.nextLink" in response.body:  # rare: more than one page of attachments
+                out[mid] = await self.list_attachments(mid)
+            else:
+                values = response.body.get("value", [])
+                out[mid] = [mapping.attachment(i, mid) for i in values if isinstance(i, dict)]
+        return out, failed
+
+    @_named("reading inline attachment ids")
     async def attachment_content_ids(
         self, message_id: str, attachment_ids: list[str]
     ) -> dict[str, str | None]:
@@ -175,17 +250,17 @@ class GraphMailReader:
             )
             for aid in attachment_ids
         }
-        out: dict[str, str | None] = {}
-        for aid, (status, body) in (await self._graph.batch(requests)).items():
-            out[aid] = body.get("contentId") if status == 200 else None
-        return out
+        responses = await self._graph.batch(requests)
+        return {aid: r.body.get("contentId") if r.status == 200 else None for aid, r in responses.items()}
 
+    @_named("downloading an attachment")
     async def download_attachment(self, message_id: str, attachment_id: str, dest: Path) -> int:
         _, size = await self._graph.download(
             f"/me/messages/{message_id}/attachments/{attachment_id}/$value", dest
         )
         return size
 
+    @_named("downloading a message")
     async def download_mime(self, message_id: str, dest: Path) -> int:
         _, size = await self._graph.download(f"/me/messages/{message_id}/$value", dest)
         return size

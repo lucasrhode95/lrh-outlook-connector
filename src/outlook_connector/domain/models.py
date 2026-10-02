@@ -141,13 +141,34 @@ class Thread(BaseModel):
     coverage: Coverage
 
 
+class ThreadSize(BaseModel):
+    conversation_id: str
+    messages: int  # what get_thread would list with the same include_deleted_items
+    at_least: bool = False  # the conversation is larger than the server listed in one request
+
+
+EXPORT_MAX_MESSAGES = 2000  # hard cap per export
+
+
 class ExportRequest(BaseModel):
+    """What to export: conversations, messages, and/or every message in a range. All are combined."""
+
     conversation_ids: list[str] = Field(default_factory=list)
     message_ids: list[str] = Field(default_factory=list)
+    # range selection: active when any of these is set
+    since: datetime | None = None
+    until: datetime | None = None
+    folder: str | None = None  # path, alias or id; None = whole mailbox
+    received_only: bool = False  # leave out Sent Items, Drafts and Outbox
+    limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
     include_attachments: bool = False
     combine: CombineMode = "per_thread"
     body: Literal["unique", "full"] = "unique"
     include_deleted_items: bool = False
+
+    @property
+    def by_range(self) -> bool:
+        return bool(self.since or self.until or self.folder or self.received_only)
 
 
 class ExportArtifact(BaseModel):
@@ -159,3 +180,6 @@ class ExportArtifact(BaseModel):
     text_files: int
     attachment_files: int
     attachments_unavailable: int
+    messages_excluded: dict[str, int] = Field(default_factory=dict)  # reason -> count left out by folder
+    messages_unavailable: int = 0  # selected, but the body could not be fetched (marked in the file)
+    unavailable_message_ids: list[str] = Field(default_factory=list)
