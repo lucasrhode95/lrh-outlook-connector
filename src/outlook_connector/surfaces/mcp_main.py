@@ -105,7 +105,10 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def search_messages(
-        query: Annotated[str, Field(description="Words or KQL terms, e.g. 'relatório be' or 'from:alice'.")],
+        query: Annotated[
+            str,
+            Field(description="Words or KQL terms, e.g. 'budget review', 'from:alice', 'subject:invoice'."),
+        ],
         since: datetime | None = None,
         until: datetime | None = None,
         folder: str | None = None,

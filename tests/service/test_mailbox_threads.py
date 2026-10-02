@@ -187,3 +187,23 @@ async def test_search_reports_an_approximate_total_only_when_incomplete(mailbox:
     result = await mailbox.search("relatório", limit=1)
     assert result.cursor and result.coverage.server_total == 3
     assert any("approximate" in n for n in result.coverage.notes)
+
+
+async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_background(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    import asyncio
+
+    from outlook_connector.service import mailbox as mailbox_module
+
+    await mailbox.folders()  # fills the cache
+    fake.add_folder("f-new", "New folder")
+    mailbox_module.FOLDER_TTL_SECONDS, saved = -1, mailbox_module.FOLDER_TTL_SECONDS  # everything is stale
+    try:
+        served = await mailbox.folders()
+        assert "f-new" not in {f.id for f in served}  # answered from the cache, without waiting
+        assert mailbox._folder_refresh is not None
+        await asyncio.wait_for(asyncio.shield(mailbox._folder_refresh), timeout=5)
+    finally:
+        mailbox_module.FOLDER_TTL_SECONDS = saved
+    assert "f-new" in {f.id for f in (await mailbox.folders())}

@@ -138,7 +138,9 @@ function spinner(text) {
 
 // Every list load gets a number; a response is only applied if no newer load started since.
 // This keeps a slow response for a previously clicked folder from replacing the current one.
-async function loadPage(reset, path, apply, loadingText) {
+// previewPath (optional): a local-cache request drawn first, so the list appears instantly while the
+// authoritative server response is on its way. The server response then replaces it.
+async function loadPage(reset, path, apply, loadingText, previewPath = null) {
   const request = ++state.listRequest;
   if (reset) {
     resetThreads();
@@ -149,9 +151,21 @@ async function loadPage(reset, path, apply, loadingText) {
     $("more").disabled = true;
     $("more").replaceChildren(el("span", { class: "spinner", "aria-hidden": "true" }), " Loading…");
   }
+  if (reset && previewPath) {
+    try {
+      const cached = await json(previewPath);
+      if (request === state.listRequest && cached.items.length) {
+        apply(cached);
+        render();
+        $("more").hidden = true; // the cached cursor is not meaningful
+        $("coverage").replaceChildren(el("span", { class: "spinner small", "aria-hidden": "true" }), " cached · updating from Outlook…");
+      }
+    } catch { /* the server request below reports errors */ }
+  }
   try {
     const result = await json(path);
     if (request !== state.listRequest) return; // superseded by a newer click: drop this response
+    if (reset) resetThreads(); // drop the cached preview rows
     apply(result);
     state.cursor = result.cursor;
     showCoverage(result.coverage);
@@ -170,9 +184,10 @@ async function loadPage(reset, path, apply, loadingText) {
 function loadList(reset) {
   const { since, until } = dateBounds();
   const path = `/api/messages?${query({ folder: state.folder, since, until, limit: 100, cursor: reset ? null : state.cursor })}`;
+  const preview = reset ? `/api/messages?${query({ folder: state.folder, since, until, limit: 100, refresh: false })}` : null;
   return loadPage(reset, path, (page) => {
     for (const item of page.items) addMessage(item);
-  }, "Loading messages…");
+  }, "Loading messages…", preview);
 }
 
 function runSearch(reset) {

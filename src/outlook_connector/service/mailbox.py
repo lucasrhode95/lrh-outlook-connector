@@ -6,6 +6,8 @@ the server can no longer provide it (messages deleted on the server).
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound
@@ -25,6 +27,8 @@ from outlook_connector.service import cursors
 from outlook_connector.service.reconcile import Reconciler
 from outlook_connector.store.db import Store
 
+log = logging.getLogger(__name__)
+
 FOLDER_TTL_SECONDS = 600
 LOCAL_ONLY_NOTE = "Local cache only: messages this app has seen before. It is not a mirror of the mailbox."
 
@@ -35,16 +39,34 @@ class Mailbox:
         self.store = store
         self.reconciler = Reconciler(reader, store)
         self._folders: dict[str, Folder] | None = None
+        self._folder_refresh: asyncio.Task[list[Folder]] | None = None
 
     # ---------------------------------------------------------------- folders
 
     async def folders(self, *, refresh: bool = False) -> list[Folder]:
+        """Cached folders right away; a stale cache is refreshed in the background (stale-while-revalidate).
+
+        Only an empty cache or ``refresh=True`` waits for the server.
+        """
         cached, age = self.store.folders()
-        if refresh or not cached or age is None or age > FOLDER_TTL_SECONDS:
-            cached = _with_paths(await self.reader.list_folders())
-            self.store.save_folders(cached)
+        if refresh or not cached:
+            cached = await self._refresh_folders()
+        elif (age is None or age > FOLDER_TTL_SECONDS) and self._folder_refresh is None:
+            self._folder_refresh = asyncio.create_task(self._refresh_folders())
+            self._folder_refresh.add_done_callback(self._folder_refresh_done)
         self._folders = {f.id: f for f in cached}
         return sorted(cached, key=lambda f: f.path.lower())
+
+    async def _refresh_folders(self) -> list[Folder]:
+        fresh = _with_paths(await self.reader.list_folders())
+        self.store.save_folders(fresh)
+        self._folders = {f.id: f for f in fresh}
+        return fresh
+
+    def _folder_refresh_done(self, task: asyncio.Task[list[Folder]]) -> None:
+        self._folder_refresh = None
+        if not task.cancelled() and task.exception() is not None:
+            log.warning("Background folder refresh failed: %s", type(task.exception()).__name__)
 
     async def folder_map(self) -> dict[str, Folder]:
         if self._folders is None:

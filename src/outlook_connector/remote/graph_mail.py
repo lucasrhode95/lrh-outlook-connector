@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,17 +32,21 @@ class GraphMailReader:
 
     async def list_folders(self) -> list[Folder]:
         params = {"$top": 100, "includeHiddenFolders": "true", "$select": mapping.FOLDER_FIELDS}
-        aliases = await self._well_known_ids()
-        found: list[Folder] = []
-        pending = ["/me/mailFolders"]
-        while pending:
-            path = pending.pop()
-            items, _ = await self._graph.collect(path, params, max_items=1000)
-            for item in items:
-                found.append(mapping.folder(item, aliases.get(item["id"])))
-                if item.get("childFolderCount"):
-                    pending.append(f"/me/mailFolders/{item['id']}/childFolders")
-        return found
+
+        async def level(paths: list[str]) -> list[dict]:
+            pages = await asyncio.gather(*(self._graph.collect(p, params, max_items=1000) for p in paths))
+            return [item for items, _ in pages for item in items]
+
+        # Aliases and the folder tree are independent; each tree level is fetched in parallel.
+        aliases_task = asyncio.create_task(self._well_known_ids())
+        raw: list[dict] = []
+        paths = ["/me/mailFolders"]
+        while paths:
+            items = await level(paths)
+            raw.extend(items)
+            paths = [f"/me/mailFolders/{i['id']}/childFolders" for i in items if i.get("childFolderCount")]
+        aliases = await aliases_task
+        return [mapping.folder(item, aliases.get(item["id"])) for item in raw]
 
     async def _well_known_ids(self) -> dict[str, str]:
         responses = await self._graph.batch(

@@ -191,3 +191,23 @@ def test_sign_out_deletes_the_cache() -> None:
     assert p.sign_out() is True
     assert not p.cache_path.exists()
     assert p.sign_out() is False
+
+
+# ---------------------------------------------------------------- per-process reuse
+
+
+def test_app_is_built_once_and_valid_tokens_are_reused_from_memory() -> None:
+    script = Script(accounts=[msal_account()], silent={READ: [token_result(aud=GRAPH, scp="Mail.Read")]})
+    p = provider(script)
+    first, second = p.get_token("read"), p.get_token("read")  # the second never reaches MSAL
+    assert (first.source, second.source) == ("cache", "memory")
+    assert script.created == [READ]
+
+
+def test_tokens_close_to_expiry_are_refreshed(monkeypatch: pytest.MonkeyPatch) -> None:
+    script = Script(accounts=[msal_account()], silent={READ: [token_result(aud=GRAPH, scp="Mail.Read")] * 2})
+    p = provider(script)
+    p.get_token("read")
+    monkeypatch.setattr(tokens.time, "time", lambda: 10**12)  # far in the future: memo is stale
+    assert p.get_token("read").source == "cache"
+    assert script.silent[READ] == []  # both scripted silent results were consumed
