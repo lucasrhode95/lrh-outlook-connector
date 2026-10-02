@@ -125,7 +125,7 @@ lrh-outlook-connector/
   - `read`: Outlook Mobile `27922004-…` → `https://graph.microsoft.com/Mail.Read`.
   - `write`: One Outlook Web `9199bf20-…` → `https://outlook.office.com/.default`.
 - MSAL `PublicClientApplication` per profile. Silent acquisition first. Device code only from the `auth` command, so surfaces never start an interactive sign-in. They raise `AuthenticationRequired` with the exact command to run.
-- Encrypted cache via `msal-extensions` by default, **fail-closed** when unavailable. `--unsecure` selects a separate plaintext cache under `.local/` with a loud warning.
+- Encrypted cache via `msal-extensions` by default, **fail-closed** when unavailable. `--unsecure` selects a separate, clearly named plaintext cache file in the same data directory, with a warning on every use. Every process finds it at the same path, wherever it was started.
 - Cross-process lock around cache reads and writes.
 - The account fingerprint (`tid`+`oid`) must match the store owner (§7).
 - The `write` profile is optional. Read-only use works without it, and write tools report "write sign-in required".
@@ -283,8 +283,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 - **Item key:** `(fingerprint, mailbox, Graph immutable id)`. Immutable ids survive moves within the mailbox (verified).
 - **Conversation key:** Graph `conversationId`.
 - **Locations:**
-  - secure token cache: OS user data directory;
-  - dev token cache: `.local/` (`--unsecure`);
+  - token cache: `%LOCALAPPDATA%/lrh-outlook-connector/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
+  - `OUTLOOK_CONNECTOR_HOME` overrides the data directory (tests, portability);
   - store: `%LOCALAPPDATA%/lrh-outlook-connector/<fingerprint>/mail.sqlite3`;
   - export temp files: OS temp directory, cleaned after delivery.
 
@@ -339,5 +339,5 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 
 | # | Question | Decision (2026-10-02) |
 |---|---|---|
-| A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache under `.local/` is available during development. |
+| A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache (a separate file in the data directory) is available during development. |
 | A2 | Package / CLI name | **`outlook_connector` / `outlook-connector`** |
