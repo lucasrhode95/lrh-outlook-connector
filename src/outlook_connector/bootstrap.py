@@ -15,6 +15,7 @@ from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.export.orchestrator import Exports
+from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads
 from outlook_connector.store.db import Store, store_path
@@ -26,6 +27,7 @@ class Services:
     mailbox: Mailbox
     threads: Threads
     exports: Exports
+    files: Files
 
 
 class AppContext:
@@ -54,7 +56,7 @@ class AppContext:
             store = Store(store_path(account.fingerprint), account.fingerprint)
             mailbox = Mailbox(reader, store)
             threads = Threads(mailbox)
-            self._services = Services(account, mailbox, threads, Exports(threads))
+            self._services = Services(account, mailbox, threads, Exports(threads), Files(mailbox))
         return self._services
 
     async def aclose(self) -> None:
