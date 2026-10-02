@@ -263,3 +263,11 @@ async def test_access_denied_is_not_a_sign_in_problem(
 def test_logged_paths_never_carry_ids() -> None:
     url = "https://graph.microsoft.com/v1.0/me/messages/" + "A" * 120 + "/attachments"
     assert transport_path(url) == "/v1.0/me/messages/{id}/attachments"
+
+
+async def test_renewal_applies_to_one_request_only(fake: FakeGraph) -> None:
+    tokens_ = StaticTokens()
+    fake.reject_tokens, fake.throttle_next = 1, 1  # 401, then (renewed) 429, then success
+    transport = Transport(tokens_, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
+    assert await GraphMailReader(Graph(transport)).list_folders()
+    assert tokens_.renewals == [{"force_refresh": True}]  # the retry after 429 did not refresh again

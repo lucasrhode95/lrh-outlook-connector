@@ -10,7 +10,7 @@ import contextlib
 import json
 import sys
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from outlook_connector import config
 from outlook_connector.domain.errors import AuthenticationRequired, ConnectorError
@@ -171,7 +171,7 @@ def _print_token_summary(token: AccessToken) -> None:
     print(f"  account:     {facts['account']}")
     print(f"  audience:    {facts['audience']}")
     print(
-        f"  mail scopes: {', '.join(facts['mail_scopes']) or '(none)'}  "
+        f"  mail scopes: {', '.join(cast(list[str], facts['mail_scopes'])) or '(none)'}  "
         f"({facts['scope_count']} scopes in total)"
     )
     print(f"  token from:  {facts['source']}, expires {facts['expires_on']}")
@@ -212,7 +212,7 @@ def _print_status(status: CacheStatus, checks: dict[str, dict[str, object]]) -> 
             if check["ok"]:
                 print(
                     f"  check: ok ({check['source']}), "
-                    f"mail scopes {', '.join(check['mail_scopes']) or '(none)'}"
+                    f"mail scopes {', '.join(cast(list[str], check['mail_scopes'])) or '(none)'}"
                 )
             else:
                 print(f"  check: FAILED - {check['error']}")

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ParamSpec, TypeVar
+from typing import Any, TypeVar, cast
 
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary
 from outlook_connector.remote import graph_mapping as mapping
@@ -39,20 +39,19 @@ def _odata_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
+F = TypeVar("F", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
-def _named(name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+def _named(name: str) -> Callable[[F], F]:
     """Errors raised inside the decorated call say what was being done."""
 
-    def wrap(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    def wrap(func: F) -> F:
         @functools.wraps(func)
-        async def run(*args: P.args, **kwargs: P.kwargs) -> R:
+        async def run(*args: Any, **kwargs: Any) -> Any:
             with operation(name):
                 return await func(*args, **kwargs)
 
-        return run
+        return cast(F, run)
 
     return wrap
 
@@ -191,10 +190,13 @@ class GraphMailReader:
             for i, fid in enumerate(minus_folders)
         }
         responses = await self._graph.batch(requests, headers={"ConsistencyLevel": "eventual"})
-        counts = {key: r.body.get("@odata.count") for key, r in responses.items() if r.ok}
-        if not all(isinstance(counts.get(key), int) for key in requests):
-            return None
-        return int(counts["all"]) - sum(int(counts[key]) for key in requests if key != "all")
+        counts: dict[str, int] = {}
+        for key, response in responses.items():
+            count = response.body.get("@odata.count")
+            if not response.ok or not isinstance(count, int):
+                return None
+            counts[key] = count
+        return counts.pop("all") - sum(counts.values())
 
     @_named("reading a message")
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message:
