@@ -19,6 +19,7 @@ from outlook_connector.domain.models import (
     ThreadMessage,
     ThreadSize,
 )
+from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
 from outlook_connector.service.mailbox import Mailbox
 
@@ -35,6 +36,18 @@ def base_subject(subject: str | None) -> str | None:
 def oldest_first(m: MessageSummary) -> float:
     stamp = m.received_at or m.sent_at
     return stamp.timestamp() if stamp else 0.0
+
+
+def _has_content(message: Message) -> bool:
+    return any(
+        value is not None
+        for value in (
+            message.body_text,
+            message.unique_body_text,
+            message.body_html,
+            message.unique_body_html,
+        )
+    )
 
 
 class Threads:
@@ -128,14 +141,19 @@ class Threads:
 
         entries: list[ThreadMessage] = []
         next_start: int | None = None
+        unavailable = 0
         if include_bodies:
             budget = max_chars
             index = start
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
-                bodies = await self.bodies(chunk)
+                bodies, failed = await self.bodies(chunk)
+                unavailable += len(failed)
                 for offset, summary in enumerate(chunk):
-                    text = bodies[summary.id].body(body) if bodies.get(summary.id) else ""
+                    if summary.id in failed:
+                        text = f"(Body could not be fetched: {failed[summary.id]})"
+                    else:
+                        text = bodies[summary.id].body(body) if bodies.get(summary.id) else ""
                     if len(text) > budget and entries:
                         next_start = index + offset
                         break
@@ -148,6 +166,8 @@ class Threads:
                 index += len(chunk)
         else:
             entries = [ThreadMessage(message=m) for m in items[start:]]
+        if unavailable:
+            notes.append(f"{unavailable} message body(ies) could not be fetched and are marked in the text.")
 
         return Thread(
             conversation_id=conversation_id,
@@ -166,30 +186,39 @@ class Threads:
             else None,
             coverage=Coverage(
                 source="remote+local" if any(m.is_deleted for m in items) else "remote",
-                complete=next_start is None and not truncated,
+                complete=next_start is None and not truncated and not unavailable,
                 more_available=next_start is not None,
                 notes=notes,
             ),
         )
 
-    async def bodies(self, summaries: list[MessageSummary]) -> dict[str, Message | None]:
+    async def bodies(
+        self, summaries: list[MessageSummary]
+    ) -> tuple[dict[str, Message | None], dict[str, str]]:
         """Text bodies for a set of messages: from the server, or the retained copy for deleted ones.
 
         Messages the server no longer has are marked deleted, in the store and on ``summaries``.
+        The second map holds the reason for each body that could not be fetched (e.g. still
+        throttled after retries) and has no retained copy either.
         """
         store = self.mailbox.store
         live = [m.id for m in summaries if not m.is_deleted]
-        fetched = await self.mailbox.reader.get_messages(live) if live else {}
-        found = [m for m in fetched.values() if m is not None]
+        fetched = await self.mailbox.reader.get_messages(live) if live else FetchedMessages()
+        found = [m for m in fetched.messages.values() if m is not None]
         store.save_messages(found)
-        gone = [mid for mid, m in fetched.items() if m is None]
+        gone = [mid for mid, m in fetched.messages.items() if m is None]
         if gone:
             store.mark_deleted(gone)
             for summary in summaries:
                 if summary.id in gone:
                     summary.is_deleted = True
-        out: dict[str, Message | None] = dict(fetched)
+        out: dict[str, Message | None] = dict(fetched.messages)
+        failed: dict[str, str] = {}
         for summary in summaries:
             if out.get(summary.id) is None:
-                out[summary.id] = store.message(summary.id)
-        return out
+                retained = store.message(summary.id)
+                # a row without retained content is only a summary, not a body
+                out[summary.id] = retained if retained and _has_content(retained) else None
+                if out[summary.id] is None and summary.id in fetched.failed:
+                    failed[summary.id] = fetched.failed[summary.id]
+        return out, failed

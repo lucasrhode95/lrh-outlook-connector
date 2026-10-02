@@ -297,7 +297,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `get_thread(conversation_id, include_deleted_items=False, cursor?)` | `threads.get_thread` | read-only |
 | `get_message(id, offset=0, max_chars, body=unique\|full\|html)` | `mailbox.get_message` | read-only |
 | `list_attachments(id)` + resource `attachment://{message}/{attachment}` | `export.attachments` | read-only |
-| `export_messages(threads?, messages?, include_attachments, combine_per_thread, combine_all, body)` | `export.orchestrator` | read-only (local file) |
+| `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, received_only?, limit<=2000, include_attachments, combine, body, include_deleted_items)` | `export.orchestrator` | read-only (local file) |
 | `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
 | `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
 | `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |

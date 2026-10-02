@@ -87,6 +87,12 @@ async def test_list_messages_received_only(server: FastMCP) -> None:
     assert "received_only=true" in (server.instructions or "")
 
 
+async def test_export_by_range_and_throttling_guidance(server: FastMCP) -> None:
+    artifact = await call(server, "export_messages", since="2026-09-30T00:00:00", limit=10)
+    assert artifact["message_count"] == 1 and artifact["messages_unavailable"] == 0
+    assert "4 concurrent requests and 10,000 requests per 10 minutes" in (server.instructions or "")
+
+
 async def test_naive_datetimes_are_treated_as_utc(server: FastMCP) -> None:
     page = await call(server, "list_messages", since="2026-09-30T00:00:00")
     assert [m["id"] for m in page["items"]] == ["m5"]

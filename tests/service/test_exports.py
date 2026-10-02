@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import zipfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import ExportRequest
@@ -12,7 +14,7 @@ from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.export.attachments import dedupe, safe_name
-from outlook_connector.service.export.orchestrator import Exports
+from outlook_connector.service.export.orchestrator import DELETED_OR_JUNK, NOT_RECEIVED, Exports
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads
 from outlook_connector.store.db import Store
@@ -166,6 +168,78 @@ async def test_identical_exports_in_the_same_second_get_distinct_files(exports: 
     first = await exports.export(ExportRequest(message_ids=["m1"]))
     second = await exports.export(ExportRequest(message_ids=["m1"]))
     assert first.path != second.path and Path(first.path).exists() and Path(second.path).exists()
+
+
+async def test_each_message_carries_its_source_ids(exports: Exports) -> None:
+    artifact = await exports.export(ExportRequest(message_ids=["m1"]))
+    text = Path(artifact.path).read_text(encoding="utf-8")
+    assert "Message id:      m1" in text and "Conversation id: c-rel" in text
+    assert "Internet id:     <m1@example.com>" in text
+
+
+async def test_range_export_selects_the_window_and_counts_what_it_leaves_out(exports: Exports) -> None:
+    artifact = await exports.export(
+        ExportRequest(
+            since=datetime(2026, 9, 28, tzinfo=UTC), until=datetime(2026, 9, 29, 23, 59, tzinfo=UTC)
+        )
+    )
+    assert artifact.message_count == 3  # m1, m2, m3; junk m4 left out, m5 outside the window
+    assert artifact.messages_excluded == {DELETED_OR_JUNK: 1} and artifact.messages_unavailable == 0
+    text = Path(artifact.path).read_text(encoding="utf-8")
+    assert f"Left out: 1 message(s) {DELETED_OR_JUNK}." in text and "buy now" not in text
+
+
+async def test_range_export_received_only_and_deleted_items(exports: Exports) -> None:
+    artifact = await exports.export(ExportRequest(received_only=True, include_deleted_items=True))
+    assert artifact.message_count == 4 and artifact.messages_excluded == {NOT_RECEIVED: 1}  # m2 is sent
+
+
+async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None:
+    artifact = await exports.export(ExportRequest(folder="inbox/projects/rie", message_ids=["m5"]))
+    assert artifact.message_count == 2
+
+
+async def test_export_limit_is_enforced_with_counts(exports: Exports) -> None:
+    with pytest.raises(InvalidRequest, match="holds 3 messages, above the limit of 2"):
+        await exports.export(ExportRequest(received_only=True, limit=2))
+    with pytest.raises(InvalidRequest, match="above the limit of 1"):
+        await exports.export(ExportRequest(message_ids=["m1", "m5"], limit=1))
+
+
+def test_export_limit_cannot_exceed_the_hard_cap() -> None:
+    with pytest.raises(ValidationError):
+        ExportRequest(message_ids=["m1"], limit=2001)
+
+
+async def test_unfetchable_bodies_are_marked_and_counted_not_fatal(exports: Exports, fake: FakeGraph) -> None:
+    await exports.mailbox.list_messages()  # ids come from a listing, so their summaries are known
+    fake.throttle_items = 10_000  # every body sub-request stays throttled
+    artifact = await exports.export(ExportRequest(message_ids=["m5"], combine="all"))
+    assert artifact.messages_unavailable == 1 and artifact.unavailable_message_ids == ["m5"]
+    text = Path(artifact.path).read_text(encoding="utf-8")
+    assert "(Content unavailable: While fetching message bodies" in text
+    assert "Unavailable: 1 message body(ies) could not be fetched" in text
+
+
+async def test_bulk_export_stays_within_batch_limits_under_throttling(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    for i in range(150):
+        fake.add(
+            FakeMessage(
+                f"b{i:03d}",
+                f"Bulk {i}",
+                "f-inbox",
+                f"2026-08-{1 + i % 28:02d}T10:{i % 60:02d}:00Z",
+                conversation=f"cb{i}",
+            )
+        )
+    ids = [f"b{i:03d}" for i in range(150)]
+    await exports.export(ExportRequest(message_ids=ids[:1]))  # warm the folder cache
+    fake.throttle_items = 60  # several batches throttled at once
+    artifact = await exports.export(ExportRequest(message_ids=ids, combine="all"))
+    assert artifact.message_count == 150 and artifact.messages_unavailable == 0
+    assert max(fake.batch_sizes) <= 20
 
 
 async def test_empty_request_is_rejected(exports: Exports) -> None:
