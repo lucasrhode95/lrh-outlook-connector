@@ -89,7 +89,7 @@ Authentication requirements:
 
 Lazy population:
 
-- **Folders** are loaded eagerly, cached, and refreshed with folder delta. This is cheap: about 22 records.
+- **Folders** are cached and served from the cache immediately; a cache older than 10 minutes is refreshed in the background. A full refresh is cheap: about 23 folders in under a second.
 - **Message metadata is not mirrored.** It is fetched by list/search/thread calls and upserted only as needed for retention and export. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2).
 - **Bodies and attachments** are fetched only on read or export. Attachment bytes are never cached automatically.
 - **Retention:** remote deletes and moves never erase known local content. When a message disappears remotely, mark it `is_deleted` with `deleted_at` when known, and keep any body already retained. Moves update `parentFolderId`, which is safe because immutable IDs survive moves within a mailbox. A Graph delta `@removed` is ambiguous between a move and a delete. Resolve it with a direct GET on the immutable ID before marking the message deleted.

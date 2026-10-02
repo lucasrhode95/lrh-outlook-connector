@@ -37,7 +37,8 @@ There is no daemon. Three entry points, all short-lived:
 - **Startup cost matters**, because every agent session pays it.
   - Nothing runs at startup: no sync, no folder walk, no token refresh before the first call.
   - The web stack (Starlette, uvicorn) is imported only by `ui`, never by `mcp`.
-  - The folder cache refreshes lazily with a short TTL, using cheap folder delta.
+  - Cached data is shown first: folders come from the cache immediately and a stale cache (older than 10 minutes) refreshes in the background; the UI draws locally retained messages, then replaces them with the server's list.
+  - Each process builds its MSAL clients once and keeps access tokens in memory until shortly before expiry (rebuilding the client costs a network round trip).
 - **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote `nextLink` or offset plus the original selection). They survive a client restart.
 - **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue (and, so far, no progress reporting: exports of a few threads take seconds).
 
@@ -122,7 +123,7 @@ lrh-outlook-connector/
 - **One centralized provider** serving any number of named profiles (`client_id` + resource scope), all defined in `config.py`. Cache, locking, fail-closed handling and the account check are shared. Profiles today (research §2):
   - `read`: Outlook Mobile `27922004-…` → `https://graph.microsoft.com/Mail.Read`.
   - `write`: One Outlook Web `9199bf20-…` → `https://outlook.office.com/.default`.
-- MSAL `PublicClientApplication` per profile. Silent acquisition first. Device code only from the `auth` command, so surfaces never start an interactive sign-in. They raise `AuthenticationRequired` with the exact command to run.
+- One MSAL `PublicClientApplication` per profile per process; the access token is kept in memory until 5 minutes before expiry. Silent acquisition first. Device code only from the `auth` command, so surfaces never start an interactive sign-in. They raise `AuthenticationRequired` with the exact command to run.
 - Encrypted cache via `msal-extensions` by default, **fail-closed** when unavailable. `--unsecure` selects a separate, clearly named plaintext cache file in the same data directory, with a warning on every use. Every process finds it at the same path, wherever it was started.
 - Cross-process lock around cache reads and writes.
 - The account fingerprint (`tid`+`oid`) must match the store owner (§7).
@@ -193,7 +194,7 @@ lrh-outlook-connector/
 ### 5.8 `service/`
 
 **`mailbox.py`:**
-- `list_folders` uses the cache when fresh and folder delta otherwise.
+- `list_folders` answers from the cache immediately (stale-while-revalidate: older than 10 minutes triggers a background refresh); only an empty cache or `refresh=true` waits for Graph, whose folder levels are fetched in parallel.
 - `list_messages(selection, refresh=True)` fetches from remote, merges retained rows that are deleted remotely (labelled), and returns `Page` + `Coverage`.
 - `get_message(id, offset, max_chars, body)` returns a bounded body with continuation and retains what it fetched.
 - `search(query, since?, until?, folder?)` runs Graph `$search` and groups hits by `conversationId`. Coverage reports "server search; retained-deleted mail not included".
