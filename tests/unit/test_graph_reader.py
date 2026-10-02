@@ -1,0 +1,133 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+import httpx
+import pytest
+
+from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled
+from outlook_connector.remote.graph import Graph
+from outlook_connector.remote.graph_mail import GraphMailReader
+from outlook_connector.remote.transport import Transport
+from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
+
+
+async def _no_sleep(_s: float) -> None:
+    return None
+
+
+def reader_for(fake: FakeGraph) -> GraphMailReader:
+    transport = Transport(
+        StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep
+    )
+    return GraphMailReader(Graph(transport))
+
+
+@pytest.fixture
+def fake() -> FakeGraph:
+    return sample_mailbox()
+
+
+async def test_folders_are_walked_recursively_with_aliases(fake: FakeGraph) -> None:
+    folders = {f.id: f for f in await reader_for(fake).list_folders()}
+    assert set(folders) == {"f-inbox", "f-sent", "f-deleted", "f-junk", "f-archive", "f-proj", "f-rie"}
+    assert folders["f-inbox"].well_known == "inbox"
+    assert folders["f-rie"].parent_id == "f-proj" and folders["f-rie"].well_known is None
+
+
+async def test_list_messages_newest_first_with_date_window_and_paging(fake: FakeGraph) -> None:
+    reader = reader_for(fake)
+    page, link = await reader.list_messages(
+        folder_id=None, since=datetime(2026, 9, 28, 9, 30, tzinfo=UTC), until=None, page_size=2, page=None
+    )
+    assert [m.id for m in page] == ["m5", "m4"]
+    assert link
+    more, link = await reader.list_messages(folder_id=None, since=None, until=None, page_size=2, page=link)
+    assert [m.id for m in more] == ["m3", "m2"] and link is None
+
+
+async def test_list_messages_in_one_folder(fake: FakeGraph) -> None:
+    page, _ = await reader_for(fake).list_messages(
+        folder_id="f-inbox", since=None, until=None, page_size=50, page=None
+    )
+    assert [m.id for m in page] == ["m5", "m1"]
+    assert page[0].is_read is False and page[0].sender and page[0].sender.address == "alice@example.com"
+
+
+async def test_conversation_spans_folders_and_never_uses_orderby(fake: FakeGraph) -> None:
+    messages = await reader_for(fake).conversation("c-rel")
+    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-rie", "f-junk"}
+
+
+async def test_get_message_text_and_html_with_attachments(fake: FakeGraph) -> None:
+    reader = reader_for(fake)
+    text = await reader.get_message("m2")
+    assert text.unique_body_text == "Thanks!" and "> First report" in (text.body_text or "")
+    html = await reader.get_message("m3", body_format="html")
+    assert "cid:img1" in (html.unique_body_html or "")
+    assert [(a.name, a.kind, a.is_inline) for a in html.attachments][:2] == [
+        ("numbers.xlsx", "file", False),
+        ("image001.png", "file", True),
+    ]
+
+
+async def test_get_message_missing_raises_not_found(fake: FakeGraph) -> None:
+    with pytest.raises(NotFound):
+        await reader_for(fake).get_message("gone")
+
+
+async def test_batch_get_returns_none_for_missing(fake: FakeGraph) -> None:
+    ids = [f"m{i}" for i in range(1, 6)] + [f"gone{i}" for i in range(20)]  # forces two batch chunks
+    result = await reader_for(fake).get_messages(ids)
+    assert result["m1"] and result["m1"].unique_body_text == "First report"
+    assert all(result[f"gone{i}"] is None for i in range(20))
+    assert fake.calls.count("POST /v1.0/$batch") == 2
+
+
+async def test_locate_reports_folder_or_none(fake: FakeGraph) -> None:
+    assert await reader_for(fake).locate(["m1", "gone"]) == {"m1": "f-inbox", "gone": None}
+
+
+async def test_search_and_total(fake: FakeGraph) -> None:
+    reader = reader_for(fake)
+    hits, link = await reader.search(query="relatório", folder_id=None, page_size=25, page=None)
+    assert {m.id for m in hits} == {"m1", "m2", "m3"} and link is None
+    assert await reader.search_total("relatório") == 3
+
+
+async def test_attachment_content_ids_and_downloads(fake: FakeGraph, tmp_path: Path) -> None:
+    reader = reader_for(fake)
+    assert await reader.attachment_content_ids("m3", ["a2", "a3"]) == {"a2": "img1", "a3": "sig"}
+    size = await reader.download_attachment("m3", "a1", tmp_path / "numbers.xlsx")
+    assert size == len(b"xlsx-bytes") and (tmp_path / "numbers.xlsx").read_bytes() == b"xlsx-bytes"
+    assert await reader.download_mime("m1", tmp_path / "m1.eml") > 0
+
+
+async def test_throttling_is_retried(fake: FakeGraph) -> None:
+    fake.throttle_next = 2
+    folders = await reader_for(fake).list_folders()
+    assert folders
+
+
+async def test_persistent_throttling_raises(fake: FakeGraph) -> None:
+    fake.throttle_next = 100
+    with pytest.raises(Throttled):
+        await reader_for(fake).list_folders()
+
+
+async def test_continuation_links_must_stay_on_graph(fake: FakeGraph) -> None:
+    with pytest.raises(InvalidRequest):
+        await reader_for(fake).list_messages(
+            folder_id=None,
+            since=None,
+            until=None,
+            page_size=5,
+            page="https://evil.example.com/v1.0/me/messages",
+        )
+
+
+async def test_odata_quotes_are_escaped_in_conversation_ids() -> None:
+    fake = FakeGraph()
+    fake.add(FakeMessage("q1", "quote", "f", "2026-09-01T00:00:00Z", conversation="it's"))
+    assert [m.id for m in await reader_for(fake).conversation("it's")] == ["q1"]
