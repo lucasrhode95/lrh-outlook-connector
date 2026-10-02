@@ -12,6 +12,8 @@ const state = {
   selectedThreads: new Set(),
   selectedMessages: new Set(),
   activeMessage: null,
+  listRequest: 0,        // newest list/search load; older responses are ignored
+  readerRequest: 0,      // same for the reader pane
 };
 
 // ------------------------------------------------------------------ helpers
@@ -88,6 +90,7 @@ function query(params) {
 // ------------------------------------------------------------------ folders
 
 async function loadFolders(refresh = false) {
+  if (!$("folders").children.length || refresh) $("folders").replaceChildren(el("li", { class: "loading-item" }, spinner("Loading folders…")));
   const folders = await json(`/api/folders?${query({ refresh })}`);
   const list = $("folders");
   list.replaceChildren(folderItem(null, "All mail (recent)", 0, null));
@@ -129,26 +132,55 @@ function addMessage(summary, { matched = false } = {}) {
   thread.messages.set(summary.id, { ...summary, matched });
 }
 
-async function loadList(reset) {
-  if (reset) resetThreads();
-  $("coverage").textContent = "Loading…";
-  const { since, until } = dateBounds();
-  const page = await json(`/api/messages?${query({ folder: state.folder, since, until, limit: 100, cursor: state.cursor })}`);
-  for (const item of page.items) addMessage(item);
-  state.cursor = page.cursor;
-  showCoverage(page.coverage);
-  render();
+function spinner(text) {
+  return el("div", { class: "loading", role: "status" }, el("span", { class: "spinner", "aria-hidden": "true" }), text);
 }
 
-async function runSearch(reset) {
-  if (reset) resetThreads();
-  $("coverage").textContent = "Searching…";
+// Every list load gets a number; a response is only applied if no newer load started since.
+// This keeps a slow response for a previously clicked folder from replacing the current one.
+async function loadPage(reset, path, apply, loadingText) {
+  const request = ++state.listRequest;
+  if (reset) {
+    resetThreads();
+    $("threads").replaceChildren(spinner(loadingText));
+    $("coverage").textContent = "";
+    $("more").hidden = true;
+  } else {
+    $("more").disabled = true;
+    $("more").replaceChildren(el("span", { class: "spinner", "aria-hidden": "true" }), " Loading…");
+  }
+  try {
+    const result = await json(path);
+    if (request !== state.listRequest) return; // superseded by a newer click: drop this response
+    apply(result);
+    state.cursor = result.cursor;
+    showCoverage(result.coverage);
+    render();
+  } catch {
+    if (request !== state.listRequest) return;
+    if (reset) $("threads").replaceChildren(el("p", { class: "muted pad" }, "Could not load messages (see the message above)."));
+  } finally {
+    if (request === state.listRequest) {
+      $("more").disabled = false;
+      $("more").textContent = "Load more";
+    }
+  }
+}
+
+function loadList(reset) {
   const { since, until } = dateBounds();
-  const result = await json(`/api/search?${query({ q: state.query, since, until, folder: state.folder, limit: 50, cursor: state.cursor })}`);
-  for (const hit of result.conversations) for (const message of hit.matching_messages) addMessage(message, { matched: true });
-  state.cursor = result.cursor;
-  showCoverage(result.coverage);
-  render();
+  const path = `/api/messages?${query({ folder: state.folder, since, until, limit: 100, cursor: reset ? null : state.cursor })}`;
+  return loadPage(reset, path, (page) => {
+    for (const item of page.items) addMessage(item);
+  }, "Loading messages…");
+}
+
+function runSearch(reset) {
+  const { since, until } = dateBounds();
+  const path = `/api/search?${query({ q: state.query, since, until, folder: state.folder, limit: 50, cursor: reset ? null : state.cursor })}`;
+  return loadPage(reset, path, (result) => {
+    for (const hit of result.conversations) for (const message of hit.matching_messages) addMessage(message, { matched: true });
+  }, "Searching the mailbox…");
 }
 
 function showCoverage(coverage) {
@@ -207,7 +239,10 @@ function renderThread(thread) {
       el("div", { class: "who" }, senders)),
     el("span", { class: "date" }, formatDate(newest.received_at || newest.sent_at)));
   const node = el("div", { class: "thread" }, row);
-  if (thread.expanded) node.append(el("div", { class: "messages" }, messages.map((m) => renderMessage(m, thread))));
+  if (thread.expanded) {
+    node.append(el("div", { class: "messages" }, messages.map((m) => renderMessage(m, thread)),
+      thread.loading ? spinner("Loading the whole conversation…") : null));
+  }
   return node;
 }
 
@@ -234,12 +269,18 @@ function toggle(set, value, on) {
 
 async function expand(thread) {
   thread.expanded = !thread.expanded;
-  if (thread.expanded && thread.conversationId && !thread.complete) {
-    const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: $("opt-deleted").checked })}`);
-    for (const entry of full.messages) thread.messages.set(entry.message.id, { ...entry.message, matched: thread.messages.get(entry.message.id)?.matched });
-    thread.complete = true;
+  if (thread.expanded && thread.conversationId && !thread.complete && !thread.loading) {
+    thread.loading = true;
+    render();
+    try {
+      const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: $("opt-deleted").checked })}`);
+      for (const entry of full.messages) thread.messages.set(entry.message.id, { ...entry.message, matched: thread.messages.get(entry.message.id)?.matched });
+      thread.complete = true;
+    } finally {
+      thread.loading = false;
+    }
   }
-  render();
+  if (state.threads.get(thread.key) === thread) render(); // skip if the list was replaced meanwhile
 }
 
 // ------------------------------------------------------------------ reader
@@ -247,11 +288,19 @@ async function expand(thread) {
 async function openMessage(id) {
   state.activeMessage = id;
   render();
-  $("reader-title").textContent = "Loading…";
+  const request = ++state.readerRequest;
+  $("reader-title").replaceChildren(spinner("Loading message…"));
   $("reader-meta").replaceChildren();
   $("reader-body").textContent = "";
   const body = $("reader-full").checked ? "full" : "unique";
-  const content = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body })}`);
+  let content;
+  try {
+    content = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body })}`);
+  } catch {
+    if (request === state.readerRequest) $("reader-title").textContent = "Could not load this message.";
+    return;
+  }
+  if (request !== state.readerRequest) return; // another message was clicked meanwhile
   const m = content.message;
   $("reader-title").textContent = m.subject || "(no subject)";
   const rows = [["From", who(m.sender)], ["To", (m.to || []).map(who).join(", ")], ["Cc", (m.cc || []).map(who).join(", ")],
@@ -344,6 +393,5 @@ setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_
     showBanner(`Not signed in. Run \`${status.sign_in_command}\` in a terminal, then reload this page.`);
     return;
   }
-  await loadFolders();
-  await loadList(true);
+  await Promise.all([loadFolders(), loadList(true)]); // independent: load side by side
 })();
