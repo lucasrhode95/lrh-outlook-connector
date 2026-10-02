@@ -1,6 +1,6 @@
 # Outlook connector
 
-A local connector for one user's Exchange Online mailbox. It has two surfaces: an MCP server for agents and a small local web UI for exports. Reads go through Microsoft Graph. Writes (send and mailbox changes, not built yet) will go through Outlook Web, because Graph write access is unavailable to the usable Microsoft first-party clients.
+A local connector for one user's Exchange Online mailbox. It has two surfaces: an MCP server for agents and a small local web UI for exports. Reads go through Microsoft Graph. Writes (drafts and sending; mailbox changes are next) go through Outlook Web, because Graph write access is unavailable to the usable Microsoft first-party clients.
 
 - **What it must do:** [docs/outlook-requirements-v4.md](docs/outlook-requirements-v4.md)
 - **How it is built:** [docs/architecture.md](docs/architecture.md)
@@ -23,7 +23,7 @@ Sign-in uses Microsoft's device-code flow and is only ever started from this com
 
 ```bash
 outlook-connector auth read     # Graph reads (needed for everything)
-outlook-connector auth write    # send and mailbox changes (later phases)
+outlook-connector auth write    # drafts and sending (and mailbox changes, later)
 outlook-connector status        # offline: account, profiles, cache location
 outlook-connector status --check  # also refreshes each token (only read is required)
 ```
@@ -40,10 +40,17 @@ For development only, `--unsecure` uses a separate **plaintext** cache file in t
 claude mcp add lrh-outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scripts/outlook-connector.exe mcp
 ```
 
-The client starts one `outlook-connector mcp` process per session. Tools: `list_folders`, `list_messages`,
-`search_messages`, `get_thread`, `get_message`, `list_attachments`, `download_attachment`,
-`save_message_mime`, `export_messages`, `auth_status`. They are read-only: nothing changes the mailbox,
-not even read state.
+The client starts one `outlook-connector mcp` process per session. Read tools: `list_folders`,
+`list_messages`, `search_messages`, `get_thread`, `get_message`, `list_attachments`,
+`download_attachment`, `save_message_mime`, `export_messages`, `auth_status`, `propose_email`. Reading
+never changes the mailbox, not even read state.
+
+Write tools (they need `outlook-connector auth write`): `create_draft` saves a plain-text message or
+reply into Drafts and never sends it. `send_email` sends only a message you confirmed: the agent calls
+`propose_email`, shows you the exact message and its confirmation code, and passes that code once you
+confirm; any change to the recipients, subject or body afterwards is refused. A send is never
+retried; if Outlook gives no clear answer, the connector looks in Sent Items and otherwise tells you
+to check before anything is sent again.
 
 Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issues (the copies
 Outlook files when two versions of an item collide while syncing) are left out unless

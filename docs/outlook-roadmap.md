@@ -2,7 +2,7 @@
 
 The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
 
-Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Two hardening passes (the 90-day review, H1–H3, and the code review, H4–H6) are built, and the live check (V1) passed against the real mailbox. Of its findings, H8, H9 and H10 are done, and H11 simplified the code; **next: H7 (count-guided mailbox-wide listing)**, then a draft-first write path (W0) before send and the mutations, lowest risk first.
+Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Two hardening passes (the 90-day review, H1–H3, and the code review, H4–H6) are built, and the live check (V1) passed against the real mailbox. Of its findings, H8, H9 and H10 are done, and H11 simplified the code; **next: H7 (count-guided mailbox-wide listing)**, then the live write check (V2) of the draft-first write path (W0) and send (W1), and the mutations, lowest risk first.
 
 **Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
 
@@ -57,8 +57,9 @@ Draft first: an agent prepares the message and you send it from Outlook. It prov
 
 | Item | Status | Scope |
 |---|---|---|
-| W0 Create draft | **Pending — first write** | `MailWriter.create_draft` via OWS `CreateItem` (`SaveOnly`) into Drafts, optionally as a reply. Returns the draft id; never sends. Needs the write sign-in. |
-| W1 Send | **Pending** | After W0. `MailWriter.send` via OWS `CreateItem`. Plain text, `user_confirmation`, revalidation, no retry. |
+| W0 Create draft | **Partial**: built and fake-tested; live check V2 pending | `create_draft` via OWS `CreateItem` (`SaveOnly`) into Drafts, optionally as a reply (`ReplyToItem`/`ReplyAllToItem`, Outlook's reply defaults). Read back through Graph; never sends. Needs the write sign-in. |
+| W1 Send | **Partial**: built and fake-tested; live check V2 pending | `propose_email` → user confirms → `send_email(message, user_confirmation)`. The code hashes the account and every material field and is recomputed at send time; the write sign-in must be the bound account. `CreateItem` `SendAndSaveCopy`, plain text, sent once; an unclear answer is checked against Sent Items and otherwise reported as "unknown". |
+| V2 Live write check | **Pending — needs you** | Against the real mailbox, self-sends only: (1) `outlook-connector auth write`; (2) a new-message draft, then a reply draft to one of your own Inbox messages (the reply contract is the unproven part), checked in Outlook; (3) a confirmed self-send, checked in Sent Items and Inbox; (4) a confirmed self-reply. |
 
 ## Mutations
 
