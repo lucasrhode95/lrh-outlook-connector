@@ -155,6 +155,16 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         )
         return _json(result)
 
+    async def thread_sizes(request: Request) -> Response:
+        payload = await request.json()
+        ids = payload.get("conversation_ids") if isinstance(payload, dict) else None
+        if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+            raise InvalidRequest("conversation_ids must be a list of strings.")
+        sizes = await (await context.services()).threads.sizes(
+            ids, include_deleted_items=bool(payload.get("include_deleted_items"))
+        )
+        return _json(sizes)
+
     async def message(request: Request) -> Response:
         body = request.query_params.get("body", "unique")
         if body not in ("unique", "full"):
@@ -181,6 +191,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         Route("/api/messages", api(messages)),
         Route("/api/messages/{message_id}", api(message)),
         Route("/api/search", api(search)),
+        Route("/api/thread-sizes", api(thread_sizes), methods=["POST"]),
         Route("/api/threads/{conversation_id}", api(thread)),
         Route("/api/export", api(export), methods=["POST"]),
         Route("/api/heartbeat", heartbeat, methods=["POST"]),

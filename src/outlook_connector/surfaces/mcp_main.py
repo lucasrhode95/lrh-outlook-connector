@@ -15,6 +15,7 @@ from pydantic import Field
 
 from outlook_connector.bootstrap import AppContext, Services
 from outlook_connector.domain.models import (
+    EXPORT_MAX_MESSAGES,
     Attachment,
     BodyKind,
     CombineMode,
@@ -35,13 +36,23 @@ the mailbox, not even read state.
 - Finding mail: use search_messages for topics (server-side search, accent-insensitive, supports \
 subject:/from:/to: terms) and list_messages for recent mail or a date window (folder optional; \
 omit it for the whole mailbox). Both return message ids and conversation ids.
+- "Latest mail I received": list_messages with received_only=true (whole mailbox minus Sent Items, \
+Drafts, Outbox, Deleted Items and Junk Email). That includes mail filed into other folders by rules; \
+folder="inbox" alone would miss it.
 - Reading: get_thread returns a whole conversation across folders, oldest first, with bodies \
 without quoted history by default. get_message reads one message with offset/max_chars continuation.
 - Always read `coverage` before treating results as complete; follow `cursor` for more.
 - Messages with is_deleted=true were deleted on the server and come from local retention.
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.
-- export_messages writes one .txt or .zip export and returns its local path.
+- export_messages writes one .txt or .zip export and returns its local path. Select conversations, \
+message ids, and/or a range (since/until/folder/received_only) in one call; at most 2,000 messages \
+(`limit` lowers that). For a large period, export the range rather than enumerating ids. Read \
+messages_excluded and messages_unavailable in the result; each message in the file carries its ids.
+- Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
+per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
+Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
+many small ones. On a throttling error, wait at least a minute before retrying.
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself.
 """
@@ -97,10 +108,23 @@ def build_server(context: AppContext) -> FastMCP:
         limit: Annotated[int, Field(ge=1, le=200)] = 25,
         refresh: Annotated[bool, Field(description="false = local cache only (no network).")] = True,
         cursor: str | None = None,
+        received_only: Annotated[
+            bool,
+            Field(
+                description="Leave out Sent Items, Drafts, Outbox, Deleted Items and Junk Email "
+                "(e.g. for the latest received mail). Pages may hold fewer than limit messages."
+            ),
+        ] = False,
     ) -> MessagePage:
         """Messages newest first, from the server, merged with retained messages deleted on the server."""
         return await (await services()).mailbox.list_messages(
-            folder=folder, since=_utc(since), until=_utc(until), limit=limit, refresh=refresh, cursor=cursor
+            folder=folder,
+            since=_utc(since),
+            until=_utc(until),
+            limit=limit,
+            refresh=refresh,
+            cursor=cursor,
+            received_only=received_only,
         )
 
     @mcp.tool(annotations=READ_ONLY)
@@ -129,7 +153,10 @@ def build_server(context: AppContext) -> FastMCP:
             bool, Field(description="Include messages in Deleted Items/Junk.")
         ] = False,
         max_chars: Annotated[int, Field(ge=1000, le=400_000)] = 40_000,
-        cursor: str | None = None,
+        cursor: Annotated[
+            str | None,
+            Field(description="Continuation; it restores the original options, which are then ignored."),
+        ] = None,
     ) -> Thread:
         """A whole conversation across folders, oldest first. body=unique strips quoted reply history."""
         return await (await services()).threads.get_thread(
@@ -181,11 +208,41 @@ def build_server(context: AppContext) -> FastMCP:
         ] = "per_thread",
         body: Literal["unique", "full"] = "unique",
         include_deleted_items: bool = False,
+        since: Annotated[
+            datetime | None, Field(description="Range selection: inclusive lower bound (ISO 8601).")
+        ] = None,
+        until: Annotated[
+            datetime | None, Field(description="Range selection: inclusive upper bound (ISO 8601).")
+        ] = None,
+        folder: Annotated[
+            str | None,
+            Field(description="Range selection: folder path, alias or id (default: whole mailbox)."),
+        ] = None,
+        received_only: Annotated[
+            bool, Field(description="Range selection: leave out Sent Items, Drafts and Outbox.")
+        ] = False,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=EXPORT_MAX_MESSAGES,
+                description="Refuse the export if the selection holds more messages than this.",
+            ),
+        ] = EXPORT_MAX_MESSAGES,
     ) -> ExportArtifact:
-        """Export conversations and/or messages to one local .txt or .zip and return its path."""
+        """Export conversations, messages and/or a date range to one local .txt or .zip; returns its path.
+
+        Deleted Items and Junk Email are left out unless include_deleted_items=true; the result counts
+        what was left out and lists messages whose body could not be fetched.
+        """
         request = ExportRequest(
             conversation_ids=conversation_ids or [],
             message_ids=message_ids or [],
+            since=_utc(since),
+            until=_utc(until),
+            folder=folder,
+            received_only=received_only,
+            limit=limit,
             include_attachments=include_attachments,
             combine=combine,
             body=body,
