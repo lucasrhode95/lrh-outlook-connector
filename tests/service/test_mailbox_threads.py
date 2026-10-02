@@ -368,3 +368,23 @@ async def test_attachments_of_a_deleted_message_come_from_retention(
     attachments = await mailbox.attachments("m3")
     assert [a.name for a in attachments][0] == "numbers.xlsx"
     assert mailbox.store.summaries(["m3"])["m3"].is_deleted
+
+
+async def test_copies_split_across_pages_are_returned_once(mailbox: Mailbox, fake: FakeGraph) -> None:
+    fake.add(
+        FakeMessage(
+            "cp-in", "Copy", "f-inbox", "2026-10-01T09:00:01Z", conversation="c-cp", internet_id="<cp@x>"
+        )
+    )
+    fake.add(
+        FakeMessage(
+            "cp-out", "Copy", "f-sent", "2026-10-01T09:00:00Z", conversation="c-cp", internet_id="<cp@x>"
+        )
+    )
+    seen, cursor = [], None
+    while True:
+        page = await mailbox.list_messages(limit=1, cursor=cursor)
+        seen += [m.id for m in page.items]
+        if not (cursor := page.cursor):
+            break
+    assert seen.count("cp-in") + seen.count("cp-out") == 1

@@ -13,9 +13,11 @@ Scope rules shared by list, search, threads and export:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from collections.abc import Iterable
 from datetime import datetime, timedelta
+from typing import Any
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import (
@@ -44,6 +46,7 @@ DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
 RECEIVED_ONLY_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
+SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
 NEVER_RETAINED = "deleted on the server and never retained by this app"
 LOCAL_ONLY_NOTE = "Local cache only: messages this app has seen before. It is not a mirror of the mailbox."
 COMPACT_DROP = {
@@ -215,6 +218,7 @@ class Mailbox:
             if upper:
                 deleted = [m for m in deleted if m.received_at and m.received_at < upper]
         items, excluded = await self.finish(sorted(fetched + deleted, key=_newest_first), skip)
+        items, seen = _skip_seen(items, state)
 
         notes: list[str] = []
         if skip and not complete:
@@ -244,6 +248,7 @@ class Mailbox:
                 since=_iso(since),
                 until=_iso(until),
                 upper=_iso(low or upper),  # an empty page keeps the previous bound
+                seen=seen,
                 received_only=received_only,
                 include_deleted_items=include_deleted_items,
             )
@@ -395,6 +400,7 @@ class Mailbox:
                 total = None
         in_window = [m for m in found if _within(m, since, until)]
         items, excluded = await self.finish(in_window, skip)
+        items, seen = _skip_seen(items, state)
 
         groups: dict[str, ConversationHit] = {}
         for item in items:
@@ -442,6 +448,7 @@ class Mailbox:
                 link=link,
                 folder_id=folder_id,
                 query=kql,
+                seen=seen,
                 since=_iso(since),
                 until=_iso(until),
                 received_only=received_only,
@@ -485,6 +492,26 @@ def merge_copies(items: list[MessageSummary], outgoing: set[str]) -> list[Messag
         keep.also_in = sorted(others - {keep.folder or ""})
         out.append(keep)
     return out
+
+
+def _skip_seen(
+    items: list[MessageSummary], state: dict[str, Any] | None
+) -> tuple[list[MessageSummary], list[str]]:
+    """Copies of one message can straddle a page boundary: drop those an earlier page returned.
+
+    The cursor carries short fingerprints of the Internet ids returned recently, newest first, up
+    to SEEN_LIMIT (copies have nearly the same timestamp, so they sit on adjacent pages).
+    Returns (items, fingerprints to carry).
+    """
+    before: list[str] = list(state["seen"]) if state else []
+    known = set(before)
+    kept = [m for m in items if not (m.internet_message_id and _fingerprint(m.internet_message_id) in known)]
+    current = [_fingerprint(m.internet_message_id) for m in kept if m.internet_message_id]
+    return kept, list(dict.fromkeys(current + before))[:SEEN_LIMIT]
+
+
+def _fingerprint(internet_id: str) -> str:
+    return hashlib.blake2b(internet_id.encode(), digest_size=5).hexdigest()
 
 
 def has_content(message: Message) -> bool:
