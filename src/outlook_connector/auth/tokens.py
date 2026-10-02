@@ -271,7 +271,11 @@ class TokenProvider:
                 expires_on=int(time.time() + int(expires_in)) if expires_in else None,
             )
         error = str(result.get("error", "")) if isinstance(result, dict) else ""
-        if not result or error in _REJECTED:
+        if not result:
+            raise AuthenticationRequired(
+                f"No sign-in yet for '{profile}'.", command=self.sign_in_command(profile)
+            )
+        if error in _REJECTED:
             raise AuthenticationRequired(
                 f"Microsoft no longer accepts the stored sign-in for '{profile}' ({_error_text(result)}).",
                 command=self.sign_in_command(profile),
