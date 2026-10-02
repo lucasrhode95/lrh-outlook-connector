@@ -1,7 +1,8 @@
 """MCP server over stdio: thin tools over the shared service (architecture §8).
 
 One process per agent session. Nothing touches the network until the first tool call.
-This MVP surface is read-only: it never changes the mailbox (not even read state).
+Reads never change the mailbox (not even read state). The write tools save drafts and send mail;
+sending needs the user's confirmation of the exact message (requirements v4 §11.1).
 """
 
 from __future__ import annotations
@@ -20,20 +21,24 @@ from outlook_connector.domain.models import (
     BodyKind,
     CombineMode,
     Detail,
+    DraftResult,
+    EmailProposal,
     ExportArtifact,
     ExportFormat,
     ExportRequest,
     Folder,
     MessageContent,
     MessagePage,
+    OutgoingMessage,
     SearchResult,
+    SendResult,
     Thread,
 )
 from outlook_connector.service.files import SavedFile
 
 INSTRUCTIONS = """\
-Read access to the signed-in user's own Outlook mailbox (Microsoft Graph). These tools never change \
-the mailbox, not even read state.
+The signed-in user's own Outlook mailbox: reads through Microsoft Graph, drafts and sending through \
+Outlook Web. Reading never changes the mailbox, not even read state.
 
 - Finding mail: search_messages for topics (server-side search, accent-insensitive, supports \
 subject:/from:/to: terms) and list_messages for recent mail or a date window (folder optional; \
@@ -67,6 +72,15 @@ writes one JSON record per message (ids, dates, folder, people, body): use it to
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
 many small ones. On a throttling error, wait at least a minute before retrying.
+- Drafts: create_draft saves a plain-text message or reply into Drafts and never sends it; the user \
+reviews and sends it from Outlook. Prefer it whenever the user has not explicitly asked you to send.
+- Sending, only when the user explicitly asks to send: (1) propose_email with the message; (2) show \
+the user the whole proposal (from, to, cc, bcc, subject, full body; a reply also carries the quoted \
+original, added by Outlook) and ask them to confirm it; (3) only after they confirm, send_email with \
+the same message and the proposal's confirmation code as user_confirmation. Never confirm on the \
+user's behalf. A message changed after confirmation is refused: propose and confirm again. If \
+send_email returns status "unknown", do not send again; ask the user to check Sent Items and Outbox.
+- Writes need the write sign-in (`outlook-connector auth write`).
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
 not the sign-in: do not ask the user to sign in again for it.
@@ -78,6 +92,8 @@ READ_ONLY = ToolAnnotations(
 LOCAL_FILE = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=False
 )
+DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
+SEND = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 
 
 IncludeDeleted = Annotated[
@@ -296,6 +312,35 @@ def build_server(context: AppContext) -> FastMCP:
             include_deleted_items=include_deleted_items,
         )
         return await (await services()).exports.export(request)
+
+    @mcp.tool(annotations=DRAFT)
+    async def create_draft(message: OutgoingMessage) -> DraftResult:
+        """Save a plain-text message, or a reply (reply_to_message_id), into Drafts. Never sends.
+
+        The user can review, edit and send it from Outlook. Returns the draft's id and what it holds."""
+        return await (await services()).writes.create_draft(message)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def propose_email(message: OutgoingMessage) -> EmailProposal:
+        """Step 1 of sending: the message exactly as it would be sent, and its confirmation code.
+
+        Changes nothing. Show the whole proposal to the user and ask them to confirm it."""
+        return await (await services()).writes.propose(message)
+
+    @mcp.tool(annotations=SEND)
+    async def send_email(
+        message: OutgoingMessage,
+        user_confirmation: Annotated[
+            str,
+            Field(description="The confirmation code of the proposal the user confirmed (SEND-…)."),
+        ],
+    ) -> SendResult:
+        """Step 2 of sending: send the message the user confirmed, once, from their account.
+
+        Only with the user's explicit confirmation of this exact message (propose_email). Refused if
+        the message differs from the confirmed proposal. Never retried: on status "unknown", ask the
+        user to check Sent Items and Outbox instead of sending again."""
+        return await (await services()).writes.send(message, user_confirmation)
 
     return mcp
 
