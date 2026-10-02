@@ -142,7 +142,7 @@ class Store:
         now = time.time()
         rows = [
             (m.id, m.conversation_id, m.folder_id, _iso(m.received_at),
-             m.model_dump_json(include=SUMMARY_COLUMNS), now)
+             m.model_dump_json(include=set(SUMMARY_COLUMNS)), now)
             for m in items
         ]  # fmt: skip
         with self._tx() as db:

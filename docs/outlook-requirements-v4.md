@@ -98,12 +98,14 @@ Lazy population:
 
 ## 8. Listing, threads and search
 
-**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit.
+**Scope, shared by list, search, thread and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included. `received_only` also leaves out Sent Items, Drafts and Outbox. Results count what was left out. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+
+**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total helps plan large reads.
 
 - `refresh=True` (the default) fetches fresh remote data, upserts it, and merges in retained rows that are now deleted remotely, labeled as such.
 - `refresh=False` reads only from the local cache.
 
-**Thread** (`get_thread`): every message with one `conversationId` **across all folders**, deduplicated and chronological.
+**Thread** (`get_thread`): every message with one `conversationId` **across all folders**, deduplicated (copies shown once) and chronological.
 
 - Messages you forgot to move into the right folder still belong to the thread.
 - Default scope: all folders except Deleted Items and Junk, with an `include_deleted_items` flag (O4).
@@ -132,19 +134,20 @@ Every search result reports coverage: backend used, server totals or `more avail
 
 ### 10.1 Selection and options (UI and MCP)
 
-The selection is any mix of **whole threads** and **individual messages**, deduplicated by message.
+The selection is any mix of **whole threads**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `received_only`), deduplicated by message and by copy. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
 
 | Option | Default | Effect |
 |---|---|---|
 | `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[Attachment unavailable: name]` line and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
-| `combine_per_thread` | **on** | One TXT per thread, with messages in chronological order. A selected individual message goes into its thread's TXT. |
-| `combine_all` | off | One TXT for the whole selection, in chronological order, with per-thread section headers. Enabling it **disables and overrides** `combine_per_thread`. |
-| (both combine options off) | — | One TXT per message. |
+| `combine` | `per_thread` | `per_thread`: one TXT per thread, chronological; a selected individual message goes into its thread's TXT. `all`: one TXT for the whole selection, chronological, with per-thread section headers. `none`: one TXT per message. |
+| `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, dates, folder, people, body, attachments), always one file. |
+| `include_deleted_items` | off | Include Deleted Items and Junk Email (see §8). |
 | `body` | `unique` | `unique` strips quoted reply history (Graph `uniqueBody`). `full` keeps it. |
 
 TXT content:
 
-- Headers per message: From, To, CC, date, subject and folder, plus a deleted marker when relevant.
+- Headers per message: From, To, CC, date, subject and folder, the message, conversation and Internet ids, the other folders of merged copies, plus a deleted marker when relevant.
+- The file header says what was left out by folder, merged as copies, or unavailable (a body that could not be fetched is marked in place; the export does not fail).
 - Then the body.
 - The output must never contain tokens, signed URLs or authorization headers.
 

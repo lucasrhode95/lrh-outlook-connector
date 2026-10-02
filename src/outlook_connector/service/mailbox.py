@@ -243,7 +243,7 @@ class Mailbox:
                 folder_id=folder_id,
                 since=_iso(since),
                 until=_iso(until),
-                upper=_iso(low),
+                upper=_iso(low or upper),  # an empty page keeps the previous bound
                 received_only=received_only,
                 include_deleted_items=include_deleted_items,
             )

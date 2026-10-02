@@ -56,7 +56,8 @@ def operation(name: str) -> Iterator[None]:
 
 
 class _Token(Protocol):
-    value: str
+    @property
+    def value(self) -> str: ...
 
 
 class TokenSource(Protocol):
@@ -106,11 +107,13 @@ class Transport:
         _check_host(url)
         retry = (method.upper() == "GET") if retry is None else retry
         attempts = self._max_attempts if retry else 1
-        renewal: dict[str, Any] | None = None  # set after a 401: renew the token once, then retry
+        renewal: dict[str, Any] | None = None  # after a 401: how to renew the token, for one request
+        renewed = False
         attempt = 0
         while attempt < attempts:
             attempt += 1
             request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
+            renewal = None
             started = time.monotonic()
             try:
                 async with self._limit:
@@ -137,8 +140,8 @@ class Transport:
                 (time.monotonic() - started) * 1000,
             )
             if response.status_code == 401:
-                if renewal is None:  # the token was rejected (revoked, expired early): renew once
-                    renewal = _renewal(response)
+                if not renewed:  # the token was rejected (revoked, expired early): renew once
+                    renewed, renewal = True, _renewal(response)
                     attempt -= 1
                     continue
                 raise self._sign_in_required(profile, response)
@@ -177,13 +180,15 @@ class Transport:
         """Stream a GET response body into ``dest``. Returns (content type, size)."""
         _check_host(url)
         renewal: dict[str, Any] | None = None
+        renewed = False
         while True:
             request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
+            renewal = None
             async with self._limit, self._client.stream("GET", url, headers=request_headers) as response:
                 if response.status_code == 401:
                     await response.aread()
-                    if renewal is None:
-                        renewal = _renewal(response)
+                    if not renewed:
+                        renewed, renewal = True, _renewal(response)
                         continue
                     raise self._sign_in_required(profile, response)
                 if not response.is_success:

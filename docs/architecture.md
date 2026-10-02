@@ -95,7 +95,8 @@ lrh-outlook-connector/
 │  │  ├─ threads.py                # conversation retrieval (+ branch labelling later)
 │  │  ├─ reconcile.py              # deleted/moved detection
 │  │  ├─ cursors.py                # self-contained continuation cursors
-│  │  ├─ files.py                  # attachment and .eml downloads for agents
+│  │  ├─ files.py                  # attachment and .eml downloads (MCP and UI)
+│  │  ├─ localfiles.py             # exports/ and downloads/ folders: 7-day cleanup, exclusive file names
 │  │  └─ export/
 │  │     ├─ orchestrator.py        # ExportRequest → ExportArtifact (the only export path)
 │  │     ├─ formatter.py           # TXT rendering
@@ -137,6 +138,7 @@ lrh-outlook-connector/
 - Response size caps. Downloads (attachments, MIME) stream.
 - Retries **only for idempotent requests**: GETs, and read-style POSTs the caller marks idempotent (`/search/query`, `$batch` of GETs). They honor `429` / `Retry-After`. Write POSTs are never retried.
 - At most **4 requests in flight** per process: Exchange Online allows about 4 concurrent requests per app and mailbox (and 10,000 per 10 minutes).
+- **401** (token rejected: revoked, or a continuous-access-evaluation challenge): the token is renewed once (`force_refresh`, or the `claims` challenge from `WWW-Authenticate`) and the request retried; a second 401 raises `AuthenticationRequired` with the sign-in command. **403** is "access denied" for that item and never asks for a new sign-in.
 - Maps HTTP and Graph/OWS errors to domain errors. An error names the operation in progress (`operation()` context, e.g. "While fetching message bodies"), the HTTP status, the service error code and a shortened message, and the `request-id`. Throttling errors state the limits. Logs metadata only.
 
 ### 5.3 `remote/ids.py`
@@ -160,7 +162,8 @@ lrh-outlook-connector/
 - `list_messages(folder | mailbox, since, until, page_size, page)`.
 - `get_message(id, body_format)` and `get_messages(ids)` (batched; per-item failures returned).
 - `conversation(conversation_id)`, which returns all folders, leaves sorting to the caller (`$orderby` is rejected with this filter) and reports truncation past 1,000 messages.
-- `conversation_folders(conversation_ids)`: batched message counts per conversation, by folder.
+- `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
+- `count_messages(window, minus_folders)`: the server's count for a window (`$count`, `ConsistencyLevel: eventual`), minus excluded folders, in one `$batch`.
 - `locate(ids)`: current folder or gone (404), for reconciliation.
 - `search(query)` + `search_total(query)`: `$search`, field-scoped queries passed through.
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`).
@@ -174,6 +177,7 @@ lrh-outlook-connector/
 - Implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
 - The bearer-only OWS envelope and write contracts proven in research §4.1–4.2. Payloads ≤ 2,048 characters go in the `X-OWA-UrlPostData` header. Anchor mailbox, correlation headers.
 - Actions:
+  - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; the first write to build);
   - `send` (`CreateItem` with `SendAndSaveCopy`);
   - `set_read` / `set_flag` / `set_categories` (`UpdateItem`);
   - `move` (`MoveItem`);
@@ -183,7 +187,8 @@ lrh-outlook-connector/
 
 ### 5.6 `domain/models.py` and `errors.py`
 
-- Pydantic models: `Folder`, `Recipient`, `MessageSummary`, `Message`, `Attachment`, `Coverage`, `MessagePage` (with cursor), `ConversationHit` + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` and `WriteResult`.
+- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` and `WriteResult`.
+- Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
 - Errors: `AuthenticationRequired`, `NotFound`, `InvalidRequest`, `Throttled`, `Upstream`, `WriteOutcomeUnknown`. Each surface maps them to its own protocol.
 
@@ -202,9 +207,11 @@ lrh-outlook-connector/
 
 **`mailbox.py`:**
 - `list_folders` answers from the cache immediately (stale-while-revalidate: older than 10 minutes triggers a background refresh); only an empty cache or `refresh=true` waits for Graph, whose folder levels are fetched in parallel.
-- `list_messages(selection, refresh=True, received_only=False)` fetches from remote, merges retained rows that are deleted remotely (labelled), and returns `MessagePage` + `Coverage`. `received_only` leaves out Sent Items, Drafts, Outbox, Deleted Items and Junk (filtered locally; a page can hold fewer than `limit` messages).
+- **Scope rules, shared by list, search, threads, sizes and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (a folder named in the request is always included); `received_only` also leaves out Sent Items, Drafts and Outbox; `coverage.excluded` counts what was left out. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a live, received copy; `also_in` names the other folders.
+- `list_messages(selection, refresh=True, received_only, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. Retained messages deleted on the server are merged into **the page whose time span covers them** (the cursor carries the page's lower bound). Folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
 - `get_message(id, offset, max_chars, body)` returns a bounded body with continuation and retains what it fetched.
-- `search(query, since?, until?, folder?)` runs Graph `$search` and groups hits by `conversationId`. Coverage reports "server search; retained-deleted mail not included".
+- `search(query, since?, until?, folder?, received_only, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`. Coverage reports "server search; retained-deleted mail not included".
+- `conversation_sizes(conversation_ids)` counts each conversation's messages the way `get_thread` lists them (copies once), for the UI and search hits.
 
 **`threads.py`:**
 - `get_thread(conversation_id, include_deleted_items=False)`:
@@ -213,7 +220,7 @@ lrh-outlook-connector/
   3. hydrate bodies via `$batch` when requested (a body that cannot be fetched is marked in the text);
   4. merge retained-deleted messages.
   Its cursor carries the original selection (conversation, body options, `include_deleted_items`, `max_chars`). Coverage is incomplete when the server listing was truncated (over 1,000 messages) or a body was unavailable.
-- `sizes(conversation_ids)` counts each conversation's messages the way `get_thread` lists them (UI conversation counts).
+- `bodies()` returns a body or a reason for every message (still throttled, or deleted before this app read it); one marker text, `(Content unavailable: …)`, is used everywhere. Coverage is incomplete only for reasons a retry could fix.
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`reconcile.py`:**
@@ -222,13 +229,14 @@ lrh-outlook-connector/
 - Known bodies are never erased.
 
 **`writes.py`:**
+- `create_draft` saves a draft (optionally a reply) and returns its id; it never sends, so it needs no confirmation.
 - `send` checks `user_confirmation`, revalidates every material field against the confirmed proposal, never retries, and on an ambiguous result checks Sent Items.
 - `move` / `delete` / `set_read` / `set_flag` / `set_categories` act on **explicit ids only**. Folder targets are resolved via `list_folders`.
 - Every write returns per-item results and updates the store afterwards.
 
 **`export/`:**
-- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`), deduplicated. Deleted Items and Junk are left out unless asked, and what was left out is counted per reason. The selection is refused above `limit` (at most 2,000) with its count. It hydrates through `$batch`, formats, attaches and packages, and returns an `ExportArtifact`. A body that cannot be fetched (still throttled, or deleted before this app read it) is marked in the file and listed in `messages_unavailable` / `unavailable_message_ids`; the export still completes.
-- `formatter.py` renders the TXT: a header (counts, date span, what was left out or unavailable), then per-message headers with the message, conversation and internet ids, a deleted marker, `uniqueBody` by default and `full` optional, plus attachment lines. People are separated by `; ` (display names are often "Last, First").
+- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`, paged through `list_messages` with the same scope rules), then merges copies (`duplicates_merged`). The selection is refused above `limit` (at most 2,000) with its count. It hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `messages_unavailable` / `unavailable_message_ids`, `attachments_unavailable` (files) and `attachment_listing_failures` (messages). A missing body is marked in the file; the export still completes.
+- `formatter.py` renders **TXT** (for people): a header (counts, date span, what was left out, merged or unavailable), then per-message headers with the message, conversation and internet ids, `Also in:` for merged copies, a deleted marker, `uniqueBody` by default and `full` optional, plus attachment lines; people are separated by `; ` (display names are often "Last, First"). Or **JSONL** (`format=jsonl`, for agents): one record per message with ids, dates, folder, `also_in`, people, the body or `body_unavailable`, and attachment records (with the file path inside the ZIP when attachments are included).
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
   - inline images only when the rendered body references their `cid:`;
@@ -243,12 +251,15 @@ lrh-outlook-connector/
 - FastMCP over stdio. Each tool is a few lines: validate, call the service, return a model.
 - Bounded responses with self-contained cursors.
 - Attachments, MIME and export artifacts are returned as local file paths, never inline base64.
-- Server instructions explain coverage, cursors, `received_only` for "latest mail", the export options, and Graph's throttling limits (no parallel tool calls; prefer one range export). With send, they will also repeat the send-authorization rule.
+- Server instructions explain the scope rules, merged copies, coverage and cursors, `received_only` for "latest mail", `include_total`, the export options (`format=jsonl` for analysis), Graph's throttling limits (no parallel tool calls; prefer one range export), and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
+- List and search results are compact by default (`detail="full"` for every field).
 
 **`web/`:**
 - Starlette JSON API over the same service calls, plus `POST /api/export` (one download) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
-  - a thread-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, threads show an accurate count. An expanded thread spans all folders and shows the newest message on top;
+  - a thread-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, threads show an accurate count. An expanded thread spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
+  - a "Deleted / Junk" toggle in the list header, applied to the list, search, counts, expansion and exports (always on inside those folders), and "export this view" (the current folder and date range);
+  - attachment download buttons in the reader;
   - a folder picker and a "recent, all mail" view;
   - an online search box;
   - an in-memory filter;
@@ -288,12 +299,12 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 ## 7. Data and identity
 
 - **Account fingerprint:** a hash of `tid` + `oid`. It selects the database and must match both token profiles.
-- **Item key:** `(fingerprint, mailbox, Graph immutable id)`. Immutable ids survive moves within the mailbox (verified).
+- **Item key:** the Graph immutable id, within the account's own store. Immutable ids survive moves within the mailbox (verified).
 - **Conversation key:** Graph `conversationId`.
 - **Locations:**
   - token cache: `%LOCALAPPDATA%/lrh-outlook-connector/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
   - `OUTLOOK_CONNECTOR_HOME` overrides the data directory (tests, portability);
-  - store: `%LOCALAPPDATA%/lrh-outlook-connector/<fingerprint>/mail.sqlite3`;
+  - store: `%LOCALAPPDATA%/lrh-outlook-connector/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields; retained bodies and attachment metadata live in a separate content column;
   - exports and downloaded attachments: `<data directory>/exports/`, removed after 7 days. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
 
 ## 8. Surfaces: tools and endpoints
@@ -301,35 +312,35 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | MCP tool | Service call | Annotations |
 |---|---|---|
 | `list_folders` | `mailbox.list_folders` | read-only |
-| `list_messages(folder?, since?, until?, limit?, refresh=True, cursor?, received_only=False)` | `mailbox.list_messages` | read-only |
-| `search_messages(query, since?, until?, folder?, cursor?)` | `mailbox.search` | read-only |
+| `list_messages(folder?, since?, until?, limit?, refresh=True, cursor?, received_only, include_deleted_items, include_total, detail=compact)` | `mailbox.list_messages` | read-only |
+| `search_messages(query, since?, until?, folder?, limit?, cursor?, received_only, include_deleted_items, detail=compact)` | `mailbox.search` | read-only |
 | `get_thread(conversation_id, include_bodies=True, body=unique\|full, include_deleted_items=False, max_chars, cursor?)` | `threads.get_thread` | read-only |
 | `get_message(id, offset=0, max_chars, body=unique\|full\|html)` | `mailbox.get_message` | read-only |
-| `list_attachments(id)` | `reader.list_attachments` | read-only |
+| `list_attachments(id)` | `mailbox.attachments` (retained list for a deleted message) | read-only |
 | `download_attachment(id, attachment_id)` · `save_message_mime(id)` | `files` | read-only (local file) |
 | `auth_status()` | `tokens.status` (offline) | read-only |
-| `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, received_only?, limit<=2000, include_attachments, combine, body, include_deleted_items)` | `export.orchestrator` | read-only (local file) |
+| `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, received_only?, limit<=2000, format=txt\|jsonl, include_attachments, combine, body, include_deleted_items)` | `export.orchestrator` | read-only (local file) |
 | `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
 | `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
 | `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |
 
-Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
+Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`, all with `include_deleted_items`) and add `GET /api/messages/{id}/attachments/{attachment_id}` (download), `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 
 ## 9. Cross-cutting concerns
 
 | Concern | Rule |
 |---|---|
-| Logging | Operation, status, counts, durations, backend. Never subjects, bodies, addresses, query text, tokens, cookies or ids in clear. |
+| Logging | Operation, status, counts, durations, backend. Never subjects, bodies, addresses, query text, tokens, cookies or ids in clear (logged URL paths show `{id}` instead of ids). |
 | Retries | Idempotent requests only, bounded, honoring `Retry-After`. Throttled `$batch` items are re-sent in batches of at most 20. Writes never retry. An ambiguous write → re-read state. |
 | Throttling | Exchange Online: about 4 concurrent requests and 10,000 requests per 10 minutes per app and mailbox; each `$batch` item counts. At most 4 requests and 2 batches in flight per process. Clients are told the limits (MCP instructions, error messages). |
 | Bounds | Every list/search/thread/body response is size-bounded with a cursor. Binary content goes through resources or files. |
-| Errors | Domain errors from the service, naming the operation, service code/message and request id. The MCP surface returns tool errors, the web surface returns HTTP status + JSON. Bulk operations report per-item gaps instead of failing whole. |
+| Errors | Domain errors from the service, naming the operation, service code/message and request id. 401 → renew once, then `AuthenticationRequired`; 403 → access denied (no new sign-in). The MCP surface returns tool errors, the web surface returns HTTP status + JSON. Bulk operations report per-item gaps instead of failing whole. |
 | Security | Localhost-only web binding. Host allowlist for outbound calls. No arbitrary URL fetching. No browser credentials, ever. |
 
 ## 10. Tooling
 
-- **uv** for the environment and lockfile. The `outlook-connector` console script comes from `pyproject.toml`.
-- **ruff** for lint and format, **pyright** for types (strict on `domain`, `remote`, `service`).
+- **uv** for the environment, with a committed `uv.lock` (`uv sync`). pip works too (`pip install -e . --group dev`). The `outlook-connector` console script comes from `pyproject.toml`.
+- **ruff** for lint and format, **pyright** (standard mode) for types: `uv run ruff check .`, `uv run ruff format --check .`, `uv run pyright`, `uv run pytest`.
 - **pytest** with **`httpx.MockTransport`** fakes serving synthetic Graph/OWS payloads. Fixtures are never derived from real captures.
 - The research probes in `research/` stay stdlib and separate, and are excluded from pytest and pyright. They are for discovering APIs, not for testing the app.
 
@@ -337,12 +348,12 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 
 | Step | Modules | Roadmap |
 |---|---|---|
-| 1. Skeleton | `config`, `auth/tokens`, `remote/transport`, `ports`, `ids`, `graph`, `domain/models`, `errors`, `__main__ auth/status` | A1, A2 |
+| 1. Skeleton | `config`, `auth/tokens`, `remote/transport`, `ports`, `graph`, `domain/models`, `errors`, `__main__ auth/status` | A1, A2 |
 | 2. Reads | `graph_mail`, `graph_mapping`, `store/*`, `service/mailbox`, `threads`, `reconcile` | B1, S1, S2, L1, T1, L2 |
 | 3. MCP | `surfaces/mcp_main` | M1 |
 | 4. Export | `service/export/*` | E1 |
 | 5. UI | `surfaces/web/*` | U1 |
-| 6. Send | `remote/ows` (send), `service/writes` (send) | W1 |
+| 6. Send | `remote/ows` (send), `remote/ids` (Graph ↔ OWS ids), `service/writes` (send) | W0, W1 |
 | 7. Mutations | `remote/ows` (update/move/delete), `service/writes` | W2–W5 |
 | Later | branch-aware threads in `service/threads` | R4, E3 |
 
