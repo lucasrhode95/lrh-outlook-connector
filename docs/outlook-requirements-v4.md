@@ -68,7 +68,7 @@ Authentication requirements:
 
 - Never use browser tokens, cookies, storage, canaries or profiles.
 - Encrypted persistence via `msal-extensions` by default. If secure storage is unavailable, **fail closed**.
-- `--unsecure` is an explicit development mode: separate cache under gitignored `.local/`, a loud warning, never implicit.
+- `--unsecure` is an explicit development mode: a separate plaintext cache file outside the repository, a warning on every use, never implicit.
 - Interactive sign-in happens only through `outlook-connector auth [read|write]`. UI and MCP calls use silent auth and return an actionable "sign-in required" error.
 - Cross-process cache locking, because several processes may run at once.
 - Sign-in is per client: the read client for the MVP, the write client when send ships. A token is used only if its account matches the bound account (§5).

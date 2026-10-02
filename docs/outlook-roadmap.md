@@ -22,8 +22,8 @@ Snapshot **2026-10-02**: research is complete for the MVP, send and mutations. T
 
 | Item | Status | Scope |
 |---|---|---|
-| A1 Token provider | **Pending** | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
-| A2 CLI | **Pending** | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
+| A1 Token provider | **Partial**: implemented and unit-tested; live sign-in check pending | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
+| A2 CLI | **Partial**: implemented and unit-tested; live sign-in check pending | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
 | B1 Graph reader | **Pending** | `MailReader` over Graph: folders (+delta), list, get, conversation, `$search`, attachments, MIME, `$batch` |
 | S1 Store | **Pending** | Account-bound SQLite: folder cache, retained messages, tombstones |
 | S3 Reconciliation | **Pending** | Remove → GET by id → tombstone only on 404. Never erase known bodies. |

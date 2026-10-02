@@ -1,0 +1,1 @@
+"""Local Outlook mailbox connector."""
