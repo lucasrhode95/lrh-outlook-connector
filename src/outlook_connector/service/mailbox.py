@@ -448,14 +448,6 @@ class Mailbox:
             query=kql, folder_id=folder_id, page_size=limit, page=state["link"] if state else None
         )
         self.store.upsert_summaries(found)
-        total = None
-        # A different engine (Microsoft Search) counts differently, so its total is only shown as an
-        # approximation when this result set is known to be incomplete.
-        if state is None and folder_id is None and link:
-            try:
-                total = await self.reader.search_total(kql)
-            except Exception:  # the total is a courtesy for coverage; never fail the search for it
-                total = None
         in_window = [m for m in found if _within(m, since, until)]
         items, excluded = await self.finish(in_window, skip)
         items, seen = _skip_seen(items, state)
@@ -494,8 +486,6 @@ class Mailbox:
             "Server-side search (Microsoft Graph); hits grouped by conversation, in rank order.",
             "Messages retained locally after deletion on the server are not searched.",
         ]
-        if total is not None:
-            notes.append("server_total is an approximate count of matching messages (Microsoft Search).")
         if skip and link:
             notes.append("Folders are filtered after paging, so a page can hold fewer than limit hits.")
         return SearchResult(
@@ -514,9 +504,7 @@ class Mailbox:
             )
             if link
             else None,
-            coverage=Coverage(
-                source="remote", complete=link is None, server_total=total, excluded=excluded, notes=notes
-            ),
+            coverage=Coverage(source="remote", complete=link is None, excluded=excluded, notes=notes),
         )
 
 

@@ -257,7 +257,6 @@ function showCoverage(coverage) {
   const excluded = coverage.excluded || {};
   const notShown = (excluded.deleted_or_junk || 0) + (excluded.sync_issues || 0);
   if (notShown) parts.push(`${notShown} in Deleted / Junk / Sync Issues not shown`);
-  if (coverage.server_total !== null && coverage.server_total !== undefined) parts.push(`${coverage.server_total} matching messages on the server`);
   if (coverage.source !== "remote") parts.push(coverage.source);
   $("coverage").textContent = parts.join(" · ");
   $("coverage").title = (coverage.notes || []).join("\n");

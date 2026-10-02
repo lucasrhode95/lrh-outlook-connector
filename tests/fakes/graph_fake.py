@@ -2,7 +2,7 @@
 
 It understands exactly the request shapes the connector sends (research §3): folder listing,
 message listing with receivedDateTime / conversationId filters, $search, $top paging,
-$batch, /search/query, attachments and $value downloads. All data is synthetic.
+$batch, attachments and $value downloads. All data is synthetic.
 """
 
 from __future__ import annotations
@@ -154,10 +154,6 @@ class FakeGraph:
     ):
         if method == "POST" and path == "/$batch":
             return self.batch(json.loads(request.content))
-        if method == "POST" and path == "/search/query":
-            q = json.loads(request.content)["requests"][0]["query"]["queryString"]
-            total = len(self.search_matches(q, None))
-            return 200, {"value": [{"hitsContainers": [{"total": total, "hits": []}]}]}, None
         text_body = 'outlook.body-content-type="text"' in prefer
 
         if m := re.fullmatch(r"/me/mailFolders", path):

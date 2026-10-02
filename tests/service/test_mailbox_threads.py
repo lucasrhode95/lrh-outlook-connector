@@ -185,7 +185,7 @@ async def test_search_groups_by_conversation_with_coverage(mailbox: Mailbox) -> 
     result = await mailbox.search("relatório")
     assert [h.conversation_id for h in result.conversations] == ["c-rel"]
     assert {m.id for m in result.conversations[0].matching_messages} == {"m1", "m2", "m3"}
-    assert result.coverage.server_total is None and result.coverage.complete  # no total for a complete set
+    assert result.coverage.server_total is None and result.coverage.complete
     assert any("not searched" in n for n in result.coverage.notes)
 
 
@@ -286,12 +286,6 @@ async def test_unknown_conversation(mailbox: Mailbox) -> None:
 
 def test_base_subject_strips_reply_and_forward_prefixes() -> None:
     assert base_subject("RE: FW: Enc: Relatório") == "Relatório"
-
-
-async def test_search_reports_an_approximate_total_only_when_incomplete(mailbox: Mailbox) -> None:
-    result = await mailbox.search("relatório", limit=1)
-    assert result.cursor and result.coverage.server_total == 3
-    assert any("approximate" in n for n in result.coverage.notes)
 
 
 async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_background(

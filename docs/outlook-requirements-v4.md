@@ -119,9 +119,9 @@ Lazy population:
 - The UI also offers an instant in-memory filter over messages and threads already loaded.
 - Retained mail that was deleted remotely is reachable through list, thread and filter, but not through search. Search results must say so.
 
-**Search backend: Graph `$search`**, which has the same recall as Outlook's own top-bar search, folds accents and supports field scoping (research §3.3). Results are messages, grouped into conversations locally. `/search/query` may add a server total for coverage.
+**Search backend: Graph `$search`**, which has the same recall as Outlook's own top-bar search, folds accents and supports field scoping (research §3.3). Results are messages, grouped into conversations locally. No search total is reported: Microsoft Search (`/search/query`) counts with a different engine and without the connector's folder rules, so its number cannot be compared with the results.
 
-Every search result reports coverage: backend used, server totals or `more available`, partial flags, and the fact that local-only retained mail was not searched.
+Every search result reports coverage: whether more results follow (a cursor), what the folder rules left out, and partial flags.
 
 ## 9. Reading content (MCP)
 

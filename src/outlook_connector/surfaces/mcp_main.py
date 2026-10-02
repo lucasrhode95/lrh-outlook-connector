@@ -62,7 +62,7 @@ path for you to read with your own file tools. save_message_mime saves the origi
 and/or a range (since/until/folder/received_only) in one call; at most 2,000 messages (`limit` \
 lowers that). For a large period, export the range rather than enumerating ids. format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
-"txt" is for people. Read messages_excluded and messages_unavailable in the result.
+"txt" is for people. Read messages_excluded and unavailable_message_ids in the result.
 - Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \

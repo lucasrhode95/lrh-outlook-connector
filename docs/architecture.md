@@ -136,7 +136,7 @@ lrh-outlook-connector/
 - One `httpx.AsyncClient` per process. It keeps connections alive within a call.
 - Host allowlist: `graph.microsoft.com`, `outlook.office.com`, `outlook.cloud.microsoft`. No redirects. (Sign-in traffic to `login.microsoftonline.com` goes through MSAL, not this client.)
 - Response size caps. Downloads (attachments, MIME) stream.
-- Retries **only for idempotent requests**: GETs, and read-style POSTs the caller marks idempotent (`/search/query`, `$batch` of GETs). They honor `429` / `Retry-After`. Write POSTs are never retried.
+- Retries **only for idempotent requests**: GETs, and read-style POSTs the caller marks idempotent (`$batch` of GETs). They honor `429` / `Retry-After`. Write POSTs are never retried.
 - At most **4 requests in flight** per process: Exchange Online allows about 4 concurrent requests per app and mailbox (and 10,000 per 10 minutes).
 - **401** (token rejected: revoked, or a continuous-access-evaluation challenge): the token is renewed once (`force_refresh`, or the `claims` challenge from `WWW-Authenticate`) and the request retried; a second 401 raises `AuthenticationRequired` with the sign-in command. **403** is "access denied" for that item and never asks for a new sign-in.
 - Maps HTTP and Graph/OWS errors to domain errors. An error names the operation in progress (`operation()` context, e.g. "While fetching message bodies"), the HTTP status, the service error code and a shortened message, and the `request-id`. Throttling errors state the limits. Logs metadata only.
@@ -165,7 +165,7 @@ lrh-outlook-connector/
 - `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
 - `locate(ids)`: current folder or gone (404), for reconciliation.
-- `search(query)` + `search_total(query)`: `$search`, field-scoped queries passed through.
+- `search(query)`: `$search`, field-scoped queries passed through.
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`).
 - `download_attachment(id, att_id)` and `download_mime(id)` stream to a file.
 - Every operation is named for error messages ("While listing attachments: …").
@@ -236,7 +236,7 @@ lrh-outlook-connector/
 - Every write returns per-item results and updates the store afterwards.
 
 **`export/`:**
-- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. It hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `messages_unavailable` / `unavailable_message_ids`, `attachments_unavailable` (files) and `attachment_listing_failures` (messages). A missing body is marked in the file; the export still completes.
+- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. It hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids`, `attachments_unavailable` (files) and `attachment_listing_failures` (messages). A missing body is marked in the file; the export still completes.
 - `formatter.py` renders **TXT** (for people): a header (counts, date span, what was left out or unavailable), then per-message headers with the message, conversation and internet ids, `Also in:` for merged copies, a deleted marker, `uniqueBody` by default and `full` optional, plus attachment lines; people are separated by `; ` (display names are often "Last, First"). Or **JSONL** (`format=jsonl`, for agents): one record per message with ids, dates, folder, `also_in`, people, the body or `body_unavailable`, and attachment records (with the file path inside the ZIP when attachments are included).
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
