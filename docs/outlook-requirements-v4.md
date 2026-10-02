@@ -51,7 +51,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 - A permanent background sync daemon.
 - Local full-text content search (§8).
 - Server-side text extraction from attachments. Agents receive the raw file (§9).
-- Branch-aware thread reconstruction (later, aspirational: §10.3).
+- Branch-aware thread reconstruction (parked: §10.3).
 
 ## 4. Authentication (decided)
 
@@ -160,7 +160,7 @@ TXT content:
 
 One shared orchestrator serves both the UI (HTTP download) and MCP (resource or file reference).
 
-### 10.3 Later (aspirational): branch-aware threads
+### 10.3 Parked: branch-aware threads
 
 Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` headers, with Exchange `ConversationId` and `Thread-Index` as supporting evidence. Detect branches, including forwards, and offer a merged chronological view where each message is labeled with its branch. Research the quality of the existing headers before committing to this (R4).
 
@@ -204,7 +204,7 @@ Requirements:
 | **MVP (read)** | Auth (read client), folders, `list_messages`, `get_thread`, `get_message`, attachment resources, online search, export (§10), local UI, MCP read surface |
 | **Send** | Write-client sign-in, `send_email` with safeguards |
 | **Mutations** | move → delete → read state → flag/categories |
-| **Later** | Branch-aware threads (§10.3) |
+| **Parked** | Branch-aware threads (§10.3): rely on Exchange conversations for now |
 
 ## 13. Operational rules
 

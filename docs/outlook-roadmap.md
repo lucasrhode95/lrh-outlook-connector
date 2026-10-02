@@ -14,7 +14,7 @@ Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mail
 | R1 Catalog sizing | **Done** | Folders only (research §3.2) |
 | R2 Search bake-off | **Done** | Graph `$search` (research §3.3) |
 | R3 Conversation retrieval | **Done** | Works across folders; sort locally (research §3.4) |
-| R4 Thread-header quality | **Partial** | Received mail is fine; own messages need a fallback before E3 (research §3.4) |
+| R4 Thread-header quality | **Parked** | Received mail is fine; own messages would need a fallback. Only needed for E3, which is parked (research §3.4) |
 | R5 OWS write contracts | **Done** | Send, read, flag, categories, conversation read, move, soft delete (research §4.2) |
 | S2 Delta semantics | **Done** | `@removed` → GET by id; moves by id (research §3.6) |
 
@@ -70,7 +70,7 @@ Ordered by risk: reversible state changes first, then moves and deletes.
 
 | Item | Status | Note |
 |---|---|---|
-| E3 Branch-aware threads | **Pending** | After R4's fallback for the user's own messages |
+| E3 Branch-aware threads | **Parked** | Decided 2026-10-02: rely on Exchange's conversations (and `uniqueBody` for quoted history) instead of rebuilding reply trees. Revisit only with a concrete need; it would start with R4. |
 | X1 Shared mailboxes | **Parked** | `Mail.Read.Shared` is granted. Needs a named mailbox and a need. |
 | X2 Online Archive mailbox | **Parked** | Not in Graph, and the account has none. The normal Archive folder is in scope. |
 | X3 OWS reader | **Parked** | Proven (research §4.3). Only needed in the "no Graph" scenario (architecture §6.2). |

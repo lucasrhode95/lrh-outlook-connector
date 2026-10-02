@@ -355,7 +355,7 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 | 5. UI | `surfaces/web/*` | U1 |
 | 6. Send | `remote/ows` (send), `remote/ids` (Graph ↔ OWS ids), `service/writes` (send) | W0, W1 |
 | 7. Mutations | `remote/ows` (update/move/delete), `service/writes` | W2–W5 |
-| Later | branch-aware threads in `service/threads` | R4, E3 |
+| Parked | branch-aware threads in `service/threads` | R4, E3 |
 
 ## 12. Decisions
 
