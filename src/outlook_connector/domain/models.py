@@ -227,7 +227,7 @@ class ExportArtifact(Compact):
 
 MAX_RECIPIENTS = 100
 MAX_BODY_CHARS = 100_000
-_ADDRESS = r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$"
+ADDRESS_PATTERN = r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$"
 
 
 class OutgoingMessage(BaseModel):

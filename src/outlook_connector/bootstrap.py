@@ -1,4 +1,4 @@
-"""Composition root: config → tokens → transport → reader → store → services.
+"""Composition root: config → tokens → transport → reader / writer → store → services.
 
 Built lazily on first use, so a starting process does no network or disk work (architecture §2).
 """
@@ -13,11 +13,13 @@ from outlook_connector.auth.tokens import Account, TokenProvider
 from outlook_connector.domain.errors import AuthenticationRequired
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
+from outlook_connector.remote.ows import Ows, OwsMailWriter
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads
+from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store, store_path
 
 
@@ -28,6 +30,7 @@ class Services:
     threads: Threads
     exports: Exports
     files: Files
+    writes: Writes  # uses the write sign-in, only when a write is made
 
 
 class AppContext:
@@ -56,7 +59,8 @@ class AppContext:
             store = Store(store_path(account.fingerprint), account.fingerprint)
             mailbox = Mailbox(reader, store)
             threads = Threads(mailbox)
-            self._services = Services(account, mailbox, threads, Exports(threads), Files(mailbox))
+            writes = Writes(mailbox, OwsMailWriter(Ows(self._transport, self.tokens)), account)
+            self._services = Services(account, mailbox, threads, Exports(threads), Files(mailbox), writes)
         return self._services
 
     async def aclose(self) -> None:
