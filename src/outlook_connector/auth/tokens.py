@@ -17,7 +17,7 @@ import json
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ from outlook_connector.domain.errors import (
 # MSAL error codes meaning "the stored credentials are no longer accepted".
 _REJECTED = {"invalid_grant", "interaction_required", "login_required", "consent_required", "access_denied"}
 _NETWORK_RETRIES = 3
+_MEMO_MARGIN_SECONDS = 300  # reuse an in-memory access token until 5 minutes before it expires
 
 AppFactory = Callable[..., Any]
 
@@ -114,6 +115,11 @@ class TokenProvider:
         self.profiles = profiles or config.PROFILES
         self._authority = authority
         self._app_factory = app_factory or msal.PublicClientApplication
+        # Per process: building an MSAL app costs a network round trip, so build each once, and keep
+        # the current access token in memory instead of re-reading the locked cache on every request.
+        self._apps: dict[str, Any] = {}
+        self._token_cache: PersistedTokenCache | None = None
+        self._memo: dict[str, AccessToken] = {}
         for profile in self.profiles.values():
             denied = [s for s in profile.scopes if (profile.client_id, s) in config.DENIED_PAIRS]
             if denied:
@@ -132,8 +138,11 @@ class TokenProvider:
         return f"{config.CLI_NAME} auth {profile}" + (" --unsecure" if self.unsecure else "")
 
     def get_token(self, profile: str) -> AccessToken:
-        """Silent acquisition from the cache (refreshing if needed). Never prompts."""
+        """Silent acquisition (memory, then cache, refreshing if needed). Never prompts."""
         spec = self._profile(profile)
+        memo = self._memo.get(profile)
+        if memo and memo.expires_on and memo.expires_on - time.time() > _MEMO_MARGIN_SECONDS:
+            return replace(memo, source="memory")
         with self._lock():
             app = self._retry(lambda: self._app(spec))
             account = self._bound_account(app.get_accounts())
@@ -144,7 +153,9 @@ class TokenProvider:
             result = self._retry(
                 lambda: app.acquire_token_silent_with_error(list(spec.scopes), account=account)
             )
-        return self._token_from_result(profile, result)
+        token = self._token_from_result(profile, result)
+        self._memo[profile] = token
+        return token
 
     def sign_in(self, profile: str, *, show: Callable[[str], None] = print) -> AccessToken:
         """Device-code sign-in for one profile. Only the `auth` command calls this."""
@@ -178,11 +189,15 @@ class TokenProvider:
                 f"({Account.from_msal(existing).username}). Run `{config.CLI_NAME} auth --sign-out` first "
                 "to switch accounts."
             )
+        self._memo[profile] = token
         return token
 
     def sign_out(self) -> bool:
         """Delete the selected token cache. Returns whether a cache existed."""
         existed = self.cache_path.exists()
+        self._apps.clear()
+        self._memo.clear()
+        self._token_cache = None
         with self._lock():
             for path in (self.cache_path, Path(f"{self.cache_path}.lockfile")):
                 path.unlink(missing_ok=True)
@@ -231,7 +246,13 @@ class TokenProvider:
             ) from None
 
     def _app(self, spec: config.TokenProfile) -> Any:
-        return self._app_factory(spec.client_id, authority=self._authority, token_cache=self._cache())
+        if spec.name not in self._apps:
+            if self._token_cache is None:
+                self._token_cache = self._cache()  # re-reads the file when other processes change it
+            self._apps[spec.name] = self._app_factory(
+                spec.client_id, authority=self._authority, token_cache=self._token_cache
+            )
+        return self._apps[spec.name]
 
     def _cache(self) -> PersistedTokenCache:
         self.cache_path.parent.mkdir(parents=True, exist_ok=True)
