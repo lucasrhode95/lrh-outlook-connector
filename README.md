@@ -26,12 +26,39 @@ Sign-in uses Microsoft's device-code flow and is only ever started from this com
 outlook-connector auth read     # Graph reads (needed for everything)
 outlook-connector auth write    # send and mailbox changes (later phases)
 outlook-connector status        # offline: account, profiles, cache location
-outlook-connector status --check  # also refreshes each profile's token
+outlook-connector status --check  # also refreshes each token (only read is required)
 ```
 
 Tokens are stored encrypted (DPAPI on Windows, Keychain on macOS, libsecret on Linux) under the user data directory. If encryption is unavailable, the connector refuses to store tokens.
 
 For development only, `--unsecure` uses a separate **plaintext** cache file in the same directory, and prints a warning each time.
+
+## Use it
+
+**Agents (MCP).** Register the stdio server with your MCP client, for example Claude Code:
+
+```bash
+claude mcp add outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scripts/outlook-connector.exe mcp
+```
+
+The client starts one `outlook-connector mcp` process per session. Tools: `list_folders`, `list_messages`,
+`search_messages`, `get_thread`, `get_message`, `list_attachments`, `download_attachment`,
+`save_message_mime`, `export_messages`, `auth_status`. They are read-only: nothing changes the mailbox,
+not even read state.
+
+**You (local UI).** Start it when you need it. It opens a browser tab and stops after 30 idle minutes:
+
+```bash
+outlook-connector ui
+```
+
+Browse folders or recent mail grouped by thread, search the mailbox, filter what is loaded, read
+messages, tick threads or single messages, and export them as one `.txt` or `.zip`
+(per thread, all in one file, or one file per message; attachments optional).
+
+Exports and downloaded attachments go to the data directory (`%LOCALAPPDATA%\lrh-outlook-connector`)
+and are removed after a week. The local store there keeps only the folder cache and copies of messages
+this app has read, so mail deleted on the server stays readable and is labelled as deleted.
 
 ## Tests
 

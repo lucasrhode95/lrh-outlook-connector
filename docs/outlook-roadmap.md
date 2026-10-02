@@ -2,7 +2,7 @@
 
 The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
 
-Snapshot **2026-10-02**: research is complete for the MVP, send and mutations. There is no product code yet.
+Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Send and mailbox changes are next.
 
 **Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
 
@@ -22,17 +22,17 @@ Snapshot **2026-10-02**: research is complete for the MVP, send and mutations. T
 
 | Item | Status | Scope |
 |---|---|---|
-| A1 Token provider | **Partial**: implemented and unit-tested; live sign-in check pending | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
-| A2 CLI | **Partial**: implemented and unit-tested; live sign-in check pending | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
-| B1 Graph reader | **Pending** | `MailReader` over Graph: folders (+delta), list, get, conversation, `$search`, attachments, MIME, `$batch` |
-| S1 Store | **Pending** | Account-bound SQLite: folder cache, retained messages, tombstones |
-| S3 Reconciliation | **Pending** | Remove → GET by id → tombstone only on 404. Never erase known bodies. |
-| L1 `list_messages` | **Pending** | Folder or mailbox-wide, `since`/`until`, limit, `refresh` |
-| T1 `get_thread` | **Pending** | Conversation across folders, local sort, retained-deleted merge, bounded |
-| L2 `search_messages` | **Pending** | Graph `$search`, grouped by conversation, coverage |
-| E1 Export | **Pending** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download |
-| M1 MCP surface | **Pending** | Read tools and resources (architecture §8) |
-| U1 Local UI | **Pending** | Thread-grouped list, search, in-memory filter, selection, export (v4 O3) |
+| A1 Token provider | **Done** (live: encrypted DPAPI cache, silent refresh) | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
+| A2 CLI | **Done** | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
+| B1 Graph reader | **Done** | `MailReader` over Graph: folders (+delta), list, get, conversation, `$search`, attachments, MIME, `$batch` |
+| S1 Store | **Done** | Account-bound SQLite: folder cache, retained messages, tombstones |
+| S3 Reconciliation | **Done** | Remove → GET by id → tombstone only on 404. Never erase known bodies. |
+| L1 `list_messages` | **Done** | Folder or mailbox-wide, `since`/`until`, limit, `refresh` |
+| T1 `get_thread` | **Done** | Conversation across folders, local sort, retained-deleted merge, bounded |
+| L2 `search_messages` | **Done** | Graph `$search`, grouped by conversation, coverage |
+| E1 Export | **Done** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download |
+| M1 MCP surface | **Done** (read-only tools) | Read tools and resources (architecture §8) |
+| U1 Local UI | **Done** | Thread-grouped list, search, in-memory filter, selection, export (v4 O3) |
 
 ## Send
 
