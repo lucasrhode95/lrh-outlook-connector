@@ -76,12 +76,13 @@ lrh-outlook-connector/
 │  │  └─ tokens.py                 # one centralized TokenProvider; named profiles are config
 │  │
 │  ├─ remote/                      # all Microsoft protocol knowledge (async)
-│  │  ├─ ports.py                  # MailReader protocol the service depends on (MailWriter: send phase)
+│  │  ├─ ports.py                  # MailReader / MailWriter protocols the service depends on
 │  │  ├─ transport.py              # shared httpx.AsyncClient and request policy
 │  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference, downloads
 │  │  ├─ graph_mail.py             # MailReader over Graph
 │  │  └─ graph_mapping.py          # Graph JSON → domain models
-│  │                               # later: ows.py (MailWriter) + ids.py (Graph ↔ OWS ids)
+│  │  ├─ ows.py                    # MailWriter over Outlook Web (OWS): drafts, send
+│  │  ├─ ids.py                    # Graph ↔ OWS ids
 │  │
 │  ├─ domain/
 │  │  ├─ models.py                 # pydantic models (the single schema source)
@@ -101,7 +102,7 @@ lrh-outlook-connector/
 │  │     ├─ formatter.py           # TXT rendering
 │  │     ├─ attachments.py         # attachment selection policy + safe filenames
 │  │     └─ packaging.py           # flat TXT vs single ZIP
-│  │                               # later: writes.py (send + mailbox changes)
+│  │  ├─ writes.py                 # drafts, confirmed send
 │  │
 │  └─ surfaces/
 │     ├─ mcp_main.py               # FastMCP (stdio) tools
@@ -135,7 +136,7 @@ lrh-outlook-connector/
 - One `httpx.AsyncClient` per process. It keeps connections alive within a call.
 - Host allowlist: `graph.microsoft.com`, `outlook.office.com`, `outlook.cloud.microsoft`. No redirects. (Sign-in traffic to `login.microsoftonline.com` goes through MSAL, not this client.)
 - Response size caps. Downloads (attachments, MIME) stream.
-- Retries **only for idempotent requests**: GETs, and read-style POSTs the caller marks idempotent (`$batch` of GETs). They honor `429` / `Retry-After`. Write POSTs are never retried.
+- Retries **only for idempotent requests**: GETs, and read-style POSTs the caller marks idempotent (`$batch` of GETs). They honor `429` / `Retry-After`. Writes (`write=True`) are sent once: an answer that never completes, or a 5xx, raises `WriteOutcomeUnknown` (the write may have happened); a 4xx or 429 is a definite failure. A 401 still renews the token once, since nothing was processed.
 - At most **4 requests in flight** per process: Exchange Online allows about 4 concurrent requests per app and mailbox (and 10,000 per 10 minutes).
 - **401** (token rejected: revoked, or a continuous-access-evaluation challenge): the token is renewed once (`force_refresh`, or the `claims` challenge from `WWW-Authenticate`) and the request retried; a second 401 raises `AuthenticationRequired` with the sign-in command. **403** is "access denied" for that item and never asks for a new sign-in.
 - Maps HTTP and Graph/OWS errors to domain errors. An error names the operation in progress (`operation()` context, e.g. "While fetching message bodies"), the HTTP status, the service error code and a shortened message, and the `request-id`. Throttling errors state the limits. Logs metadata only.
@@ -174,9 +175,10 @@ lrh-outlook-connector/
 
 - Implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
 - The bearer-only OWS envelope and write contracts proven in research §4.1–4.2. Payloads ≤ 2,048 characters go in the `X-OWA-UrlPostData` header. Anchor mailbox, correlation headers.
+- `Ows.call(action, body)` sends one action and returns its item results; an item whose `ResponseClass` is not `Success`/`Warning` raises an error naming its `ResponseCode`. The anchor mailbox is the write token's `upn`.
 - Actions:
-  - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; the first write to build);
-  - `send` (`CreateItem` with `SendAndSaveCopy`);
+  - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
+  - `send` (`CreateItem` with `SendAndSaveCopy`), both with the body proven by the self-send. Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject (pending a live check, V2);
   - `set_read` / `set_flag` / `set_categories` (`UpdateItem`);
   - `move` (`MoveItem`);
   - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**);
@@ -185,10 +187,10 @@ lrh-outlook-connector/
 
 ### 5.6 `domain/models.py` and `errors.py`
 
-- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` and `WriteResult`.
+- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` (to/cc/bcc, subject, plain-text body, optional `reply_to_message_id` and `reply_all`), `EmailProposal`, `DraftResult` and `SendResult`.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
-- Errors: `AuthenticationRequired`, `NotFound`, `InvalidRequest`, `Throttled`, `Upstream`, `WriteOutcomeUnknown`. Each surface maps them to its own protocol.
+- Errors: `AuthenticationRequired`, `AccountMismatch`, `NotFound`, `InvalidRequest`, `Throttled`, `Upstream`, `WriteOutcomeUnknown`. Each surface maps them to its own protocol.
 
 ### 5.7 `store/`
 
@@ -220,8 +222,9 @@ lrh-outlook-connector/
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`writes.py`:**
-- `create_draft` saves a draft (optionally a reply) and returns its id; it never sends, so it needs no confirmation.
-- `send` checks `user_confirmation`, revalidates every material field against the confirmed proposal, never retries, and on an ambiguous result checks Sent Items.
+- `propose(message)` resolves the message exactly as it would be sent: the sender is the signed-in account (no Send As), recipients are validated and de-duplicated, and a reply gets Outlook's defaults when recipients or subject are omitted (the sender, or the original recipients for your own message; with reply-all also the original To and Cc; never yourself; "RE: <subject>"). It returns an `EmailProposal` with a **confirmation code**: a hash of the account fingerprint and every material field. Stateless: nothing is stored between calls.
+- `create_draft` saves the proposal into Drafts and reads it back through Graph; it never sends, so it needs no confirmation.
+- `send(message, user_confirmation)` re-derives the proposal and refuses unless the code matches (any change to the account, recipients, subject or body changes it), checks that the write token's `tid`/`oid` are the bound account, and sends once. On `WriteOutcomeUnknown` it looks for the message in Sent Items (subject and recipients, from five minutes before the send): found → `sent`; not found → `unknown`, with "do not send again before checking Outlook".
 - `move` / `delete` / `set_read` / `set_flag` / `set_categories` act on **explicit ids only**. Folder targets are resolved via `list_folders`.
 - Every write returns per-item results and updates the store afterwards.
 
@@ -311,6 +314,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `download_attachment(id, attachment_id)` · `save_message_mime(id)` | `files` | read-only (local file) |
 | `auth_status()` | `tokens.status` (offline) | read-only |
 | `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, received_only?, limit<=2000, format=txt\|jsonl, include_attachments, combine, body, include_deleted_items)` | `export.orchestrator` | read-only (local file) |
+| `create_draft(message)` | `writes.create_draft` | not read-only, not destructive, closed world |
+| `propose_email(message)` | `writes.propose` | read-only |
 | `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
 | `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
 | `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |
@@ -344,7 +349,7 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 | 3. MCP | `surfaces/mcp_main` | M1 |
 | 4. Export | `service/export/*` | E1 |
 | 5. UI | `surfaces/web/*` | U1 |
-| 6. Send | `remote/ows` (send), `remote/ids` (Graph ↔ OWS ids), `service/writes` (send) | W0, W1 |
+| 6. Send | `remote/ows` (draft, send), `remote/ids` (Graph ↔ OWS ids), `service/writes` (propose, draft, send) | W0, W1 |
 | 7. Mutations | `remote/ows` (update/move/delete), `service/writes` | W2–W5 |
 | Parked | branch-aware threads in `service/threads` | R4, E3 |
 
