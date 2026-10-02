@@ -9,11 +9,12 @@ import pytest
 from pydantic import ValidationError
 
 from outlook_connector.domain.errors import InvalidRequest
-from outlook_connector.domain.models import ExportRequest
+from outlook_connector.domain.models import ExportRequest, Recipient
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.export.attachments import dedupe, safe_name
+from outlook_connector.service.export.formatter import people
 from outlook_connector.service.export.orchestrator import DELETED_OR_JUNK, NOT_RECEIVED, Exports
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads
@@ -254,6 +255,12 @@ async def test_bulk_export_stays_within_batch_limits_under_throttling(
 async def test_empty_request_is_rejected(exports: Exports) -> None:
     with pytest.raises(InvalidRequest):
         await exports.export(ExportRequest())
+
+
+def test_recipients_are_separated_by_semicolons() -> None:
+    # display names are often "Last, First", so commas cannot separate people
+    names = [Recipient(name="Rhode, Lucas", address="lr@example.com"), Recipient(name="Garcia, Felipe")]
+    assert people(names) == "Rhode, Lucas <lr@example.com>; Garcia, Felipe"
 
 
 def test_safe_names() -> None:
