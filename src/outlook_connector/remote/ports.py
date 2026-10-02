@@ -1,6 +1,6 @@
 """The ports the service depends on (architecture §6.1).
 
-Adapters: remote/graph_mail.py implements MailReader. MailWriter (OWS) arrives with the send phase.
+Adapters: remote/graph_mail.py implements MailReader, remote/ows.py implements MailWriter.
 Swapping an adapter (another tenant, a policy change) must not change anything above this file.
 """
 
@@ -10,10 +10,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from outlook_connector.domain.models import (
     Attachment,
+    EmailProposal,
     Folder,
     Message,
     MessageSummary,
@@ -90,3 +91,19 @@ class MailReader(Protocol):
     async def download_attachment(self, message_id: str, attachment_id: str, dest: Path) -> int: ...
 
     async def download_mime(self, message_id: str, dest: Path) -> int: ...
+
+
+class MailWriter(Protocol):
+    """Writes as the signed-in account. Each call is sent once and never retried."""
+
+    def account(self) -> dict[str, Any]:
+        """Identity claims (tid, oid, upn) of the credential the writes use."""
+        ...
+
+    async def create_draft(self, message: EmailProposal) -> str | None:
+        """Save into Drafts without sending; the draft's id when the backend reports it."""
+        ...
+
+    async def send(self, message: EmailProposal) -> None:
+        """Send and keep a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell."""
+        ...
