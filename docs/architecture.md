@@ -61,60 +61,58 @@ The diagram at the top shows the layers, top to bottom:
 
 ```
 lrh-outlook-connector/
-├─ pyproject.toml · uv.lock        # Python ≥3.12; deps: mcp, msal, msal-extensions
-│                                  # (mcp already brings httpx, pydantic, starlette, uvicorn, anyio)
+├─ pyproject.toml                  # Python ≥3.12; msal, msal-extensions[portalocker], mcp, httpx, pydantic,
+│                                  # starlette, uvicorn (uv- and pip-compatible; dev group: pytest, ruff)
 ├─ README.md · AGENTS.md
 ├─ docs/                           # requirements v4, roadmap, research, this file
 ├─ research/                       # stdlib probes + README (independent of the package)
 ├─ src/outlook_connector/
-│  ├─ __main__.py                  # CLI dispatch: auth · mcp · ui · status (lazy imports per command)
-│  ├─ bootstrap.py                 # lazy factory: config → auth → transport → clients → store → service
-│  ├─ config.py                    # frozen settings: client ids, scopes, allowed hosts, paths, limits
-│  ├─ logging.py                   # stdlib logging + redaction filter
+│  ├─ __main__.py                  # CLI dispatch: auth · status · mcp · ui (lazy imports per command)
+│  ├─ bootstrap.py                 # lazy composition: tokens → transport → reader → store → services
+│  ├─ config.py                    # client profiles, denied pairs, data directory, cache paths
 │  │
 │  ├─ auth/
 │  │  └─ tokens.py                 # one centralized TokenProvider; named profiles are config
 │  │
 │  ├─ remote/                      # all Microsoft protocol knowledge (async)
-│  │  ├─ ports.py                  # MailReader / MailWriter protocols the service depends on
+│  │  ├─ ports.py                  # MailReader protocol the service depends on (MailWriter: send phase)
 │  │  ├─ transport.py              # shared httpx.AsyncClient and request policy
-│  │  ├─ ids.py                    # Graph immutable id ↔ OWS id; conversation ids
-│  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference
-│  │  ├─ graph_mail.py             # mail reads (folders, list, get, conversation, search, attachments, MIME)
-│  │  ├─ graph_mapping.py          # Graph JSON → domain models
-│  │  └─ ows.py                    # OWS envelope + write actions
+│  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference, downloads
+│  │  ├─ graph_mail.py             # MailReader over Graph
+│  │  └─ graph_mapping.py          # Graph JSON → domain models
+│  │                               # later: ows.py (MailWriter) + ids.py (Graph ↔ OWS ids)
 │  │
 │  ├─ domain/
 │  │  ├─ models.py                 # pydantic models (the single schema source)
 │  │  └─ errors.py                 # domain errors
 │  │
 │  ├─ store/
-│  │  ├─ db.py                     # sqlite3 connection policy, owner fingerprint check
-│  │  ├─ schema.sql                # current schema
-│  │  └─ retained.py               # folder cache, retained messages/bodies, tombstones
+│  │  └─ db.py                     # account-bound SQLite: folder cache, retained messages, tombstones
 │  │
 │  ├─ service/
 │  │  ├─ mailbox.py                # folders, list, get, search
 │  │  ├─ threads.py                # conversation retrieval (+ branch labelling later)
-│  │  ├─ reconcile.py              # deleted/moved detection and retention merge
-│  │  ├─ writes.py                 # send + mailbox mutations
+│  │  ├─ reconcile.py              # deleted/moved detection
+│  │  ├─ cursors.py                # self-contained continuation cursors
+│  │  ├─ files.py                  # attachment and .eml downloads for agents
 │  │  └─ export/
 │  │     ├─ orchestrator.py        # ExportRequest → ExportArtifact (the only export path)
 │  │     ├─ formatter.py           # TXT rendering
 │  │     ├─ attachments.py         # attachment selection policy + safe filenames
 │  │     └─ packaging.py           # flat TXT vs single ZIP
+│  │                               # later: writes.py (send + mailbox changes)
 │  │
 │  └─ surfaces/
-│     ├─ mcp_main.py               # FastMCP (stdio) tools + resources
+│     ├─ mcp_main.py               # FastMCP (stdio) tools
 │     └─ web/
-│        ├─ main.py                # Starlette app + uvicorn launch (imported only by `ui`)
-│        ├─ routes.py              # JSON API, export download, progress
-│        └─ static/                # index.html, app.js (ES modules, no build step), app.css
+│        ├─ main.py                # uvicorn launch + idle shutdown (imported only by `ui`)
+│        ├─ routes.py              # Starlette JSON API, session-token/Host guard, export download
+│        └─ static/                # index.html, app.js (ES module, no build step), app.css
 └─ tests/
-   ├─ fakes/                       # httpx.MockTransport handlers with synthetic Graph/OWS payloads
-   ├─ unit/                        # ids, mapping, formatter, packaging, attachment policy, reconcile
-   ├─ service/                     # threads, search grouping, retention merge, writes (against fakes)
-   └─ surfaces/                    # MCP contract (schemas, annotations), web routes
+   ├─ fakes/                       # fake MSAL; in-memory Graph mailbox over httpx.MockTransport
+   ├─ unit/                        # config, tokens, CLI, Graph reader, store, reconcile
+   ├─ service/                     # mailbox, threads, exports (against the fake Graph)
+   └─ surfaces/                    # MCP contract, web routes
 ```
 
 ## 5. Module responsibilities
