@@ -41,8 +41,14 @@ class MailReader(Protocol):
 
     async def search_total(self, query: str) -> int | None: ...
 
-    async def conversation(self, conversation_id: str) -> list[MessageSummary]:
-        """Every message of the conversation in every folder (unsorted)."""
+    async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
+        """Every message of the conversation in every folder (unsorted), and whether it was truncated."""
+        ...
+
+    async def conversation_folders(
+        self, conversation_ids: list[str]
+    ) -> dict[str, tuple[list[str | None], bool]]:
+        """Per conversation: the folder id of each message, and whether there are more than listed."""
         ...
 
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message: ...
@@ -58,6 +64,8 @@ class MailReader(Protocol):
         ...
 
     async def list_attachments(self, message_id: str) -> list[Attachment]: ...
+
+    async def list_attachments_many(self, message_ids: list[str]) -> dict[str, list[Attachment]]: ...
 
     async def attachment_content_ids(
         self, message_id: str, attachment_ids: list[str]

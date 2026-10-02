@@ -75,7 +75,7 @@ input[type=search], input[type=date] { font: inherit; color: inherit; background
 .toggle { color: var(--muted); user-select: none; text-align: center; }
 .messages { padding-left: 24px; }
 .msg-row { grid-template-columns: 22px 1fr auto; }
-.msg-row.active { background: var(--accent-soft); }
+.msg-row.active, .thread-row.active { background: var(--accent-soft); }
 .msg-subject { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 10px; margin-left: 6px;
   background: var(--accent-soft); color: var(--accent); }

@@ -109,15 +109,39 @@ class GraphMailReader:
                     return container["total"]
         return None
 
-    async def conversation(self, conversation_id: str) -> list[MessageSummary]:
+    async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
         # $orderby cannot be combined with this filter (InefficientFilter, research §3.4): sort locally.
         params = {
             "$filter": f"conversationId eq {_odata_string(conversation_id)}",
             "$select": mapping.SUMMARY_FIELDS,
             "$top": 100,
         }
-        items, _ = await self._graph.collect("/me/messages", params, max_items=MAX_CONVERSATION)
-        return [mapping.summary(i) for i in items]
+        items, truncated = await self._graph.collect("/me/messages", params, max_items=MAX_CONVERSATION)
+        return [mapping.summary(i) for i in items], truncated
+
+    async def conversation_folders(
+        self, conversation_ids: list[str]
+    ) -> dict[str, tuple[list[str | None], bool]]:
+        requests = {
+            str(index): relative(
+                "/me/messages",
+                {
+                    "$filter": f"conversationId eq {_odata_string(cid)}",
+                    "$select": "id,parentFolderId",
+                    "$top": MAX_CONVERSATION,
+                },
+            )
+            for index, cid in enumerate(conversation_ids)
+        }
+        out: dict[str, tuple[list[str | None], bool]] = {}
+        for key, (status, body) in (await self._graph.batch(requests)).items():
+            raise_for_sub_status(status, body)
+            items = [i for i in body.get("value", []) if isinstance(i, dict)]
+            out[conversation_ids[int(key)]] = (
+                [i.get("parentFolderId") for i in items],
+                "@odata.nextLink" in body,
+            )
+        return out
 
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message:
         prefer = (PREFER_TEXT_BODY,) if body_format == "text" else ()
@@ -164,6 +188,20 @@ class GraphMailReader:
             f"/me/messages/{message_id}/attachments", {"$select": mapping.ATTACHMENT_FIELDS}, max_items=500
         )
         return [mapping.attachment(i, message_id) for i in items]
+
+    async def list_attachments_many(self, message_ids: list[str]) -> dict[str, list[Attachment]]:
+        requests = {
+            mid: relative(f"/me/messages/{mid}/attachments", {"$select": mapping.ATTACHMENT_FIELDS})
+            for mid in message_ids
+        }
+        out: dict[str, list[Attachment]] = {}
+        for mid, (status, body) in (await self._graph.batch(requests)).items():
+            raise_for_sub_status(status, body)
+            if "@odata.nextLink" in body:  # rare: more than one page of attachments
+                out[mid] = await self.list_attachments(mid)
+                continue
+            out[mid] = [mapping.attachment(i, mid) for i in body.get("value", []) if isinstance(i, dict)]
+        return out
 
     async def attachment_content_ids(
         self, message_id: str, attachment_ids: list[str]

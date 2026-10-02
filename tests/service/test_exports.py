@@ -125,6 +125,49 @@ async def test_server_deleted_message_is_exported_from_retention_and_labelled(
     assert "!! DELETED on the server" in text and "Thanks!" in text
 
 
+async def test_inline_only_attachments_are_found_when_exporting_files(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add(
+        FakeMessage(
+            "pic",
+            "Chart",
+            "f-inbox",
+            "2026-09-30T08:00:00Z",
+            conversation="c-pic",
+            attachments=[
+                FakeAttachment("p1", "chart.png", b"png", "image/png", inline=True, content_id="c1")
+            ],
+            html='<img src="cid:c1">',
+        )
+    )
+    artifact = await exports.export(ExportRequest(message_ids=["pic"], include_attachments=True))
+    assert "2026-09-30 Chart/chart.png" in zip_names(artifact.path)
+
+
+async def test_cached_message_deleted_on_the_server_is_labelled(exports: Exports, fake: FakeGraph) -> None:
+    await exports.export(ExportRequest(message_ids=["m3"]))  # caches m3's summary and body
+    del fake.messages["m3"]
+    artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
+    text = Path(artifact.path).read_text(encoding="utf-8")  # nothing downloadable: a flat .txt
+    assert "!! DELETED on the server" in text and "Follow-up with numbers" in text
+    assert "[Attachment unavailable: numbers.xlsx]" in text
+
+
+async def test_truncated_conversation_is_not_exported_silently(
+    exports: Exports, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
+    with pytest.raises(InvalidRequest, match="listing limit"):
+        await exports.export(ExportRequest(conversation_ids=["c-rel"]))
+
+
+async def test_identical_exports_in_the_same_second_get_distinct_files(exports: Exports) -> None:
+    first = await exports.export(ExportRequest(message_ids=["m1"]))
+    second = await exports.export(ExportRequest(message_ids=["m1"]))
+    assert first.path != second.path and Path(first.path).exists() and Path(second.path).exists()
+
+
 async def test_empty_request_is_rejected(exports: Exports) -> None:
     with pytest.raises(InvalidRequest):
         await exports.export(ExportRequest())

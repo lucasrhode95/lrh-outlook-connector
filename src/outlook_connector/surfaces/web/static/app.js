@@ -4,11 +4,12 @@ const TOKEN = document.querySelector('meta[name="session-token"]').content;
 const $ = (id) => document.getElementById(id);
 
 const state = {
-  folder: null,          // folder id or null for the whole mailbox
+  folder: "inbox",       // folder id, "inbox" until the folder list resolves it, or null for the whole mailbox
+  folderName: "Inbox",
   mode: "list",          // "list" | "search"
   query: "",
   cursor: null,
-  threads: new Map(),    // key -> { key, conversationId, subject, messages: Map(id -> summary), expanded, complete }
+  threads: new Map(),    // key -> { key, conversationId, subject, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
   selectedThreads: new Set(),
   selectedMessages: new Set(),
   activeMessage: null,
@@ -93,6 +94,10 @@ async function loadFolders(refresh = false) {
   if (!$("folders").children.length || refresh) $("folders").replaceChildren(el("li", { class: "loading-item" }, spinner("Loading folders…")));
   const folders = await json(`/api/folders?${query({ refresh })}`);
   const list = $("folders");
+  if (state.folder === "inbox") { // the landing folder, requested by alias before its id was known
+    const inbox = folders.find((f) => f.well_known === "inbox");
+    if (inbox) state.folder = inbox.id;
+  }
   list.replaceChildren(folderItem(null, "All mail (recent)", 0, null));
   for (const folder of folders) {
     if (folder.hidden) continue;
@@ -107,8 +112,9 @@ function folderItem(id, name, depth, unread) {
     unread ? el("span", { class: "count" }, unread) : null);
   item.addEventListener("click", () => {
     state.folder = id;
+    state.folderName = id ? name : "Recent mail";
     state.mode = "list";
-    $("list-title").textContent = id ? name : "Recent mail";
+    $("list-title").textContent = state.folderName;
     for (const li of $("folders").children) li.classList.toggle("active", li === item);
     loadList(true);
   });
@@ -126,7 +132,8 @@ function addMessage(summary, { matched = false } = {}) {
   const key = summary.conversation_id || summary.id;
   let thread = state.threads.get(key);
   if (!thread) {
-    thread = { key, conversationId: summary.conversation_id, subject: summary.subject, messages: new Map(), expanded: false, complete: false };
+    thread = { key, conversationId: summary.conversation_id, subject: summary.subject, messages: new Map(), expanded: false, complete: false,
+      size: undefined, sizeAtLeast: false };
     state.threads.set(key, thread);
   }
   thread.messages.set(summary.id, { ...summary, matched });
@@ -170,6 +177,7 @@ async function loadPage(reset, path, apply, loadingText, previewPath = null) {
     state.cursor = result.cursor;
     showCoverage(result.coverage);
     render();
+    loadSizes(request);
   } catch {
     if (request !== state.listRequest) return;
     if (reset) $("threads").replaceChildren(el("p", { class: "muted pad" }, "Could not load messages (see the message above)."));
@@ -198,8 +206,30 @@ function runSearch(reset) {
   }, "Searching the mailbox…");
 }
 
+// Ask Outlook how many messages each listed conversation really has, so single messages render as
+// plain rows and threads show an accurate count. Rows look as before until the counts arrive.
+async function loadSizes(request) {
+  const pending = [...state.threads.values()].filter((t) => t.conversationId && t.size === undefined).map((t) => t.conversationId);
+  for (let start = 0; start < pending.length; start += 200) {
+    let sizes;
+    try {
+      sizes = await json("/api/thread-sizes", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), include_deleted_items: $("opt-deleted").checked }) });
+    } catch {
+      return; // counts are a refinement; the rows keep working without them
+    }
+    if (request !== state.listRequest) return; // the list was replaced meanwhile
+    const byId = new Map(sizes.map((s) => [s.conversation_id, s]));
+    for (const thread of state.threads.values()) {
+      const size = byId.get(thread.conversationId);
+      if (size) { thread.size = size.messages; thread.sizeAtLeast = size.at_least; }
+    }
+    render();
+  }
+}
+
 function showCoverage(coverage) {
-  const parts = [coverage.complete ? "complete" : "more available"];
+  const parts = [];
   if (coverage.server_total !== null && coverage.server_total !== undefined) parts.push(`${coverage.server_total} matching messages on the server`);
   if (coverage.source !== "remote") parts.push(coverage.source);
   $("coverage").textContent = parts.join(" · ");
@@ -234,7 +264,43 @@ function render() {
   renderSelection();
 }
 
+function isSingle(thread) {
+  if (thread.messages.size !== 1) return false;
+  if (!thread.conversationId) return true;
+  return thread.size !== undefined && !thread.sizeAtLeast && thread.size <= 1;
+}
+
+function countLabel(thread, loaded) {
+  if (thread.complete) return `${loaded}`;
+  if (thread.size !== undefined) return `${Math.max(thread.size, loaded)}${thread.sizeAtLeast ? "+" : ""}`;
+  return `${loaded}+`;
+}
+
+// A conversation with one message: a plain row, like Outlook's conversation view.
+function renderSingle(thread) {
+  const [message] = thread.messages.values();
+  const checkbox = el("input", { type: "checkbox", title: "Export this message",
+    onclick: (event) => event.stopPropagation(),
+    onchange: (event) => {
+      toggle(state.selectedMessages, message.id, event.target.checked);
+      if (!event.target.checked && thread.conversationId) state.selectedThreads.delete(thread.conversationId);
+      render();
+    } });
+  checkbox.checked = state.selectedMessages.has(message.id) || state.selectedThreads.has(thread.conversationId);
+  return el("div", { class: "thread" },
+    el("div", { class: `thread-row${message.is_read === false ? " unread" : ""}${state.activeMessage === message.id ? " active" : ""}`,
+      onclick: () => openMessage(message.id) },
+      checkbox,
+      el("span", { class: "toggle" }),
+      el("div", {},
+        el("div", { class: "subject" }, message.subject || "(no subject)",
+          message.is_deleted ? el("span", { class: "badge deleted" }, "deleted on server") : null),
+        el("div", { class: "who" }, who(message.sender))),
+      el("span", { class: "date" }, formatDate(message.received_at || message.sent_at))));
+}
+
 function renderThread(thread) {
+  if (isSingle(thread)) return renderSingle(thread);
   const messages = [...thread.messages.values()].sort((a, b) => Date.parse(a.received_at || 0) - Date.parse(b.received_at || 0));
   const newest = messages[messages.length - 1];
   const senders = [...new Set(messages.map((m) => who(m.sender)))].join(", ");
@@ -249,7 +315,7 @@ function renderThread(thread) {
     el("span", { class: "toggle" }, thread.expanded ? "▾" : "▸"),
     el("div", {},
       el("div", { class: "subject" }, newest.subject || "(no subject)",
-        el("span", { class: "badge" }, thread.complete ? `${messages.length}` : `${messages.length}+`),
+        el("span", { class: "badge" }, countLabel(thread, messages.length)),
         messages.some((m) => m.is_deleted) ? el("span", { class: "badge deleted" }, "deleted on server") : null),
       el("div", { class: "who" }, senders)),
     el("span", { class: "date" }, formatDate(newest.received_at || newest.sent_at)));
@@ -291,6 +357,8 @@ async function expand(thread) {
       const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: $("opt-deleted").checked })}`);
       for (const entry of full.messages) thread.messages.set(entry.message.id, { ...entry.message, matched: thread.messages.get(entry.message.id)?.matched });
       thread.complete = true;
+      thread.size = full.messages.length;
+      thread.sizeAtLeast = false;
     } finally {
       thread.loading = false;
     }
@@ -387,7 +455,7 @@ $("search-form").addEventListener("submit", (event) => {
   event.preventDefault();
   state.query = $("search").value.trim();
   state.mode = state.query ? "search" : "list";
-  $("list-title").textContent = state.query ? `Search: ${state.query}` : "Recent mail";
+  $("list-title").textContent = state.query ? `Search: ${state.query}` : state.folderName;
   (state.query ? runSearch : loadList)(true);
 });
 $("filter").addEventListener("input", render);
@@ -490,6 +558,11 @@ $("more").addEventListener("click", () => (state.mode === "search" ? runSearch :
 $("refresh-folders").addEventListener("click", () => loadFolders(true));
 $("reader-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
 $("opt-all").addEventListener("change", (event) => { $("opt-per-thread").disabled = event.target.checked; });
+$("opt-deleted").addEventListener("change", () => { // sizes are counted with or without Deleted Items / Junk
+  for (const thread of state.threads.values()) if (!thread.complete) thread.size = undefined;
+  render();
+  loadSizes(state.listRequest);
+});
 $("clear").addEventListener("click", () => { state.selectedThreads.clear(); state.selectedMessages.clear(); render(); });
 $("export").addEventListener("click", runExport);
 setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_000);

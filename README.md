@@ -52,7 +52,9 @@ not even read state.
 outlook-connector ui
 ```
 
-Browse folders or recent mail grouped by thread, search the mailbox, filter what is loaded, read
+The UI opens on the Inbox. Browse folders or recent mail grouped by thread (a conversation with one
+message is a plain row; a real thread shows its message count across all folders, as Outlook reports it),
+search the mailbox, filter what is loaded, read
 messages, tick threads or single messages, and export them as one `.txt` or `.zip`
 (per thread, all in one file, or one file per message; attachments optional).
 

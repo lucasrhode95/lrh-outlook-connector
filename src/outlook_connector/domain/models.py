@@ -141,6 +141,12 @@ class Thread(BaseModel):
     coverage: Coverage
 
 
+class ThreadSize(BaseModel):
+    conversation_id: str
+    messages: int  # what get_thread would list with the same include_deleted_items
+    at_least: bool = False  # the conversation is larger than the server listed in one request
+
+
 class ExportRequest(BaseModel):
     conversation_ids: list[str] = Field(default_factory=list)
     message_ids: list[str] = Field(default_factory=list)
