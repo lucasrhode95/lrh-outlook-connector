@@ -158,12 +158,12 @@ lrh-outlook-connector/
   - results are per item: what is still throttled or failed is returned to the caller, which reports it per message instead of failing the whole call.
 
 **`graph_mail.py`** implements `MailReader`. Operations:
-- `list_folders()` with hidden folders included. (Folder delta is researched (S2) but not used: the folder cache is refreshed in full.)
+- `list_folders()` with hidden folders included (the service needs them to tell what is out of reach). Folder delta is researched (S2) but not used: the folder cache is refreshed in full.
 - `list_messages(folder | mailbox, since, until, page_size, page)`.
 - `get_message(id, body_format)` and `get_messages(ids)` (batched; per-item failures returned).
 - `conversation(conversation_id)`, which returns all folders, leaves sorting to the caller (`$orderby` is rejected with this filter) and reports truncation past 1,000 messages.
 - `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
-- `count_messages(window, minus_folders)`: the server's count for a window (`$count`, `ConsistencyLevel: eventual`), minus excluded folders, in one `$batch`.
+- `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
 - `locate(ids)`: current folder or gone (404), for reconciliation.
 - `search(query)` + `search_total(query)`: `$search`, field-scoped queries passed through.
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`).
@@ -207,7 +207,8 @@ lrh-outlook-connector/
 
 **`mailbox.py`:**
 - `list_folders` answers from the cache immediately (stale-while-revalidate: older than 10 minutes triggers a background refresh); only an empty cache or `refresh=true` waits for Graph, whose folder levels are fetched in parallel.
-- **Scope rules, shared by list, search, threads, sizes and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (a folder named in the request is always included); `received_only` also leaves out Sent Items, Drafts and Outbox; `coverage.excluded` counts what was left out. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a live, received copy; `also_in` names the other folders.
+- **Scope rules, shared by list, search, threads, sizes and export:** each folder gets a category from itself and its parents (`folder_categories`): `sync_issues` > `hidden` > `deleted_or_junk` > `outgoing`. Deleted Items, Junk Email and Sync Issues (with their subfolders; a folder deleted in Outlook sits inside Deleted Items) are left out unless `include_deleted_items` (a folder named in the request is always included); `received_only` also leaves out Sent Items, Drafts and Outbox; `coverage.excluded` counts what was left out, per reason.
+- **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in `SkypeSpacesData/TeamsMeetings`), are always dropped (`excluded.hidden`): from lists, search, threads, conversation sizes, totals and exports. `list_folders` omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues is reachable even when Graph marks it hidden. Retained copies of messages deleted on the server keep their place. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a live, received copy; `also_in` names the other folders.
 - `list_messages(selection, refresh=True, received_only, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. Retained messages deleted on the server are merged into **the page whose time span covers them** (the cursor carries the page's lower bound). Folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
 - `get_message(id, offset, max_chars, body)` returns a bounded body with continuation and retains what it fetched.
 - `search(query, since?, until?, folder?, received_only, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`. Coverage reports "server search; retained-deleted mail not included".
@@ -251,14 +252,14 @@ lrh-outlook-connector/
 - FastMCP over stdio. Each tool is a few lines: validate, call the service, return a model.
 - Bounded responses with self-contained cursors.
 - Attachments, MIME and export artifacts are returned as local file paths, never inline base64.
-- Server instructions explain the scope rules, merged copies, coverage and cursors, `received_only` for "latest mail", `include_total`, the export options (`format=jsonl` for analysis), Graph's throttling limits (no parallel tool calls; prefer one range export), and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
+- Server instructions explain the scope rules, what is out of reach (hidden folders, non-mail items; search is mail only), merged copies, coverage and cursors, `received_only` for "latest mail", `include_total`, the export options (`format=jsonl` for analysis), Graph's throttling limits (no parallel tool calls; prefer one range export), and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
 - List and search results are compact by default (`detail="full"` for every field).
 
 **`web/`:**
 - Starlette JSON API over the same service calls, plus `POST /api/export` (one download) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
   - a thread-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, threads show an accurate count. An expanded thread spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
-  - a "Deleted / Junk" toggle in the list header, applied to the list, search, counts, expansion and exports (always on inside those folders), and "export this view" (the current folder and date range);
+  - a "Deleted / Junk" toggle in the list header (it also covers Sync Issues), applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date range). The folder list shows only reachable folders;
   - attachment download buttons in the reader;
   - a folder picker and a "recent, all mail" view;
   - an online search box;
@@ -311,7 +312,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 
 | MCP tool | Service call | Annotations |
 |---|---|---|
-| `list_folders` | `mailbox.list_folders` | read-only |
+| `list_folders` (reachable folders only) | `mailbox.folders` | read-only |
 | `list_messages(folder?, since?, until?, limit?, refresh=True, cursor?, received_only, include_deleted_items, include_total, detail=compact)` | `mailbox.list_messages` | read-only |
 | `search_messages(query, since?, until?, folder?, limit?, cursor?, received_only, include_deleted_items, detail=compact)` | `mailbox.search` | read-only |
 | `get_thread(conversation_id, include_bodies=True, body=unique\|full, include_deleted_items=False, max_chars, cursor?)` | `threads.get_thread` | read-only |

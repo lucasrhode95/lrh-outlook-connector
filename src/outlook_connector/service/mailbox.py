@@ -3,9 +3,12 @@
 Remote first: every call asks Outlook (Graph) and only falls back to retained local data where
 the server can no longer provide it (messages deleted on the server).
 
-Scope rules shared by list, search, threads and export:
-- Deleted Items and Junk Email are left out unless ``include_deleted_items`` (a folder asked for by
-  name is always included). ``received_only`` also leaves out Sent Items, Drafts and Outbox.
+Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
+- Deleted Items, Junk Email and Sync Issues (Outlook's own conflict and failure copies) are left out
+  unless ``include_deleted_items`` (a folder asked for by name is always included).
+  ``received_only`` also leaves out Sent Items, Drafts and Outbox.
+- Hidden folders, and items outside the mail folders (e.g. Teams meeting records), are out of reach:
+  never listed, searched, counted, threaded or exported, and list_folders does not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.
 """
@@ -43,7 +46,11 @@ log = logging.getLogger(__name__)
 
 FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
+SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
+UNKNOWN_FOLDER_REFRESH_SECONDS = (
+    60  # an item in an unknown folder refreshes the folder list, at most this often
+)
 RECEIVED_ONLY_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
@@ -69,11 +76,13 @@ class Mailbox:
         self.reconciler = Reconciler(reader, store)
         self._folders: dict[str, Folder] | None = None
         self._folder_refresh: asyncio.Task[list[Folder]] | None = None
+        self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
 
     # ---------------------------------------------------------------- folders
 
     async def folders(self, *, refresh: bool = False) -> list[Folder]:
-        """Cached folders right away; a stale cache is refreshed in the background (stale-while-revalidate).
+        """The visible folders: cached right away, a stale cache refreshed in the background
+        (stale-while-revalidate). Hidden folders are out of reach and not listed.
 
         Only an empty cache or ``refresh=True`` waits for the server.
         """
@@ -84,7 +93,9 @@ class Mailbox:
             self._folder_refresh = asyncio.create_task(self._refresh_folders())
             self._folder_refresh.add_done_callback(self._folder_refresh_done)
         self._folders = {f.id: f for f in cached}
-        return sorted(cached, key=lambda f: f.path.lower())
+        categories = folder_categories(self._folders)
+        visible = [f for f in cached if categories.get(f.id) != "hidden"]
+        return sorted(visible, key=lambda f: f.path.lower())
 
     async def _refresh_folders(self) -> list[Folder]:
         fresh = _with_paths(await self.reader.list_folders())
@@ -107,23 +118,42 @@ class Mailbox:
         """A folder id, a well-known alias (inbox, archive, ...), a path (Inbox/Projects) or a name.
 
         An unknown name refreshes the folder list once, so folders created meanwhile are found.
+        Hidden folders are refused: they and their items are out of reach.
         """
-        found = _match_folder(ref, await self.folder_map())
+        found = _resolve(ref, await self.folder_map())
         if found is None:
-            found = _match_folder(ref, {f.id: f for f in await self.folders(refresh=True)})
+            await self._refresh_folders()
+            found = _resolve(ref, await self.folder_map())
         if found is None:
             raise InvalidRequest(f"Unknown folder '{ref}'. Use list_folders to see folder paths.")
         return found
 
     async def exclusions(self, *, include_deleted_items: bool, received_only: bool = False) -> dict[str, str]:
-        """Folder id -> reason (an ExclusionReason) for every folder this scope leaves out."""
-        out: dict[str, str] = {}
-        for folder in (await self.folder_map()).values():
-            if not include_deleted_items and folder.well_known in DELETED_OR_JUNK_FOLDERS:
-                out[folder.id] = "deleted_or_junk"
-            elif received_only and folder.well_known in OUTGOING_FOLDERS:
-                out[folder.id] = "outgoing"
-        return out
+        """Folder id -> reason (an ExclusionReason) for every folder this scope leaves out.
+
+        Hidden folders are not listed here: ``finish`` always leaves them out.
+        """
+        left_out = set() if include_deleted_items else {"deleted_or_junk", "sync_issues"}
+        if received_only:
+            left_out.add("outgoing")
+        categories = folder_categories(await self.folder_map())
+        return {folder_id: category for folder_id, category in categories.items() if category in left_out}
+
+    async def reach(self, folder_ids: Iterable[str | None]) -> tuple[dict[str, Folder], set[str]]:
+        """The folder map and the ids of hidden folders.
+
+        A folder id not in the map (a folder created meanwhile, or an item outside the mail folders)
+        refreshes the folder list first. Ids still unknown after that are outside the mail folders;
+        they are remembered and never trigger another refresh.
+        """
+        folders = await self.folder_map()
+        unknown = {fid for fid in folder_ids if fid and fid not in folders} - self._outside
+        if unknown:
+            await self._refresh_folders()
+            folders = await self.folder_map()
+            self._outside |= {fid for fid in unknown if fid not in folders}
+        hidden = {fid for fid, category in folder_categories(folders).items() if category == "hidden"}
+        return folders, hidden
 
     async def decorate(self, items: list[MessageSummary]) -> list[MessageSummary]:
         folders = await self.folder_map()
@@ -135,11 +165,21 @@ class Mailbox:
     async def finish(
         self, items: Iterable[MessageSummary], skip: dict[str, str] | None = None
     ) -> tuple[list[MessageSummary], dict[str, int]]:
-        """Apply folder exclusions, fill folder paths and merge copies. Returns (items, excluded counts)."""
+        """Apply folder exclusions, fill folder paths and merge copies. Returns (items, excluded counts).
+
+        Items in hidden folders or outside the mail folders are always left out ("hidden"); retained
+        copies of messages deleted on the server keep their place.
+        """
+        items = list(items)
+        folders, hidden = await self.reach(m.folder_id for m in items if not m.is_deleted)
         kept: list[MessageSummary] = []
         excluded: dict[str, int] = {}
         for item in items:
-            reason = (skip or {}).get(item.folder_id or "")
+            folder_id = item.folder_id or ""
+            if item.folder_id and not item.is_deleted and (folder_id in hidden or folder_id not in folders):
+                reason: str | None = "hidden"
+            else:
+                reason = (skip or {}).get(folder_id)
             if reason:
                 excluded[reason] = excluded.get(reason, 0) + 1
             else:
@@ -197,7 +237,8 @@ class Mailbox:
 
         link = state["link"] if state else None
         fetched: list[MessageSummary] = []
-        for _ in range(RECEIVED_ONLY_PAGES if skip else 1):
+        drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
+        for _ in range(RECEIVED_ONLY_PAGES if drop else 1):
             page, link = await self.reader.list_messages(
                 folder_id=folder_id, since=since, until=until, page_size=limit, page=link
             )
@@ -206,7 +247,7 @@ class Mailbox:
                 folder_id=folder_id, since=since, until=until, remote=page, complete=link is None
             )
             fetched += page
-            if not link or any(m.folder_id not in skip for m in page):
+            if not link or any(m.folder_id not in drop for m in page):
                 break  # a page that exclusions empty entirely is skipped, within bounds
         complete = link is None
 
@@ -229,12 +270,7 @@ class Mailbox:
             )
         total = None
         if include_total and state is None:
-            try:
-                total = await self.reader.count_messages(
-                    folder_id=folder_id, since=since, until=until, minus_folders=list(skip)
-                )
-            except Exception:  # a courtesy for planning; never fail the listing for it
-                total = None
+            total = await self._count(folder_id, since, until, skip)
             if total is not None:
                 notes.append(
                     "server_total counts the server's messages in scope (copies counted separately)."
@@ -264,6 +300,21 @@ class Mailbox:
             ),
         )
 
+    async def _count(
+        self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
+    ) -> int | None:
+        """The server's count for the scope: the named folder, or every reachable folder not left out."""
+        if folder_id:
+            in_scope = [folder_id]
+        else:
+            folders, hidden = await self.reach(())
+            in_scope = [fid for fid in folders if fid not in hidden and fid not in skip]
+        try:
+            counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
+        except Exception:  # a courtesy for planning; never fail the listing for it
+            return None
+        return sum(counts.values()) if counts is not None else None
+
     async def conversation_sizes(
         self, conversation_ids: list[str], *, include_deleted_items: bool = False
     ) -> list[ThreadSize]:
@@ -279,14 +330,16 @@ class Mailbox:
             return []
         remote = await self.reader.conversation_folders(ids)
         skip = await self.exclusions(include_deleted_items=include_deleted_items)
+        folders, hidden = await self.reach(fid for listed, _ in remote.values() for fid, _ in listed)
         retained = self.store.conversations(ids)
         out = []
         for cid in ids:
             listed, more = remote.get(cid, ([], False))
+            reachable = [(f, i) for f, i in listed if f and f in folders and f not in hidden]
             local = [(m.folder_id, m.internet_message_id) for m in retained.get(cid, []) if m.is_deleted]
             seen: set[str] = set()
             count = 0
-            for folder_id, internet_id in listed + local:
+            for folder_id, internet_id in reachable + local:
                 if folder_id in skip or (internet_id and internet_id in seen):
                     continue
                 if internet_id:
@@ -526,6 +579,53 @@ def unavailable(reason: str) -> str:
 
 def _detail(items: list[MessageSummary], detail: Detail) -> list[MessageSummary]:
     return items if detail == "full" else [m.model_copy(update=COMPACT_DROP) for m in items]
+
+
+def folder_categories(folders: dict[str, Folder]) -> dict[str, str]:
+    """Folder id -> category, judged from the folder and its parents (a folder deleted in Outlook
+    moves into Deleted Items with its mail; Sync Issues has subfolders):
+    "sync_issues" > "hidden" > "deleted_or_junk" > "outgoing". Folders without one are absent."""
+    out: dict[str, str] = {}
+    for folder in folders.values():
+        chain = _ancestry(folder, folders)
+        aliases = {f.well_known for f in chain if f.well_known}
+        if aliases & set(SYNC_ISSUES_FOLDERS):
+            out[folder.id] = "sync_issues"
+        elif any(f.hidden for f in chain):
+            out[folder.id] = "hidden"
+        elif aliases & set(DELETED_OR_JUNK_FOLDERS):
+            out[folder.id] = "deleted_or_junk"
+        elif aliases & set(OUTGOING_FOLDERS):
+            out[folder.id] = "outgoing"
+    return out
+
+
+def _ancestry(folder: Folder, folders: dict[str, Folder]) -> list[Folder]:
+    """The folder and its parents, nearest first."""
+    chain: list[Folder] = []
+    seen: set[str] = set()
+    current: Folder | None = folder
+    while current is not None and current.id not in seen:
+        seen.add(current.id)
+        chain.append(current)
+        current = folders.get(current.parent_id or "")
+    return chain
+
+
+def _resolve(ref: str, folders: dict[str, Folder]) -> Folder | None:
+    """Match among the visible folders; a reference to a hidden folder is refused."""
+    categories = folder_categories(folders)
+    visible = {fid: f for fid, f in folders.items() if categories.get(fid) != "hidden"}
+    found = _match_folder(ref, visible)
+    if found is None and any(_mentions(ref, f) for fid, f in folders.items() if fid not in visible):
+        raise InvalidRequest(f"'{ref}' is a hidden folder: hidden folders and their items are out of reach.")
+    return found
+
+
+def _mentions(ref: str, folder: Folder) -> bool:
+    needle = ref.strip().strip("/").lower()
+    names = {folder.well_known or "", folder.path.lower(), folder.name.lower()} - {""}
+    return ref == folder.id or needle in names
 
 
 def _match_folder(ref: str, folders: dict[str, Folder]) -> Folder | None:

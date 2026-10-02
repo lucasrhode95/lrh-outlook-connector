@@ -12,7 +12,14 @@ import re
 from typing import Literal
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound
-from outlook_connector.domain.models import Coverage, Message, MessageSummary, Thread, ThreadMessage
+from outlook_connector.domain.models import (
+    EXCLUSION_TEXT,
+    Coverage,
+    Message,
+    MessageSummary,
+    Thread,
+    ThreadMessage,
+)
 from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
 from outlook_connector.service.mailbox import NEVER_RETAINED, Mailbox, has_content, unavailable
@@ -81,11 +88,8 @@ class Threads:
                 "The conversation has more messages than the server listing limit; only the first ones "
                 "the server returned are included. Use search_messages or list_messages for the rest."
             )
-        if excluded:
-            notes.append(
-                f"{sum(excluded.values())} message(s) in Deleted Items or Junk Email omitted; "
-                "pass include_deleted_items=true to include them."
-            )
+        for reason, count in excluded.items():
+            notes.append(f"{count} message(s) left out: {EXCLUSION_TEXT[reason]}.")
         if any(m.is_deleted for m in items):
             notes.append(
                 "Messages marked is_deleted=true were deleted on the server; shown from local retention."
