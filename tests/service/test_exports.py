@@ -218,7 +218,16 @@ async def test_unfetchable_bodies_are_marked_and_counted_not_fatal(exports: Expo
     assert artifact.messages_unavailable == 1 and artifact.unavailable_message_ids == ["m5"]
     text = Path(artifact.path).read_text(encoding="utf-8")
     assert "(Content unavailable: While fetching message bodies" in text
-    assert "Unavailable: 1 message body(ies) could not be fetched" in text
+    assert "Unavailable: 1 message body(ies); they are marked below." in text
+
+
+async def test_deleted_before_ever_read_counts_as_unavailable(exports: Exports, fake: FakeGraph) -> None:
+    await exports.mailbox.list_messages()  # only summaries are stored, no bodies
+    del fake.messages["m5"]
+    artifact = await exports.export(ExportRequest(message_ids=["m5"]))
+    assert artifact.messages_unavailable == 1 and artifact.unavailable_message_ids == ["m5"]
+    text = Path(artifact.path).read_text(encoding="utf-8")
+    assert "(Content unavailable: deleted on the server and never retained by this app)" in text
 
 
 async def test_bulk_export_stays_within_batch_limits_under_throttling(

@@ -32,6 +32,7 @@ DELETED_FOLDERS = ("deleteditems", "junkemail")
 SENT_FOLDERS = ("sentitems", "drafts", "outbox")
 DELETED_OR_JUNK = "in Deleted Items or Junk Email (include_deleted_items=false)"
 NOT_RECEIVED = "in Sent Items, Drafts or Outbox (received_only=true)"
+NEVER_RETAINED = "deleted on the server and never retained by this app"
 
 Downloaded = list[tuple[Attachment, Path | None]]  # None: unavailable
 
@@ -68,6 +69,9 @@ class Exports:
                 f"Nothing to export: the selection holds no messages{_excluded_note(selection)}."
             )
         bodies, body_failures = await self.threads.bodies(summaries)
+        for summary in summaries:  # deleted on the server before this app ever read the body
+            if bodies.get(summary.id) is None and summary.id not in body_failures:
+                body_failures[summary.id] = NEVER_RETAINED
         found, attachment_failures = await self._attachments(
             summaries, bodies, inline=request.include_attachments, skip=set(body_failures)
         )
@@ -278,8 +282,7 @@ class Exports:
         notes = [f"Left out: {count} message(s) {reason}." for reason, count in excluded.items() if count]
         if fetched.body_failures:
             notes.append(
-                f"Unavailable: {len(fetched.body_failures)} message body(ies) could not be fetched; "
-                "they are marked below."
+                f"Unavailable: {len(fetched.body_failures)} message body(ies); they are marked below."
             )
         files: list[TextFile] = []
         taken: set[str] = set()

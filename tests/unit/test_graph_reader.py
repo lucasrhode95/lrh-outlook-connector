@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -7,7 +8,7 @@ import httpx
 import pytest
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled
-from outlook_connector.remote.graph import Graph
+from outlook_connector.remote.graph import BATCH_CONCURRENCY, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
@@ -120,6 +121,30 @@ async def test_throttled_batch_items_are_retried_in_batches_of_at_most_20(fake: 
     result = await reader_for(fake).get_messages(ids)
     assert not result.failed and all(result.messages[i] is None for i in ids)
     assert max(fake.batch_sizes) <= 20 and sum(fake.batch_sizes) == 60 + 45
+
+
+async def test_batch_concurrency_is_shared_across_calls(
+    fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reader = reader_for(fake)
+    graph = reader._graph
+    original = graph._batch_once
+    in_flight = peak = 0
+
+    async def counting(requests, prefer):  # type: ignore[no-untyped-def]
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        try:
+            return await original(requests, prefer)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(graph, "_batch_once", counting)
+    # like the export's inline attachment lookups: many small batch() calls at once
+    await asyncio.gather(*(reader.attachment_content_ids("m3", ["a2", "a3"]) for _ in range(8)))
+    assert peak == BATCH_CONCURRENCY
 
 
 async def test_persistently_throttled_items_are_reported_not_raised(fake: FakeGraph) -> None:
