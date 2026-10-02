@@ -2,7 +2,7 @@
 
 The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
 
-Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Two hardening passes (the 90-day review, H1–H3, and the code review, H4–H6) are built and tested against the fake mailbox. **Next: the live check (V1)**, then a draft-first write path (W0) before send and the mutations, lowest risk first.
+Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Two hardening passes (the 90-day review, H1–H3, and the code review, H4–H6) are built and tested against the fake mailbox, and the live check (V1) passed against the real mailbox. **Next: the read fixes it found (H7–H10)**, then a draft-first write path (W0) before send and the mutations, lowest risk first.
 
 **Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
 
@@ -34,7 +34,7 @@ Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mail
 | M1 MCP surface | **Done** (read-only tools) | Read tools; files returned as local paths (architecture §8) |
 | U1 Local UI | **Done** | Thread-grouped list (opens on the Inbox; real conversation sizes, one-message conversations as plain rows; newest message on top; merged copies), search, in-memory filter, selection, export and "export this view", attachment downloads, Deleted/Junk toggle (v4 O3) |
 
-## Hardening (90-day review, 2026-10-02)
+## Hardening (90-day review and live check, 2026-10-02)
 
 | Item | Status | Scope |
 |---|---|---|
@@ -44,7 +44,11 @@ Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mail
 | H4 Review bugs | **Done** | Retained deleted mail on every page (lists and range exports); `get_thread` coverage; summary column without bodies; 401 renew-then-sign-in (403 is access denied); exact search dates; Junk/Deleted folder views in the UI |
 | H5 Consistency | **Done** | One scope rule set for every tool (`include_deleted_items`, `received_only`, stable `excluded` keys); copies of one message merged (`also_in`); JSONL export; compact results; totals; message counts on search hits |
 | H6 Tooling | **Done** | Committed `uv.lock`; pyright (standard mode) clean and in the dev group |
-| V1 Live check | **Pending — next** | Against the real mailbox: re-run the 1,500-message export (now also as `format=jsonl`); check conversation sizes, merged copies, `include_total` (`$count` in `$batch`) and batched attachment listing |
+| V1 Live check | **Done** (2026-10-02) | Real mailbox, read-only. **Exports:** the 240 newest days (1,471 messages, the 1,500-message case) completed as JSONL (260 s), TXT (206 s) and TXT with attachments (718 s, 173 MB, 761 files): no body, listing or download failures, identical files stored once. **`include_total`:** the Inbox count equals the folder total (144); mailbox-wide counts in under 1 s. **Conversation sizes:** 76 conversations in 2.3 s, 40 compared with `get_thread`, no mismatch; search-hit counts match too. **Merged copies:** 500 listed messages, no repeated id or Internet id across pages; self-sent mail shows `also_in: Sent Items`. Findings: H7–H10. |
+| H7 Junk-heavy mailbox-wide listing | **Pending — next** | Only scopes without a folder are affected (MCP `list_messages`/`export_messages` without `folder`, including `received_only`); folder views such as the UI's Inbox are not. Graph lists the whole mailbox newest first, Junk and Deleted Items included, and the connector drops those afterwards. With 16,846 junk messages, pages of 100 kept 11–40 messages, and the export above read 13,821 summaries to keep 1,471, most of its run time. Graph's `parentFolderId ne` filter excludes them server-side but takes 9–14 s per page (vs ~1 s). Candidate: list the in-scope folders in parallel and merge by date. Emptying Junk hides the symptom only until it refills. |
+| H8 Mail-only search | **Pending** | Decided 2026-10-02: search is explicitly mail only, in the tool descriptions, MCP instructions and UI. `$search` also returns Teams meeting items from the hidden `SkypeSpacesData/TeamsMeetings` folder (7 of 22 hits for `from:lucas`); they are not mail, sit outside the mail folder tree and have no conversation (`get_thread` says "not found"). Drop hits outside the mail folder tree. Meeting search is X10. |
+| H9 Sync Issues in scope | **Pending — decision** | `Sync Issues` and its subfolders (`Conflicts`, `Local Failures`, `Server Failures`) are created by Outlook itself, not by Microsoft mail or this app. When two versions of one item collide during sync, Outlook keeps one and files the other copy in `Conflicts`. The export above held 24 such copies: 17 duplicate a message you later deleted (the kept copy is in Deleted Items, so the conflict copy brings deleted mail back into exports), 7 have no other copy. Recommendation: treat Sync Issues like Deleted Items and Junk (left out by default, counted in `excluded`, included with `include_deleted_items`). |
+| H10 Merged-copy count | **Pending** | Reporting only: the export result's `duplicates_merged` (how many extra copies of one message were folded into one) said 0, while 4 exported messages carried `also_in`. The listing merged those copies before the export counted, so the export missed them. Count copies merged at either stage. |
 
 ## Send
 
@@ -79,3 +83,4 @@ Ordered by risk: reversible state changes first, then moves and deletes.
 | X6 Attachment text extraction | **Parked** | Agents receive raw files |
 | X7 Resumable export with progress | **Parked** | Review suggestion. Not needed while exports finish in one call with per-item gaps (H1–H3); revisit if a real export still hits limits. |
 | X9 Folder delta | **Parked** | Researched (S2); a full folder refresh takes under a second. |
+| X10 Meeting search | **Later — nice to have** | Decided 2026-10-02: belongs here, not in lrh-teams. Meetings are calendar events in the same Exchange mailbox (Graph `/me/calendarView`, `/me/events`: subject, time, organizer, attendees, agenda, Teams join link). lrh-teams keeps meeting chats, which it already reads; the join link carries the meeting chat id (`19:meeting_…`) so an agent can hand over to lrh-teams without duplicating either side. Not the `TeamsMeetings` folder items (undocumented Teams storage). First step: probe whether the read client's token grants `Calendars.Read`. |
