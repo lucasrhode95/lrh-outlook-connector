@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import ParamSpec, TypeVar
+from typing import Any, TypeVar, cast
 
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary
 from outlook_connector.remote import graph_mapping as mapping
@@ -26,24 +26,32 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _window(since: datetime | None, until: datetime | None) -> str | None:
+    conditions = []
+    if since:
+        conditions.append(f"receivedDateTime ge {_iso(since)}")
+    if until:
+        conditions.append(f"receivedDateTime le {_iso(until)}")
+    return " and ".join(conditions) or None
+
+
 def _odata_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-P = ParamSpec("P")
-R = TypeVar("R")
+F = TypeVar("F", bound=Callable[..., Coroutine[Any, Any, Any]])
 
 
-def _named(name: str) -> Callable[[Callable[P, Awaitable[R]]], Callable[P, Awaitable[R]]]:
+def _named(name: str) -> Callable[[F], F]:
     """Errors raised inside the decorated call say what was being done."""
 
-    def wrap(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
+    def wrap(func: F) -> F:
         @functools.wraps(func)
-        async def run(*args: P.args, **kwargs: P.kwargs) -> R:
+        async def run(*args: Any, **kwargs: Any) -> Any:
             with operation(name):
                 return await func(*args, **kwargs)
 
-        return run
+        return cast(F, run)
 
     return wrap
 
@@ -91,16 +99,11 @@ class GraphMailReader:
             items, link = await self._graph.page(page)
         else:
             path = f"/me/mailFolders/{folder_id}/messages" if folder_id else "/me/messages"
-            conditions = []
-            if since:
-                conditions.append(f"receivedDateTime ge {_iso(since)}")
-            if until:
-                conditions.append(f"receivedDateTime le {_iso(until)}")
             params = {
                 "$select": mapping.SUMMARY_FIELDS,
                 "$top": page_size,
                 "$orderby": "receivedDateTime desc",
-                "$filter": " and ".join(conditions) or None,
+                "$filter": _window(since, until),
             }
             items, link = await self._graph.page(path, params)
         return [mapping.summary(i) for i in items], link
@@ -147,28 +150,53 @@ class GraphMailReader:
     @_named("counting conversation messages")
     async def conversation_folders(
         self, conversation_ids: list[str]
-    ) -> dict[str, tuple[list[str | None], bool]]:
+    ) -> dict[str, tuple[list[tuple[str | None, str | None]], bool]]:
         requests = {
             str(index): relative(
                 "/me/messages",
                 {
                     "$filter": f"conversationId eq {_odata_string(cid)}",
-                    "$select": "id,parentFolderId",
+                    "$select": "id,parentFolderId,internetMessageId",
                     "$top": MAX_CONVERSATION,
                 },
             )
             for index, cid in enumerate(conversation_ids)
         }
-        out: dict[str, tuple[list[str | None], bool]] = {}
+        out: dict[str, tuple[list[tuple[str | None, str | None]], bool]] = {}
         responses = await self._graph.batch(requests)
         raise_for_failures(responses)
         for key, response in responses.items():
             items = [i for i in response.body.get("value", []) if isinstance(i, dict)]
             out[conversation_ids[int(key)]] = (
-                [i.get("parentFolderId") for i in items],
+                [(i.get("parentFolderId"), i.get("internetMessageId")) for i in items],
                 "@odata.nextLink" in response.body,
             )
         return out
+
+    @_named("counting messages")
+    async def count_messages(
+        self,
+        *,
+        folder_id: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        minus_folders: list[str],
+    ) -> int | None:
+        """Messages in the window on the server, minus those in ``minus_folders``. One $batch."""
+        params = {"$count": "true", "$top": 1, "$select": "id", "$filter": _window(since, until)}
+        path = f"/me/mailFolders/{folder_id}/messages" if folder_id else "/me/messages"
+        requests = {"all": relative(path, params)} | {
+            f"minus-{i}": relative(f"/me/mailFolders/{fid}/messages", params)
+            for i, fid in enumerate(minus_folders)
+        }
+        responses = await self._graph.batch(requests, headers={"ConsistencyLevel": "eventual"})
+        counts: dict[str, int] = {}
+        for key, response in responses.items():
+            count = response.body.get("@odata.count")
+            if not response.ok or not isinstance(count, int):
+                return None
+            counts[key] = count
+        return counts.pop("all") - sum(counts.values())
 
     @_named("reading a message")
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message:

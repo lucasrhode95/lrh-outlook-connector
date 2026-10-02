@@ -55,9 +55,12 @@
       <div class="list-head">
         <span id="list-title">Inbox</span>
         <span id="coverage" class="muted"></span>
+        <label class="muted" title="Also list, count and export messages in Deleted Items and Junk Email (always on inside those folders)">
+          <input id="opt-deleted" type="checkbox"> Deleted / Junk</label>
+        <button id="export-view" class="link" title="Export every message of this folder and date range">export this view</button>
       </div>
       <div id="threads"></div>
-      <button id="more" class="more" hidden>Load more</button>
+      <button id="more" class="more" hidden>Load older messages</button>
     </section>
 
     <aside class="reader">
@@ -73,10 +76,12 @@
   <footer class="exportbar">
     <span id="selection" class="muted">Nothing selected</span>
     <label><input id="opt-attachments" type="checkbox"> include attachments</label>
-    <label><input id="opt-per-thread" type="checkbox" checked> combine messages of the same thread</label>
-    <label><input id="opt-all" type="checkbox"> combine all into one file</label>
+    <label>files: <select id="opt-files">
+      <option value="per_thread" selected>one per thread</option>
+      <option value="all">one for everything</option>
+      <option value="none">one per message</option>
+    </select></label>
     <label><input id="opt-full" type="checkbox"> include quoted history</label>
-    <label><input id="opt-deleted" type="checkbox"> include Deleted Items / Junk</label>
     <button id="clear">Clear</button>
     <button id="export" class="primary" disabled>Export</button>
   </footer>

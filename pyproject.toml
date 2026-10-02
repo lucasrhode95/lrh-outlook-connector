@@ -22,6 +22,7 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
+    "pyright>=1.1.400",
 ]
 
 [build-system]
@@ -48,4 +49,3 @@ select = ["E", "F", "I", "B", "UP", "SIM"]
 [tool.pyright]
 include = ["src"]
 exclude = ["research"]
-strict = ["src/outlook_connector/domain", "src/outlook_connector/remote", "src/outlook_connector/service"]

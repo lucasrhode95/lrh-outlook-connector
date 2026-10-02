@@ -59,6 +59,7 @@ class Script:
     device_result: dict[str, Any] | None = None
     removed: list[dict[str, Any]] = field(default_factory=list)
     shown_flows: int = 0
+    silent_options: list[dict[str, Any]] = field(default_factory=list)  # kwargs of each silent call
     created: list[str] = field(default_factory=list)
 
 
@@ -79,7 +80,10 @@ class FakeApp:
     def get_accounts(self) -> list[dict[str, Any]]:
         return list(self.script.accounts)
 
-    def acquire_token_silent_with_error(self, scopes: list[str], account: dict[str, Any]) -> Any:
+    def acquire_token_silent_with_error(
+        self, scopes: list[str], account: dict[str, Any], **options: Any
+    ) -> Any:
+        self.script.silent_options.append(options)
         result = self.script.silent.get(self.client_id)
         if isinstance(result, list):  # sequence of outcomes, consumed in order
             result = result.pop(0)

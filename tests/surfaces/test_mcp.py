@@ -23,7 +23,7 @@ READ_TOOLS = {
 class FakeTokens:
     """Token provider stand-in carrying a synthetic account identity."""
 
-    def get_token(self, profile: str) -> AccessToken:
+    def get_token(self, profile: str, **_: object) -> AccessToken:
         claims = {
             "tid": "tenant-x",
             "oid": "user-x",
@@ -91,6 +91,13 @@ async def test_export_by_range_and_throttling_guidance(server: FastMCP) -> None:
     artifact = await call(server, "export_messages", since="2026-09-30T00:00:00", limit=10)
     assert artifact["message_count"] == 1 and artifact["messages_unavailable"] == 0
     assert "4 concurrent requests and 10,000 requests per 10 minutes" in (server.instructions or "")
+
+
+async def test_list_results_are_compact_by_default(server: FastMCP) -> None:
+    compact = await call(server, "list_messages", folder="inbox")
+    assert "to" not in compact["items"][0] and "internet_message_id" not in compact["items"][0]
+    full = await call(server, "list_messages", folder="inbox", detail="full")
+    assert full["items"][0]["to"] and full["items"][0]["internet_message_id"]
 
 
 async def test_naive_datetimes_are_treated_as_utc(server: FastMCP) -> None:

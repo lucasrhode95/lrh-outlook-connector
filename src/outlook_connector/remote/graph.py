@@ -101,7 +101,11 @@ class Graph:
         return items[:max_items], bool(link) or len(items) > max_items
 
     async def batch(
-        self, requests: Mapping[str, str], *, prefer: tuple[str, ...] = ()
+        self,
+        requests: Mapping[str, str],
+        *,
+        prefer: tuple[str, ...] = (),
+        headers: Mapping[str, str] | None = None,
     ) -> dict[str, SubResponse]:
         """GET many relative URLs via $batch. Returns {caller key: sub-response}, one per request.
 
@@ -118,7 +122,7 @@ class Graph:
 
         async def send(keys: list[str]) -> dict[str, SubResponse]:
             async with self._batch_gate:  # shared by every batch() call of this process
-                return await self._batch_once({k: requests[k] for k in keys}, prefer)
+                return await self._batch_once({k: requests[k] for k in keys}, prefer, headers)
 
         for attempt in range(BATCH_RETRIES + 1):
             chunks = [pending[i : i + BATCH_LIMIT] for i in range(0, len(pending), BATCH_LIMIT)]
@@ -131,12 +135,13 @@ class Graph:
         return results
 
     async def _batch_once(
-        self, requests: Mapping[str, str], prefer: tuple[str, ...]
+        self, requests: Mapping[str, str], prefer: tuple[str, ...], headers: Mapping[str, str] | None
     ) -> dict[str, SubResponse]:
         keys = list(requests)
+        sub_headers = {**_prefer(*prefer), **(headers or {})}
         body = {
             "requests": [
-                {"id": str(index), "method": "GET", "url": requests[key], "headers": _prefer(*prefer)}
+                {"id": str(index), "method": "GET", "url": requests[key], "headers": sub_headers}
                 for index, key in enumerate(keys)
             ]
         }

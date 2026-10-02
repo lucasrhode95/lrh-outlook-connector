@@ -1,20 +1,24 @@
 """The single export path (requirements v4 §10), used by both the local UI and MCP.
 
-selection (threads + messages) → bodies (Graph $batch, retained copies for server-deleted mail)
-→ attachments (policy) → grouping (per thread / all / none) → TXT rendering → packaging.
+selection (conversations + messages + a range) → copies merged → bodies (Graph $batch, retained
+copies for server-deleted mail) → attachments (policy) → grouping (per thread / all / none) →
+TXT or JSONL rendering → packaging.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import tempfile
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path, PurePath
+from pathlib import Path
+from typing import Any
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Upstream
 from outlook_connector.domain.models import (
+    EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
     Attachment,
     ExportArtifact,
@@ -23,16 +27,12 @@ from outlook_connector.domain.models import (
     MessageSummary,
 )
 from outlook_connector.service.export import attachments as policy
-from outlook_connector.service.export.formatter import RenderedMessage, body_text, render_file
+from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
 from outlook_connector.service.export.packaging import TextFile, package
+from outlook_connector.service.mailbox import unavailable
 from outlook_connector.service.threads import Threads, base_subject, oldest_first
 
 RANGE_PAGE = 200
-DELETED_FOLDERS = ("deleteditems", "junkemail")
-SENT_FOLDERS = ("sentitems", "drafts", "outbox")
-DELETED_OR_JUNK = "in Deleted Items or Junk Email (include_deleted_items=false)"
-NOT_RECEIVED = "in Sent Items, Drafts or Outbox (received_only=true)"
-NEVER_RETAINED = "deleted on the server and never retained by this app"
 
 Downloaded = list[tuple[Attachment, Path | None]]  # None: unavailable
 
@@ -40,13 +40,15 @@ Downloaded = list[tuple[Attachment, Path | None]]  # None: unavailable
 @dataclass
 class Selection:
     summaries: list[MessageSummary]
-    excluded: dict[str, int] = field(default_factory=dict)  # reason -> messages left out
+    excluded: dict[str, int] = field(default_factory=dict)  # ExclusionReason -> messages left out
+    known: dict[str, Message] = field(default_factory=dict)  # fetched with bodies while selecting
+    duplicates: int = 0  # copies merged into one message
 
 
 @dataclass
 class Fetched:
-    bodies: dict[str, Message | None]
-    body_failures: dict[str, str]  # message id -> why its body could not be fetched
+    bodies: dict[str, Message]
+    missing: dict[str, str]  # message id -> why it has no body
     attachments: dict[str, list[Attachment]]
     attachment_failures: dict[str, str]  # message id -> why its attachments could not be listed
 
@@ -66,16 +68,13 @@ class Exports:
         summaries = selection.summaries
         if not summaries:
             raise InvalidRequest(
-                f"Nothing to export: the selection holds no messages{_excluded_note(selection)}."
+                f"Nothing to export: the selection holds no messages{_excluded_note(selection.excluded)}."
             )
-        bodies, body_failures = await self.threads.bodies(summaries)
-        for summary in summaries:  # deleted on the server before this app ever read the body
-            if bodies.get(summary.id) is None and summary.id not in body_failures:
-                body_failures[summary.id] = NEVER_RETAINED
+        bodies, missing = await self.threads.bodies(summaries, known=selection.known)
         found, attachment_failures = await self._attachments(
-            summaries, bodies, inline=request.include_attachments, skip=set(body_failures)
+            summaries, bodies, inline=request.include_attachments, skip=set(missing)
         )
-        fetched = Fetched(bodies, body_failures, found, attachment_failures)
+        fetched = Fetched(bodies, missing, found, attachment_failures)
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
         try:
             downloads = (
@@ -83,12 +82,12 @@ class Exports:
                 if request.include_attachments
                 else {}
             )
-            files = self._render(summaries, fetched, downloads, request, selection.excluded)
+            files = self._render(summaries, fetched, downloads, request, selection)
             base = files[0].folder if len(files) == 1 else _range_name(summaries)
             result = package(files, base_name=base)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
-        unavailable = sum(1 for items in downloads.values() for _, path in items if path is None)
+        unavailable_files = sum(1 for items in downloads.values() for _, path in items if path is None)
         return ExportArtifact(
             path=str(result.path),
             filename=result.filename,
@@ -97,10 +96,12 @@ class Exports:
             message_count=len(summaries),
             text_files=len(files),
             attachment_files=sum(len(f.attachments) for f in files),
-            attachments_unavailable=unavailable + len(attachment_failures),
+            attachments_unavailable=unavailable_files,
+            attachment_listing_failures=len(attachment_failures),
             messages_excluded=selection.excluded,
-            messages_unavailable=len(body_failures),
-            unavailable_message_ids=list(body_failures),
+            messages_unavailable=len(missing),
+            unavailable_message_ids=list(missing),
+            duplicates_merged=selection.duplicates,
         )
 
     # ---------------------------------------------------------------- selection
@@ -117,33 +118,27 @@ class Exports:
                     f"Conversation {conversation_id} is larger than the server listing limit; "
                     "export its messages by message id instead."
                 )
-            if left_out:
-                excluded[DELETED_OR_JUNK] += left_out
+            _add(excluded, left_out)
             for item in items:
                 selected.setdefault(item.id, item)
-            self._check_limit(selected, request.limit)
+            _check_limit(selected, request.limit)
         if request.by_range:
             await self._select_range(request, selected, excluded)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
-        known = self.mailbox.store.summaries(explicit)
-        selected.update(known)
-        missing = [mid for mid in explicit if mid not in known]
-        if missing:
-            selected.update(await self._summaries(missing))
-        self._check_limit(selected, request.limit)
-        summaries = sorted(await self.mailbox.decorate(list(selected.values())), key=oldest_first)
-        return Selection(summaries, dict(excluded))
+        cached = self.mailbox.store.summaries(explicit)
+        selected.update(cached)
+        known = await self._fetch_unknown([mid for mid in explicit if mid not in cached])
+        selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
+        merged, _ = await self.mailbox.finish(selected.values())  # copies across conversations and pages
+        _check_limit({m.id: m for m in merged}, request.limit)
+        return Selection(
+            sorted(merged, key=oldest_first), dict(excluded), known, duplicates=len(selected) - len(merged)
+        )
 
     async def _select_range(
         self, request: ExportRequest, selected: dict[str, MessageSummary], excluded: dict[str, int]
     ) -> None:
-        """Every message in the window (newest first from the server), minus the excluded folders."""
-        folders = await self.mailbox.folder_map()
-        skip: dict[str, str] = {}
-        if not request.include_deleted_items:
-            skip |= {f.id: DELETED_OR_JUNK for f in folders.values() if f.well_known in DELETED_FOLDERS}
-        if request.received_only:
-            skip |= {f.id: NOT_RECEIVED for f in folders.values() if f.well_known in SENT_FOLDERS}
+        """Every message in the window, page by page, with the listing's scope rules."""
         cursor: str | None = None
         while True:
             page = await self.mailbox.list_messages(
@@ -152,29 +147,21 @@ class Exports:
                 until=request.until,
                 limit=RANGE_PAGE,
                 cursor=cursor,
+                received_only=request.received_only,
+                include_deleted_items=request.include_deleted_items,
             )
+            _add(excluded, page.coverage.excluded)
             for item in page.items:
-                reason = skip.get(item.folder_id or "")
-                if reason:
-                    excluded[reason] += 1
-                else:
-                    selected.setdefault(item.id, item)
-            self._check_limit(selected, request.limit, more=page.cursor is not None)
+                selected.setdefault(item.id, item)
+            _check_limit(selected, request.limit, more=page.cursor is not None)
             cursor = page.cursor
             if cursor is None:
                 return
 
-    @staticmethod
-    def _check_limit(selected: dict[str, MessageSummary], limit: int, *, more: bool = False) -> None:
-        if len(selected) > limit:
-            raise InvalidRequest(
-                f"The selection holds {'more than ' if more else ''}{len(selected)} messages, above "
-                f"the limit of {limit} (at most {EXPORT_MAX_MESSAGES}). Narrow the date range or "
-                "split the export."
-            )
-
-    async def _summaries(self, message_ids: list[str]) -> dict[str, MessageSummary]:
-        """Summaries for ids this app has never seen, in batches (bodies are stored on the way)."""
+    async def _fetch_unknown(self, message_ids: list[str]) -> dict[str, Message]:
+        """Messages this app has never seen, in batches; their bodies are reused for the export."""
+        if not message_ids:
+            return {}
         fetched = await self.reader.get_messages(message_ids)
         if fetched.failed:
             first = next(iter(fetched.failed.values()))
@@ -184,14 +171,14 @@ class Exports:
             raise NotFound(
                 f"{len(gone)} selected message(s) exist neither on the server nor locally: {gone[0]}"
             )
-        messages = [m for m in fetched.messages.values() if m is not None]
-        self.mailbox.store.save_messages(messages)
-        return {m.id: MessageSummary.model_validate(m.model_dump()) for m in messages}
+        messages = {mid: m for mid, m in fetched.messages.items() if m is not None}
+        self.mailbox.store.save_messages(messages.values())
+        return messages
 
     async def _attachments(
         self,
         summaries: list[MessageSummary],
-        bodies: dict[str, Message | None],
+        bodies: dict[str, Message],
         *,
         inline: bool,
         skip: set[str],
@@ -219,7 +206,7 @@ class Exports:
     async def _download(
         self,
         summaries: list[MessageSummary],
-        bodies: dict[str, Message | None],
+        bodies: dict[str, Message],
         found: dict[str, list[Attachment]],
         request: ExportRequest,
         workdir: Path,
@@ -241,12 +228,10 @@ class Exports:
 
         jobs: list[tuple[str, Attachment, Path | None]] = []
         for index, summary in enumerate(summaries):
-            page = html.get(summary.id)
+            page = html.get(summary.id) or bodies.get(summary.id)
             page_html = None
             if page is not None:
                 page_html = page.unique_body_html if request.body == "unique" else page.body_html
-            elif (retained := bodies.get(summary.id)) is not None:
-                page_html = retained.unique_body_html if request.body == "unique" else retained.body_html
             for position, attachment in enumerate(found.get(summary.id, [])):
                 cid = content_ids.get(summary.id, {}).get(attachment.id)
                 if policy.wanted(attachment, content_id=cid, body_html=page_html):
@@ -276,71 +261,116 @@ class Exports:
         fetched: Fetched,
         downloads: dict[str, Downloaded],
         request: ExportRequest,
-        excluded: dict[str, int],
+        selection: Selection,
     ) -> list[TextFile]:
-        found = fetched.attachments
-        notes = [f"Left out: {count} message(s) {reason}." for reason, count in excluded.items() if count]
-        if fetched.body_failures:
-            notes.append(
-                f"Unavailable: {len(fetched.body_failures)} message body(ies); they are marked below."
-            )
+        notes = [
+            f"Left out: {count} message(s) {EXCLUSION_TEXT[key]}."
+            for key, count in selection.excluded.items()
+        ]
+        if selection.duplicates:
+            notes.append(f"Merged: {selection.duplicates} copy(ies) of the same message, exported once.")
+        if fetched.missing:
+            notes.append(f"Unavailable: {len(fetched.missing)} message body(ies); they are marked below.")
+        combine = "all" if request.format == "jsonl" else request.combine
+        suffix = ".jsonl" if request.format == "jsonl" else ".txt"
         files: list[TextFile] = []
         taken: set[str] = set()
-        for title, base, members in _groups(summaries, request.combine):
-            name = policy.dedupe(policy.safe_name(f"{base}.txt", fallback="export.txt"), taken)
-            folder = PurePath(name).stem
+        for title, base, members in _groups(summaries, combine):
+            name = policy.dedupe(policy.safe_name(f"{base}{suffix}", fallback=f"export{suffix}"), taken)
             file = TextFile(name=name, text="")
             names: set[str] = set()
-            rendered = []
-            for message in members:
-                lines = []
-                if message.id in fetched.attachment_failures:
-                    lines.append(
-                        f"[Attachments could not be listed: {fetched.attachment_failures[message.id]}]"
-                    )
-                if request.include_attachments:
-                    for attachment, path in downloads.get(message.id, []):
-                        label = attachment.name or "attachment"
-                        if path is None:
-                            lines.append(f"[Attachment unavailable: {label}]")
-                            continue
-                        final = policy.dedupe(
-                            policy.safe_name(
-                                attachment.name,
-                                fallback=f"attachment-{len(names) + 1}",
-                                eml=attachment.kind == "item",
-                            ),
-                            names,
-                        )
-                        file.attachments.append((final, path))
-                        lines.append(f"{folder}/{final} ({policy.size_label(path.stat().st_size)})")
-                    lines += [
-                        f"{a.name} (cloud link, not downloaded)"
-                        for a in found.get(message.id, [])
-                        if a.kind == "reference"
-                    ]
-                else:
-                    lines += [
-                        f"{a.name} ({policy.size_label(a.size)})"
-                        for a in found.get(message.id, [])
-                        if policy.listed(a)
-                    ]
-                failure = fetched.body_failures.get(message.id)
-                text = (
-                    f"(Content unavailable: {failure})"
-                    if failure
-                    else body_text(fetched.bodies.get(message.id), request.body)
+            stored: dict[str, str] = {}  # content digest -> name in this file's folder
+            rendered = [self._message(m, fetched, downloads, request, file, names, stored) for m in members]
+            if request.format == "jsonl":
+                file.text = "".join(jsonl_record(r, body_kind=request.body) + "\n" for r in rendered)
+            else:
+                file.text = render_file(
+                    title, rendered, body_kind=request.body, sections=combine == "all", notes=notes
                 )
-                rendered.append(RenderedMessage(message, text, lines))
-            file.text = render_file(
-                title, rendered, body_kind=request.body, sections=request.combine == "all", notes=notes
-            )
             files.append(file)
         return files
 
+    def _message(
+        self,
+        message: MessageSummary,
+        fetched: Fetched,
+        downloads: dict[str, Downloaded],
+        request: ExportRequest,
+        file: TextFile,
+        names: set[str],
+        stored: dict[str, str],
+    ) -> RenderedMessage:
+        """One message's text, attachment lines (TXT) and attachment records (JSONL)."""
+        lines: list[str] = []
+        records: list[dict[str, Any]] = []
+        if message.id in fetched.attachment_failures:
+            lines.append(f"[Attachments could not be listed: {fetched.attachment_failures[message.id]}]")
+        listed = fetched.attachments.get(message.id, [])
+        if request.include_attachments:
+            for attachment, path in downloads.get(message.id, []):
+                label = attachment.name or "attachment"
+                if path is None:
+                    lines.append(f"[Attachment unavailable: {label}]")
+                    records.append(_attachment_record(attachment, unavailable=True))
+                    continue
+                # The same bytes (a signature logo on every message) are stored once; every
+                # message that carries them points to that file.
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                final = stored.get(digest)
+                if final is None:
+                    final = policy.dedupe(
+                        policy.safe_name(
+                            attachment.name,
+                            fallback=f"attachment-{len(names) + 1}",
+                            eml=attachment.kind == "item",
+                        ),
+                        names,
+                    )
+                    stored[digest] = final
+                    file.attachments.append((final, path))
+                lines.append(f"{file.folder}/{final} ({policy.size_label(path.stat().st_size)})")
+                records.append(_attachment_record(attachment, file=f"{file.folder}/{final}"))
+            for a in listed:
+                if a.kind == "reference":
+                    lines.append(f"{a.name} (cloud link, not downloaded)")
+                    records.append(_attachment_record(a))
+        else:
+            for a in listed:
+                if policy.listed(a):
+                    lines.append(f"{a.name} ({policy.size_label(a.size)})")
+                    records.append(_attachment_record(a))
+        reason = fetched.missing.get(message.id)
+        text = unavailable(reason) if reason else body_text(fetched.bodies[message.id], request.body)
+        return RenderedMessage(message, text, lines, unavailable=reason, attachments=records)
 
-def _excluded_note(selection: Selection) -> str:
-    parts = [f"{count} {reason}" for reason, count in selection.excluded.items() if count]
+
+def _attachment_record(
+    a: Attachment, *, file: str | None = None, unavailable: bool = False
+) -> dict[str, Any]:
+    record: dict[str, Any] = {"name": a.name, "size": a.size, "kind": a.kind, "inline": a.is_inline}
+    if file:
+        record["file"] = file
+    if unavailable:
+        record["unavailable"] = True
+    return record
+
+
+def _add(total: dict[str, int], counts: dict[str, int]) -> None:
+    for key, count in counts.items():
+        total[key] += count
+
+
+def _check_limit(selected: dict[str, MessageSummary], limit: int, *, more: bool = False) -> None:
+    if len(selected) > limit:
+        raise InvalidRequest(
+            f"The selection holds {'more than ' if more else ''}{len(selected)} messages, above "
+            f"the limit of {limit} (at most {EXPORT_MAX_MESSAGES}). Narrow the date range or "
+            "split the export."
+        )
+
+
+def _excluded_note(excluded: dict[str, int]) -> str:
+    parts = [f"{count} {EXCLUSION_TEXT[key]}" for key, count in excluded.items() if count]
     return f" ({'; '.join(parts)} left out)" if parts else ""
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
 
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary, Recipient
 
@@ -50,7 +50,7 @@ def folder(data: dict[str, Any], well_known: str | None = None) -> Folder:
 
 
 def _summary_fields(data: dict[str, Any]) -> dict[str, Any]:
-    flag = data.get("flag") if isinstance(data.get("flag"), dict) else {}
+    flag: dict[str, Any] = data["flag"] if isinstance(data.get("flag"), dict) else {}
     return {
         "id": data["id"],
         "conversation_id": data.get("conversationId"),
@@ -83,7 +83,7 @@ def _content(value: Any) -> str | None:
 def message(data: dict[str, Any], *, html: bool) -> Message:
     """A full message. ``html`` says which body format the request asked for."""
     body, unique = _content(data.get("body")), _content(data.get("uniqueBody"))
-    fields = _summary_fields(data) | {"bcc": recipients(data.get("bccRecipients"))}
+    fields: dict[str, Any] = _summary_fields(data) | {"bcc": recipients(data.get("bccRecipients"))}
     if html:
         return Message(**fields, body_html=body, unique_body_html=unique)
     return Message(**fields, body_text=body, unique_body_text=unique)
@@ -98,7 +98,10 @@ def attachment(data: dict[str, Any], message_id: str) -> Attachment:
         content_type=data.get("contentType"),
         size=data.get("size"),
         is_inline=bool(data.get("isInline")),
-        kind={"fileAttachment": "file", "itemAttachment": "item", "referenceAttachment": "reference"}.get(
-            kind, "unknown"
+        kind=cast(
+            Literal["file", "item", "reference", "unknown"],
+            {"fileAttachment": "file", "itemAttachment": "item", "referenceAttachment": "reference"}.get(
+                kind, "unknown"
+            ),
         ),
     )
