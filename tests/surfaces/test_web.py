@@ -56,6 +56,12 @@ def test_folders_messages_search_thread_and_message(client: TestClient) -> None:
     assert "> First report" in message["text"]
 
 
+def test_thread_sizes(client: TestClient) -> None:
+    sizes = client.post("/api/thread-sizes", json={"conversation_ids": ["c-rel", "c-lunch"]}).json()
+    assert [(s["conversation_id"], s["messages"]) for s in sizes] == [("c-rel", 3), ("c-lunch", 1)]
+    assert client.post("/api/thread-sizes", json={"conversation_ids": "c-rel"}).status_code == 400
+
+
 def test_dates_from_the_browser_are_accepted(client: TestClient) -> None:
     page = client.get("/api/messages", params={"since": "2026-09-30T03:00:00.000Z"}).json()
     assert [m["id"] for m in page["items"]] == ["m5"]

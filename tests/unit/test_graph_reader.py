@@ -56,8 +56,29 @@ async def test_list_messages_in_one_folder(fake: FakeGraph) -> None:
 
 
 async def test_conversation_spans_folders_and_never_uses_orderby(fake: FakeGraph) -> None:
-    messages = await reader_for(fake).conversation("c-rel")
-    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-rie", "f-junk"}
+    messages, truncated = await reader_for(fake).conversation("c-rel")
+    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-rie", "f-junk"} and not truncated
+
+
+async def test_large_conversation_reports_truncation(
+    fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
+    messages, truncated = await reader_for(fake).conversation("c-rel")
+    assert len(messages) == 2 and truncated
+
+
+async def test_conversation_folders_in_one_batch(fake: FakeGraph) -> None:
+    result = await reader_for(fake).conversation_folders(["c-rel", "c-lunch", "c-none"])
+    assert sorted(result["c-rel"][0]) == ["f-inbox", "f-junk", "f-rie", "f-sent"]
+    assert result["c-lunch"] == (["f-inbox"], False) and result["c-none"] == ([], False)
+    assert fake.calls == ["POST /v1.0/$batch"]
+
+
+async def test_list_attachments_many_in_one_batch(fake: FakeGraph) -> None:
+    result = await reader_for(fake).list_attachments_many(["m3", "m5"])
+    assert [a.name for a in result["m3"]] == ["numbers.xlsx", "image001.png", "logo.png"]
+    assert result["m5"] == [] and fake.calls == ["POST /v1.0/$batch"]
 
 
 async def test_get_message_text_and_html_with_attachments(fake: FakeGraph) -> None:
@@ -130,4 +151,5 @@ async def test_continuation_links_must_stay_on_graph(fake: FakeGraph) -> None:
 async def test_odata_quotes_are_escaped_in_conversation_ids() -> None:
     fake = FakeGraph()
     fake.add(FakeMessage("q1", "quote", "f", "2026-09-01T00:00:00Z", conversation="it's"))
-    assert [m.id for m in await reader_for(fake).conversation("it's")] == ["q1"]
+    messages, _ = await reader_for(fake).conversation("it's")
+    assert [m.id for m in messages] == ["q1"]

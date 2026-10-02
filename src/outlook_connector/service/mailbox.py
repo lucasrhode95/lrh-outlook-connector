@@ -30,6 +30,8 @@ from outlook_connector.store.db import Store
 log = logging.getLogger(__name__)
 
 FOLDER_TTL_SECONDS = 600
+NOT_RECEIVED = ("sentitems", "drafts", "outbox", "deleteditems", "junkemail")
+RECEIVED_ONLY_PAGES = 10  # server pages scanned at most for one received_only page
 LOCAL_ONLY_NOTE = "Local cache only: messages this app has seen before. It is not a mirror of the mailbox."
 
 
@@ -74,6 +76,9 @@ class Mailbox:
         assert self._folders is not None
         return self._folders
 
+    async def _not_received_ids(self) -> set[str]:
+        return {f.id for f in (await self.folder_map()).values() if f.well_known in NOT_RECEIVED}
+
     async def resolve_folder(self, ref: str) -> Folder:
         """A folder id, a well-known alias (inbox, archive, ...), a path (Inbox/Projects) or a name."""
         folders = await self.folder_map()
@@ -111,7 +116,9 @@ class Mailbox:
         limit: int = 25,
         refresh: bool = True,
         cursor: str | None = None,
+        received_only: bool = False,
     ) -> MessagePage:
+        """Newest first. ``received_only`` leaves out Sent Items, Drafts, Outbox, Deleted Items and Junk."""
         if not 1 <= limit <= 200:
             raise InvalidRequest("limit must be between 1 and 200.")
         if since and until and since > until:
@@ -121,30 +128,42 @@ class Mailbox:
             folder_id = state.get("folder_id")
             since = datetime.fromisoformat(state["since"]) if state.get("since") else None
             until = datetime.fromisoformat(state["until"]) if state.get("until") else None
+            received_only = bool(state["received_only"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
+        skip = await self._not_received_ids() if received_only else set()
 
         if not refresh:
-            items = self.store.window(folder_id=folder_id, since=since, until=until, limit=limit)
+            items = self.store.window(
+                folder_id=folder_id, since=since, until=until, limit=None if skip else limit
+            )
+            items = [m for m in items if m.folder_id not in skip][:limit]
             return MessagePage(
                 items=await self.decorate(items),
                 coverage=Coverage(source="local", complete=False, notes=[LOCAL_ONLY_NOTE]),
             )
 
-        items, link = await self.reader.list_messages(
-            folder_id=folder_id,
-            since=since,
-            until=until,
-            page_size=limit,
-            page=state["link"] if state else None,
-        )
-        self.store.upsert_summaries(items)
+        link = state["link"] if state else None
+        items: list[MessageSummary] = []
+        for _ in range(RECEIVED_ONLY_PAGES if skip else 1):
+            fetched, link = await self.reader.list_messages(
+                folder_id=folder_id, since=since, until=until, page_size=limit, page=link
+            )
+            self.store.upsert_summaries(fetched)
+            await self.reconciler.after_window(
+                folder_id=folder_id, since=since, until=until, remote=fetched, complete=link is None
+            )
+            items += [m for m in fetched if m.folder_id not in skip]
+            if items or not link:  # a filtered page can be empty: keep scanning, within bounds
+                break
         complete = link is None
-        await self.reconciler.after_window(
-            folder_id=folder_id, since=since, until=until, remote=items, complete=complete
-        )
 
         notes: list[str] = []
+        if skip:
+            notes.append(
+                "received_only: Sent Items, Drafts, Outbox, Deleted Items and Junk Email are left out, "
+                "so a page can hold fewer than limit messages; follow cursor for more."
+            )
         if state is None:  # retained server-deleted messages are merged into the first page only
             span_since = (
                 since
@@ -152,6 +171,7 @@ class Mailbox:
                 else min((m.received_at for m in items if m.received_at), default=since)
             )
             deleted = self.store.window(folder_id=folder_id, since=span_since, until=until, deleted=True)
+            deleted = [m for m in deleted if m.folder_id not in skip]
             if deleted:
                 items = sorted(items + deleted, key=_newest_first)
                 notes.append(
@@ -166,12 +186,14 @@ class Mailbox:
                 folder_id=folder_id,
                 since=since.isoformat() if since else None,
                 until=until.isoformat() if until else None,
+                received_only=received_only,
             )
+        retained = any(m.is_deleted for m in items)
         return MessagePage(
             items=await self.decorate(items),
             cursor=next_cursor,
             coverage=Coverage(
-                source="remote+local" if notes else "remote",
+                source="remote+local" if retained else "remote",
                 complete=complete,
                 more_available=not complete,
                 notes=notes,

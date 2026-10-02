@@ -35,7 +35,7 @@ class Exports:
             raise InvalidRequest("Select at least one conversation or message to export.")
         summaries = await self._select(request)
         bodies = await self.threads.bodies(summaries)
-        found = await self._attachments(summaries, bodies)
+        found = await self._attachments(summaries, bodies, inline=request.include_attachments)
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
         try:
             downloads = (
@@ -65,9 +65,14 @@ class Exports:
     async def _select(self, request: ExportRequest) -> list[MessageSummary]:
         selected: dict[str, MessageSummary] = {}
         for conversation_id in dict.fromkeys(request.conversation_ids):
-            items, _ = await self.threads.messages(
+            items, _, truncated = await self.threads.messages(
                 conversation_id, include_deleted_items=request.include_deleted_items
             )
+            if truncated:
+                raise InvalidRequest(
+                    f"Conversation {conversation_id} is larger than the server listing limit; "
+                    "export its messages by message id instead."
+                )
             for item in items:
                 selected.setdefault(item.id, item)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
@@ -81,11 +86,13 @@ class Exports:
         return sorted(await self.mailbox.decorate(list(selected.values())), key=oldest_first)
 
     async def _attachments(
-        self, summaries: list[MessageSummary], bodies: dict[str, Message | None]
+        self, summaries: list[MessageSummary], bodies: dict[str, Message | None], *, inline: bool
     ) -> dict[str, list[Attachment]]:
-        live = [m for m in summaries if m.has_attachments and not m.is_deleted]
-        listed = await asyncio.gather(*(self.reader.list_attachments(m.id) for m in live))
-        found: dict[str, list[Attachment]] = {m.id: items for m, items in zip(live, listed, strict=True)}
+        # Graph reports hasAttachments=false when a message has only inline attachments, so when
+        # files are exported (inline images included) every live message is asked, in batches.
+        # ``bodies`` has already marked messages that disappeared from the server as deleted.
+        live = [m.id for m in summaries if not m.is_deleted and (inline or m.has_attachments)]
+        found = await self.reader.list_attachments_many(live) if live else {}
         retain = []
         for summary in summaries:
             body = bodies.get(summary.id)

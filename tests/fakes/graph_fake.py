@@ -68,7 +68,7 @@ class FakeMessage:
             "sentDateTime": self.received,
             "isRead": self.is_read,
             "isDraft": False,
-            "hasAttachments": bool(self.attachments),
+            "hasAttachments": any(not a.inline for a in self.attachments),  # false when inline-only
             "importance": "normal",
             "categories": [],
             "flag": {"flagStatus": "notFlagged"},

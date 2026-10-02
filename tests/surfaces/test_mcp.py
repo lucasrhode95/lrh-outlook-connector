@@ -81,6 +81,12 @@ async def test_list_search_thread_message_flow(server: FastMCP) -> None:
     assert message["text"] == "Thanks!"
 
 
+async def test_list_messages_received_only(server: FastMCP) -> None:
+    page = await call(server, "list_messages", received_only=True)
+    assert [m["id"] for m in page["items"]] == ["m5", "m3", "m1"]
+    assert "received_only=true" in (server.instructions or "")
+
+
 async def test_naive_datetimes_are_treated_as_utc(server: FastMCP) -> None:
     page = await call(server, "list_messages", since="2026-09-30T00:00:00")
     assert [m["id"] for m in page["items"]] == ["m5"]

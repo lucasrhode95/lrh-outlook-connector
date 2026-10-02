@@ -292,7 +292,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | MCP tool | Service call | Annotations |
 |---|---|---|
 | `list_folders` | `mailbox.list_folders` | read-only |
-| `list_messages(folder?, since?, until?, limit?, refresh=True, cursor?)` | `mailbox.list_messages` | read-only |
+| `list_messages(folder?, since?, until?, limit?, refresh=True, cursor?, received_only=False)` | `mailbox.list_messages` | read-only |
 | `search_messages(query, since?, until?, folder?, cursor?)` | `mailbox.search` | read-only |
 | `get_thread(conversation_id, include_deleted_items=False, cursor?)` | `threads.get_thread` | read-only |
 | `get_message(id, offset=0, max_chars, body=unique\|full\|html)` | `mailbox.get_message` | read-only |
@@ -302,7 +302,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
 | `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |
 
-Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
+Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 
 ## 9. Cross-cutting concerns
 
