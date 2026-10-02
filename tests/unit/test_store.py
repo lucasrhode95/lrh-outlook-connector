@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from outlook_connector.domain.errors import AccountMismatch
-from outlook_connector.domain.models import Folder, Message, MessageSummary, Recipient
+from outlook_connector.domain.models import Folder, MessageSummary, Recipient
 from outlook_connector.store.db import Store, store_path
 
 
@@ -52,36 +52,20 @@ def test_window_queries_newest_first(store: Store) -> None:
     ] == ["b"]
 
 
-def test_deleted_rows_keep_content_and_reappearing_clears_the_marker(store: Store) -> None:
-    msg = Message(**summary("a", day=1).model_dump(), body_text="full", unique_body_text="unique")
-    store.save_messages([msg])
-    store.mark_deleted(["a"])
-    retained = store.message("a")
-    assert retained and retained.is_deleted and retained.deleted_at and retained.body_text == "full"
-    store.upsert_summaries([summary("a", day=1)])  # seen on the server again
-    again = store.message("a")
-    assert again and not again.is_deleted and again.body_text == "full"
+def test_forget_drops_rows_of_a_covered_window_except_kept(store: Store) -> None:
+    store.upsert_summaries(
+        [summary("a", day=1), summary("b", day=2), summary("c", day=3), summary("s", day=2, folder="f-sent")]
+    )
+    store.forget(folder_id="f-inbox", since=datetime(2026, 9, 2, tzinfo=UTC), until=None, keep={"c"})
+    assert [m.id for m in store.window(folder_id=None, since=None, until=None)] == ["c", "s", "a"]
 
 
-def test_later_fetch_without_bodies_does_not_erase_retained_bodies(store: Store) -> None:
-    store.save_messages([Message(**summary("a", day=1).model_dump(), body_text="text")])
-    store.save_messages([Message(**summary("a", day=1).model_dump(), body_html="<p>html</p>")])
-    retained = store.message("a")
-    assert retained and retained.body_text == "text" and retained.body_html == "<p>html</p>"
-
-
-def test_moves_update_folder_and_summary(store: Store) -> None:
-    store.upsert_summaries([summary("a", day=1)])
-    store.mark_deleted(["a"])
-    store.set_folders({"a": "f-archive"})
-    moved = store.window(folder_id="f-archive", since=None, until=None)
-    assert [m.id for m in moved] == ["a"] and not moved[0].is_deleted and moved[0].folder_id == "f-archive"
-
-
-def test_conversation_and_summaries_lookup(store: Store) -> None:
-    store.upsert_summaries([summary("a", day=1), summary("b", day=2, conv="c2")])
-    assert [m.id for m in store.conversation("c1")] == ["a"]
+def test_summaries_lookup_holds_only_summary_fields(store: Store) -> None:
+    labelled = summary("a", day=1).model_copy(update={"folder": "Inbox", "also_in": ["Sent Items"]})
+    store.upsert_summaries([labelled, summary("b", day=2, conv="c2")])
     assert set(store.summaries(["a", "b", "zzz"])) == {"a", "b"}
+    cached = store.summaries(["a"])["a"]
+    assert cached.folder is None and cached.also_in == []  # derived per result, never stored
 
 
 def test_two_store_instances_share_the_file(tmp_path: Path) -> None:

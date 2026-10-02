@@ -257,7 +257,6 @@ function showCoverage(coverage) {
   const excluded = coverage.excluded || {};
   const notShown = (excluded.deleted_or_junk || 0) + (excluded.sync_issues || 0);
   if (notShown) parts.push(`${notShown} in Deleted / Junk / Sync Issues not shown`);
-  if (coverage.source !== "remote") parts.push(coverage.source);
   $("coverage").textContent = parts.join(" · ");
   $("coverage").title = (coverage.notes || []).join("\n");
 }
@@ -342,8 +341,7 @@ function renderThread(thread) {
     el("span", { class: "toggle" }, thread.expanded ? "▾" : "▸"),
     el("div", {},
       el("div", { class: "subject" }, newest.subject || "(no subject)",
-        el("span", { class: "badge" }, countLabel(thread, messages.length)),
-        messages.some((m) => m.is_deleted) ? el("span", { class: "badge deleted" }, "deleted on server") : null),
+        el("span", { class: "badge" }, countLabel(thread, messages.length))),
       el("div", { class: "who" }, senders)),
     el("span", { class: "date" }, formatDate(newest.received_at || newest.sent_at)));
   const node = el("div", { class: "thread" }, row);
@@ -354,12 +352,11 @@ function renderThread(thread) {
   return node;
 }
 
-// Folder (optional), "also in" for merged copies of one message, and "deleted on server".
+// Folder (optional) and "also in" for merged copies of one message.
 function badges(message, withFolder) {
   return [
     withFolder && message.folder ? el("span", { class: "badge" }, message.folder) : null,
     ...(message.also_in || []).map((folder) => el("span", { class: "badge copy", title: "Another copy of this message" }, `also in ${folder}`)),
-    message.is_deleted ? el("span", { class: "badge deleted" }, "deleted on server") : null,
   ];
 }
 
@@ -427,7 +424,6 @@ async function openMessage(id) {
     ["Folder", [m.folder, ...(m.also_in || [])].filter(Boolean).join(SEPARATOR)]];
   const files = (content.attachments || []).filter((a) => !a.is_inline);
   if (files.length) rows.push(["Attachments", files.map((a) => attachmentButton(m.id, a))]);
-  if (m.is_deleted) rows.push(["Note", "Deleted on the server; shown from local retention."]);
   $("reader-meta").replaceChildren(...rows.filter(([, v]) => v && v.length).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
   $("reader-body").textContent = content.text;
 }

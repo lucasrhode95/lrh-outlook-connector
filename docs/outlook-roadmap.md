@@ -25,10 +25,10 @@ Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mail
 | A1 Token provider | **Done** (live: encrypted DPAPI cache, silent refresh) | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
 | A2 CLI | **Done** | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
 | B1 Graph reader | **Done** | `MailReader` over Graph: folders, list, get, conversation, `$search`, attachments, MIME, `$batch`. Folder delta (S2) is not used: the folder cache refreshes in full. |
-| S1 Store | **Done** | Account-bound SQLite: folder cache, retained messages, tombstones |
-| S3 Reconciliation | **Done** | Remove → GET by id → tombstone only on 404. Never erase known bodies. |
+| S1 Store | **Done** | Account-bound SQLite: folder cache, summary cache (no retention since 2026-10-02) |
+| S3 Reconciliation | **Removed** (2026-10-02) | Local retention of server-deleted mail was dropped: the lookups after every list page, the per-page merge, the fallbacks and the "deleted on server" labels are gone. A listed page now replaces its time span in the summary cache. |
 | L1 `list_messages` | **Done** | Folder or mailbox-wide, `since`/`until`, limit, `refresh`; shared scope rules (`include_deleted_items`, `received_only`); `include_total`; compact by default for MCP |
-| T1 `get_thread` | **Done** | Conversation across folders, local sort, retained-deleted merge, bounded; the cursor keeps the original selection; truncation past 1,000 messages is reported |
+| T1 `get_thread` | **Done** | Conversation across folders, local sort, bounded; the cursor keeps the original selection; truncation past 1,000 messages is reported |
 | L2 `search_messages` | **Done** | Graph `$search`, grouped by conversation with each conversation's message count, exact date bounds, coverage |
 | E1 Export | **Done** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download. Also a range selection (`since`/`until`/`folder`/`received_only`), `limit` up to 2,000, source ids per message, counts of what was left out or unavailable; copies named per message (`also_in`). `format=jsonl` for agents. |
 | M1 MCP surface | **Done** (read-only tools) | Read tools; files returned as local paths (architecture §8) |

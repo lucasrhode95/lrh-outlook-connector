@@ -1,7 +1,8 @@
 """Folders, message listing, message content and search (requirements v4 §7–§9).
 
-Remote first: every call asks Outlook (Graph) and only falls back to retained local data where
-the server can no longer provide it (messages deleted on the server).
+Remote first: every call asks Outlook (Graph). The local store only caches folders and message
+summaries (for the UI's instant preview and ``refresh=false``); a message deleted on the server is
+gone here too.
 
 Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
 - Deleted Items, Junk Email and Sync Issues (Outlook's own conflict and failure copies) are left out
@@ -39,7 +40,6 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ports import MailReader
 from outlook_connector.service import cursors
-from outlook_connector.service.reconcile import Reconciler
 from outlook_connector.store.db import Store
 
 log = logging.getLogger(__name__)
@@ -48,13 +48,10 @@ FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
 SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
-UNKNOWN_FOLDER_REFRESH_SECONDS = (
-    60  # an item in an unknown folder refreshes the folder list, at most this often
-)
 RECEIVED_ONLY_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
-NEVER_RETAINED = "deleted on the server and never retained by this app"
+GONE = "deleted on the server"
 LOCAL_ONLY_NOTE = "Local cache only: messages this app has seen before. It is not a mirror of the mailbox."
 COMPACT_DROP = {
     "to": [],
@@ -65,7 +62,6 @@ COMPACT_DROP = {
     "is_draft": None,
     "sent_at": None,
     "folder_id": None,
-    "deleted_at": None,
 }
 
 
@@ -73,7 +69,6 @@ class Mailbox:
     def __init__(self, reader: MailReader, store: Store) -> None:
         self.reader = reader
         self.store = store
-        self.reconciler = Reconciler(reader, store)
         self._folders: dict[str, Folder] | None = None
         self._folder_refresh: asyncio.Task[list[Folder]] | None = None
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
@@ -167,16 +162,15 @@ class Mailbox:
     ) -> tuple[list[MessageSummary], dict[str, int]]:
         """Apply folder exclusions, fill folder paths and merge copies. Returns (items, excluded counts).
 
-        Items in hidden folders or outside the mail folders are always left out ("hidden"); retained
-        copies of messages deleted on the server keep their place.
+        Items in hidden folders or outside the mail folders are always left out ("hidden").
         """
         items = list(items)
-        folders, hidden = await self.reach(m.folder_id for m in items if not m.is_deleted)
+        folders, hidden = await self.reach(m.folder_id for m in items)
         kept: list[MessageSummary] = []
         excluded: dict[str, int] = {}
         for item in items:
             folder_id = item.folder_id or ""
-            if item.folder_id and not item.is_deleted and (folder_id in hidden or folder_id not in folders):
+            if item.folder_id and (folder_id in hidden or folder_id not in folders):
                 reason: str | None = "hidden"
             else:
                 reason = (skip or {}).get(folder_id)
@@ -214,10 +208,9 @@ class Mailbox:
         if since and until and since > until:
             raise InvalidRequest("since must not be after until.")
         state = cursors.decode(cursor, "list_messages") if cursor else None
-        upper: datetime | None = None  # continuation: the previous page's oldest message (exclusive)
         if state:
             folder_id = state["folder_id"]
-            since, until, upper = (_dt(state[k]) for k in ("since", "until", "upper"))
+            since, until = _dt(state["since"]), _dt(state["until"])
             received_only = bool(state["received_only"])
             include_deleted_items = bool(state["include_deleted_items"])
         else:
@@ -237,42 +230,28 @@ class Mailbox:
             items, excluded = await self.finish(window, skip)
             return MessagePage(
                 items=_detail(items[:limit], detail),
-                coverage=Coverage(source="local", complete=False, excluded=excluded, notes=[LOCAL_ONLY_NOTE]),
+                coverage=Coverage(complete=False, excluded=excluded, notes=[LOCAL_ONLY_NOTE]),
             )
 
         link = state["link"] if state else None
         fetched: list[MessageSummary] = []
         drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
-        for _ in range(RECEIVED_ONLY_PAGES if drop else 1):
+        for attempt in range(RECEIVED_ONLY_PAGES if drop else 1):
             page, link = await self.reader.list_messages(
                 folder_id=folder_id, since=since, until=until, page_size=limit, page=link
             )
-            self.store.upsert_summaries(page)
-            await self.reconciler.after_window(
-                folder_id=folder_id, since=since, until=until, remote=page, complete=link is None
-            )
+            first, last = state is None and attempt == 0, link is None
+            self._cache(page, folder_id, since=since, until=until, first=first, last=last)
             fetched += page
             if not link or any(m.folder_id not in drop for m in page):
                 break  # a page that exclusions empty entirely is skipped, within bounds
         complete = link is None
-
-        # Retained messages deleted on the server, in the time span this page covered: [low, upper).
-        low = since if complete else min((m.received_at for m in fetched if m.received_at), default=None)
-        deleted: list[MessageSummary] = []
-        if complete or low is not None:
-            deleted = self.store.window(folder_id=folder_id, since=low, until=upper or until, deleted=True)
-            if upper:
-                deleted = [m for m in deleted if m.received_at and m.received_at < upper]
-        items, excluded = await self.finish(sorted(fetched + deleted, key=_newest_first), skip)
+        items, excluded = await self.finish(fetched, skip)
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
         notes: list[str] = []
         if skip and not complete:
             notes.append("Folders are filtered after paging, so a page can hold fewer than limit messages.")
-        if any(m.is_deleted for m in items):
-            notes.append(
-                "Messages with is_deleted=true were deleted on the server and come from local retention."
-            )
         total = None
         if include_total and state is None:
             total = await self._count(folder_id, since, until, skip)
@@ -288,7 +267,6 @@ class Mailbox:
                 folder_id=folder_id,
                 since=_iso(since),
                 until=_iso(until),
-                upper=_iso(low or upper),  # an empty page keeps the previous bound
                 seen=seen,
                 received_only=received_only,
                 include_deleted_items=include_deleted_items,
@@ -297,13 +275,32 @@ class Mailbox:
             items=_detail(items, detail),
             cursor=next_cursor,
             coverage=Coverage(
-                source="remote+local" if any(m.is_deleted for m in items) else "remote",
                 complete=complete,
                 server_total=total,
                 excluded=excluded,
                 notes=notes,
             ),
         )
+
+    def _cache(
+        self,
+        page: list[MessageSummary],
+        folder_id: str | None,
+        *,
+        since: datetime | None,
+        until: datetime | None,
+        first: bool,
+        last: bool,
+    ) -> None:
+        """Cache a listed page, and forget cached rows of the time span it covered that it does not
+        hold (deleted or moved on the server). The span runs from the page's oldest to its newest
+        message, extended to the window's ends on the last and the first page."""
+        dated = [m.received_at for m in page if m.received_at]
+        if dated or (first and last):
+            low = since if last else min(dated)
+            high = until if first else max(dated)
+            self.store.forget(folder_id=folder_id, since=low, until=high, keep={m.id for m in page})
+        self.store.upsert_summaries(page)
 
     async def _count(
         self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
@@ -326,7 +323,7 @@ class Mailbox:
         """How many messages each conversation has, counted the way get_thread lists them.
 
         One batched server listing of folders and Internet ids per conversation (copies counted
-        once), plus retained messages deleted on the server.
+        once).
         """
         ids = list(dict.fromkeys(conversation_ids))
         if len(ids) > MAX_SIZE_LOOKUPS:
@@ -336,15 +333,13 @@ class Mailbox:
         remote = await self.reader.conversation_folders(ids)
         skip = await self.exclusions(include_deleted_items=include_deleted_items)
         folders, hidden = await self.reach(fid for listed, _ in remote.values() for fid, _ in listed)
-        retained = self.store.conversations(ids)
         out = []
         for cid in ids:
             listed, more = remote.get(cid, ([], False))
             reachable = [(f, i) for f, i in listed if f and f in folders and f not in hidden]
-            local = [(m.folder_id, m.internet_message_id) for m in retained.get(cid, []) if m.is_deleted]
             seen: set[str] = set()
             count = 0
-            for folder_id, internet_id in reachable + local:
+            for folder_id, internet_id in reachable:
                 if folder_id in skip or (internet_id and internet_id in seen):
                     continue
                 if internet_id:
@@ -356,32 +351,19 @@ class Mailbox:
     # ---------------------------------------------------------------- content
 
     async def message(self, message_id: str, *, body: BodyKind = "unique") -> Message:
-        """The full message from the server, or the retained copy if the server no longer has it."""
         try:
             message = await self.reader.get_message(
                 message_id, body_format="html" if body == "html" else "text"
             )
         except NotFound:
-            retained = self._retained(message_id)
-            return (await self.decorate([retained]))[0]  # type: ignore[return-value]
-        self.store.save_messages([message])
+            raise NotFound(f"Message {message_id} is not on the server ({GONE}).") from None
         return (await self.decorate([message]))[0]  # type: ignore[return-value]
 
     async def attachments(self, message_id: str) -> list[Attachment]:
-        """Attachment metadata from the server, or the retained list of a message deleted there."""
         try:
             return await self.reader.list_attachments(message_id)
         except NotFound:
-            return self._retained(message_id).attachments
-
-    def _retained(self, message_id: str) -> Message:
-        """The retained copy of a message the server no longer has (marked deleted)."""
-        retained = self.store.message(message_id)
-        if retained is None:
-            raise NotFound(f"Message {message_id} exists neither on the server nor locally.") from None
-        self.store.mark_deleted([message_id])
-        retained.is_deleted = True
-        return retained
+            raise NotFound(f"Message {message_id} is not on the server ({GONE}).") from None
 
     async def get_message(
         self, message_id: str, *, body: BodyKind = "unique", offset: int = 0, max_chars: int = 20000
@@ -390,8 +372,6 @@ class Mailbox:
             raise InvalidRequest("offset must be >= 0 and max_chars between 1 and 200000.")
         message = await self.message(message_id, body=body)
         text = message.body(body)
-        if message.is_deleted and not has_content(message):
-            text = unavailable(NEVER_RETAINED)
         end = min(len(text), offset + max_chars)
         return MessageContent(
             message=MessageSummary.model_validate(message.model_dump()),
@@ -482,10 +462,7 @@ class Mailbox:
                     hit.message_count, hit.message_count_at_least = size.messages, size.at_least
         for hit in groups.values():
             hit.matching_messages = _detail(hit.matching_messages, detail)
-        notes = [
-            "Server-side search (Microsoft Graph); hits grouped by conversation, in rank order.",
-            "Messages retained locally after deletion on the server are not searched.",
-        ]
+        notes = ["Server-side search (Microsoft Graph); hits grouped by conversation, in rank order."]
         if skip and link:
             notes.append("Folders are filtered after paging, so a page can hold fewer than limit hits.")
         return SearchResult(
@@ -504,7 +481,7 @@ class Mailbox:
             )
             if link
             else None,
-            coverage=Coverage(source="remote", complete=link is None, excluded=excluded, notes=notes),
+            coverage=Coverage(complete=link is None, excluded=excluded, notes=notes),
         )
 
 
@@ -513,8 +490,8 @@ class Mailbox:
 
 def merge_copies(items: list[MessageSummary], outgoing: set[str]) -> list[MessageSummary]:
     """Show each message once: copies share an Internet message id (a self-sent mail sits in Sent
-    Items and Inbox). Keeps a live copy over a retained-deleted one and a received copy over the
-    sent one; ``also_in`` lists the folders of the others. Order follows the first copy."""
+    Items and Inbox). Keeps a received copy over the sent one; ``also_in`` lists the folders of the
+    others. Order follows the first copy."""
     groups: dict[str, list[MessageSummary]] = {}
     order: list[MessageSummary | str] = []
     for item in items:
@@ -532,7 +509,7 @@ def merge_copies(items: list[MessageSummary], outgoing: set[str]) -> list[Messag
             out.append(entry)
             continue
         copies = groups[entry]
-        keep = min(copies, key=lambda m: (m.is_deleted, (m.folder_id or "") in outgoing))
+        keep = min(copies, key=lambda m: (m.folder_id or "") in outgoing)
         others = {m.folder or "(unknown folder)" for m in copies if m is not keep}
         others |= {folder for m in copies for folder in m.also_in}  # copies merged earlier
         keep.also_in = sorted(others - {keep.folder or ""})
@@ -558,11 +535,6 @@ def _skip_seen(
 
 def _fingerprint(internet_id: str) -> str:
     return hashlib.blake2b(internet_id.encode(), digest_size=5).hexdigest()
-
-
-def has_content(message: Message) -> bool:
-    bodies = (message.body_text, message.unique_body_text, message.body_html, message.unique_body_html)
-    return any(value is not None for value in bodies)
 
 
 def unavailable(reason: str) -> str:
@@ -652,10 +624,6 @@ def _iso(value: datetime | None) -> str | None:
 
 def _dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value else None
-
-
-def _newest_first(m: MessageSummary) -> float:
-    return -(m.received_at.timestamp() if m.received_at else 0)
 
 
 def _with_paths(folders: list[Folder]) -> list[Folder]:

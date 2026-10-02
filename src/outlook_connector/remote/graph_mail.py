@@ -211,17 +211,6 @@ class GraphMailReader:
                 out.failed[mid] = str(sub_failure(response))
         return out
 
-    @_named("checking for moved or deleted messages")
-    async def locate(self, message_ids: list[str]) -> dict[str, str | None]:
-        requests = {
-            mid: relative(f"/me/messages/{mid}", {"$select": "id,parentFolderId"}) for mid in message_ids
-        }
-        responses = await self._graph.batch(requests)
-        raise_for_failures(responses, allow=(404,))
-        return {
-            mid: None if r.status == 404 else r.body.get("parentFolderId") for mid, r in responses.items()
-        }
-
     @_named("listing attachments")
     async def list_attachments(self, message_id: str) -> list[Attachment]:
         items, _ = await self._graph.collect(

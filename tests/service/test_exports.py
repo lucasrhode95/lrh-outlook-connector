@@ -121,14 +121,12 @@ async def test_forwarded_mail_attachment_is_saved_as_eml(exports: Exports, fake:
     assert "2026-09-30 thing/Original message.eml" in zip_names(artifact.path)
 
 
-async def test_server_deleted_message_is_exported_from_retention_and_labelled(
-    exports: Exports, fake: FakeGraph
-) -> None:
+async def test_server_deleted_message_is_gone_from_the_export(exports: Exports, fake: FakeGraph) -> None:
     await exports.export(ExportRequest(conversation_ids=["c-rel"]))
     del fake.messages["m2"]
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert "!! DELETED on the server" in text and "Thanks!" in text
+    assert artifact.message_count == 2 and "Thanks!" not in text and "DELETED" not in text
 
 
 async def test_inline_only_attachments_are_found_when_exporting_files(
@@ -185,13 +183,15 @@ async def test_inline_image_ids_of_many_messages_are_read_in_shared_batches(
     assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
 
 
-async def test_cached_message_deleted_on_the_server_is_labelled(exports: Exports, fake: FakeGraph) -> None:
-    await exports.export(ExportRequest(message_ids=["m3"]))  # caches m3's summary and body
+async def test_listed_message_deleted_before_export_is_marked_unavailable(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    await exports.mailbox.list_messages()  # caches m3's summary
     del fake.messages["m3"]
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
     text = Path(artifact.path).read_text(encoding="utf-8")  # nothing downloadable: a flat .txt
-    assert "!! DELETED on the server" in text and "Follow-up with numbers" in text
-    assert "[Attachment unavailable: numbers.xlsx]" in text
+    assert artifact.unavailable_message_ids == ["m3"]
+    assert "(Content unavailable: deleted on the server)" in text
 
 
 async def test_truncated_conversation_is_not_exported_silently(
@@ -259,15 +259,6 @@ async def test_unfetchable_bodies_are_marked_and_counted_not_fatal(exports: Expo
     assert "Unavailable: 1 message body(ies); they are marked below." in text
 
 
-async def test_deleted_before_ever_read_counts_as_unavailable(exports: Exports, fake: FakeGraph) -> None:
-    await exports.mailbox.list_messages()  # only summaries are stored, no bodies
-    del fake.messages["m5"]
-    artifact = await exports.export(ExportRequest(message_ids=["m5"]))
-    assert artifact.unavailable_message_ids == ["m5"]
-    text = Path(artifact.path).read_text(encoding="utf-8")
-    assert "(Content unavailable: deleted on the server and never retained by this app)" in text
-
-
 async def test_bulk_export_stays_within_batch_limits_under_throttling(
     exports: Exports, fake: FakeGraph
 ) -> None:
@@ -306,17 +297,6 @@ def test_safe_names() -> None:
     assert safe_name("   ", fallback="file") == "file"
     taken: set[str] = set()
     assert [dedupe(n, taken) for n in ("r.pdf", "R.pdf", "r.pdf")] == ["r.pdf", "R (2).pdf", "r (3).pdf"]
-
-
-async def test_range_export_keeps_retained_messages_on_every_page(
-    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    await exports.threads.get_thread("c-rel")  # retains m1 (the oldest message)
-    del fake.messages["m1"]
-    monkeypatch.setattr("outlook_connector.service.export.orchestrator.RANGE_PAGE", 2)
-    artifact = await exports.export(ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), combine="all"))
-    assert artifact.message_count == 4  # m5, m3, m2 live + m1 retained; m4 in Junk left out
-    assert "!! DELETED on the server" in Path(artifact.path).read_text(encoding="utf-8")
 
 
 async def test_copies_are_exported_once(exports: Exports, fake: FakeGraph) -> None:

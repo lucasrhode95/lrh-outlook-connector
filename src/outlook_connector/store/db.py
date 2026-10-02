@@ -1,8 +1,9 @@
 """Account-bound SQLite store (architecture §5.7).
 
-Holds only what Outlook cannot give back: the folder cache, retained copies of messages the
-app has seen (so they survive server-side deletion), and deletion markers. No mailbox mirror,
-no attachment bytes. Several short-lived processes may share it: WAL mode, busy timeout,
+Holds the account binding, the folder cache and a cache of message summaries this app has
+listed (for the UI's instant preview and ``refresh=false``). No bodies, no attachment bytes, no
+mailbox mirror: a message deleted on the server is dropped from the cache when a listing that
+covered it no longer has it. Several short-lived processes may share it: WAL mode, busy timeout,
 one connection per operation, short transactions.
 
 The store is a reconstructable cache. If SQLite reports it damaged when it is opened, the damaged
@@ -12,7 +13,6 @@ files are moved to a ``corrupt-<timestamp>`` folder next to it and a fresh store
 from __future__ import annotations
 
 import contextlib
-import json
 import logging
 import os
 import sqlite3
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from outlook_connector import config
 from outlook_connector.domain.errors import AccountMismatch, ConnectorError
-from outlook_connector.domain.models import DERIVED_FIELDS, Folder, Message, MessageSummary
+from outlook_connector.domain.models import DERIVED_FIELDS, Folder, MessageSummary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -37,13 +37,9 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id TEXT,
     folder_id TEXT,
     received_at TEXT,
-    is_deleted INTEGER NOT NULL DEFAULT 0,
-    deleted_at TEXT,
     summary TEXT NOT NULL,
-    content TEXT,
     updated_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS messages_conversation ON messages (conversation_id);
 CREATE INDEX IF NOT EXISTS messages_folder_received ON messages (folder_id, received_at);
 CREATE INDEX IF NOT EXISTS messages_received ON messages (received_at);
 """
@@ -138,7 +134,6 @@ class Store:
     # ---------------------------------------------------------------- messages
 
     def upsert_summaries(self, items: Iterable[MessageSummary]) -> None:
-        """Record messages seen on the server. Seeing one again clears any deletion marker."""
         now = time.time()
         rows = [
             (m.id, m.conversation_id, m.folder_id, _iso(m.received_at),
@@ -151,55 +146,20 @@ class Store:
                    VALUES (?, ?, ?, ?, ?, ?)
                    ON CONFLICT (id) DO UPDATE SET conversation_id = excluded.conversation_id,
                        folder_id = excluded.folder_id, received_at = excluded.received_at,
-                       summary = excluded.summary, updated_at = excluded.updated_at,
-                       is_deleted = 0, deleted_at = NULL""",
+                       summary = excluded.summary, updated_at = excluded.updated_at""",
                 rows,
             )
 
-    def save_messages(self, messages: Iterable[Message]) -> None:
-        """Retain full content (bodies, attachment metadata). Also refreshes the summary."""
-        messages = list(messages)
-        self.upsert_summaries(messages)
-        with self._tx() as db:
-            for m in messages:
-                existing = db.execute("SELECT content FROM messages WHERE id = ?", (m.id,)).fetchone()
-                merged = _merge_content(existing[0] if existing else None, m)
-                db.execute("UPDATE messages SET content = ? WHERE id = ?", (merged, m.id))
-
-    def message(self, message_id: str) -> Message | None:
-        with self._tx() as db:
-            row = db.execute(
-                "SELECT summary, content, is_deleted, deleted_at FROM messages WHERE id = ?", (message_id,)
-            ).fetchone()
-        return _message_from_row(row) if row else None
-
-    def messages(self, ids: Iterable[str]) -> dict[str, Message]:
-        """Retained messages (with content where retained), in one query."""
-        rows = self._rows("summary, content, is_deleted, deleted_at", "id", ids)
-        return {m.id: m for m in (_message_from_row(r) for r in rows)}
-
     def summaries(self, ids: Iterable[str]) -> dict[str, MessageSummary]:
-        rows = self._rows("summary, NULL, is_deleted, deleted_at", "id", ids)
-        return {m.id: m for m in (_summary_from_row(r) for r in rows)}
-
-    def conversations(self, conversation_ids: Iterable[str]) -> dict[str, list[MessageSummary]]:
-        """Retained summaries per conversation, in one query."""
-        out: dict[str, list[MessageSummary]] = {}
-        for row in self._rows("summary, NULL, is_deleted, deleted_at", "conversation_id", conversation_ids):
-            summary = _summary_from_row(row)
-            out.setdefault(summary.conversation_id or "", []).append(summary)
-        return out
-
-    def _rows(self, columns: str, key: str, values: Iterable[str]) -> list[tuple]:
-        values = list(dict.fromkeys(values))
-        rows: list[tuple] = []
+        values = list(dict.fromkeys(ids))
+        rows: list[tuple[str]] = []
         with self._tx() as db:
             for start in range(0, len(values), 500):  # well under SQLite's bound-parameter limit
                 chunk = values[start : start + 500]
                 rows += db.execute(
-                    f"SELECT {columns} FROM messages WHERE {key} IN ({','.join('?' * len(chunk))})", chunk
+                    f"SELECT summary FROM messages WHERE id IN ({','.join('?' * len(chunk))})", chunk
                 ).fetchall()
-        return rows
+        return {m.id: m for m in (MessageSummary.model_validate_json(r[0]) for r in rows)}
 
     def window(
         self,
@@ -207,81 +167,38 @@ class Store:
         folder_id: str | None,
         since: datetime | None,
         until: datetime | None,
-        deleted: bool | None = None,
         limit: int | None = None,
     ) -> list[MessageSummary]:
-        """Retained messages newest first. ``deleted``: None = all, True/False = only those."""
-        sql = "SELECT summary, NULL, is_deleted, deleted_at FROM messages WHERE 1=1"
-        args: list[object] = []
-        if folder_id:
-            sql += " AND folder_id = ?"
-            args.append(folder_id)
-        if since:
-            sql += " AND received_at >= ?"
-            args.append(_iso(since))
-        if until:
-            sql += " AND received_at <= ?"
-            args.append(_iso(until))
-        if deleted is not None:
-            sql += " AND is_deleted = ?"
-            args.append(int(deleted))
-        sql += " ORDER BY received_at DESC"
+        """Cached summaries newest first."""
+        where, args = _where(folder_id, since, until)
+        sql = f"SELECT summary FROM messages WHERE {where} ORDER BY received_at DESC"
         if limit:
             sql += " LIMIT ?"
             args.append(limit)
         with self._tx() as db:
             rows = db.execute(sql, args).fetchall()
-        return [_summary_from_row(r) for r in rows]
+        return [MessageSummary.model_validate_json(r[0]) for r in rows]
 
-    def conversation(self, conversation_id: str) -> list[MessageSummary]:
-        return self.conversations([conversation_id]).get(conversation_id, [])
-
-    def mark_deleted(self, ids: Iterable[str], when: datetime | None = None) -> None:
-        stamp = _iso(when or datetime.now(UTC))
+    def forget(
+        self, *, folder_id: str | None, since: datetime | None, until: datetime | None, keep: set[str]
+    ) -> None:
+        """Drop cached summaries in the window (inclusive) except ``keep``: a listing covered the
+        window and no longer has them."""
+        where, args = _where(folder_id, since, until)
         with self._tx() as db:
-            db.executemany(
-                "UPDATE messages SET is_deleted = 1, deleted_at = COALESCE(deleted_at, ?) WHERE id = ?",
-                [(stamp, i) for i in ids],
-            )
-
-    def set_folders(self, moves: dict[str, str]) -> None:
-        with self._tx() as db:
-            for message_id, folder_id in moves.items():
-                row = db.execute("SELECT summary FROM messages WHERE id = ?", (message_id,)).fetchone()
-                if row is None:
-                    continue
-                summary = json.loads(row[0]) | {"folder_id": folder_id}
-                db.execute(
-                    "UPDATE messages SET folder_id = ?, summary = ?, is_deleted = 0, deleted_at = NULL "
-                    "WHERE id = ?",
-                    (folder_id, json.dumps(summary), message_id),
-                )
+            stale = [r[0] for r in db.execute(f"SELECT id FROM messages WHERE {where}", args)]
+            db.executemany("DELETE FROM messages WHERE id = ?", [(i,) for i in stale if i not in keep])
 
 
-def _summary_from_row(row: tuple[str, str | None, int, str | None]) -> MessageSummary:
-    summary = MessageSummary.model_validate_json(row[0])
-    summary.is_deleted = bool(row[2])
-    summary.deleted_at = datetime.fromisoformat(row[3]) if row[3] else None
-    return summary
-
-
-def _message_from_row(row: tuple[str, str | None, int, str | None]) -> Message:
-    summary = _summary_from_row(row)
-    if not row[1]:
-        return Message.model_validate(summary.model_dump())
-    content = Message.model_validate_json(row[1])
-    return Message.model_validate(content.model_dump() | summary.model_dump())
-
-
-def _merge_content(existing: str | None, new: Message) -> str:
-    """Keep previously retained bodies when a newer fetch lacks them (e.g. text vs html fetch)."""
-    if not existing:
-        return new.model_dump_json()
-    old = Message.model_validate_json(existing)
-    merged = new.model_dump()
-    for key in ("body_text", "unique_body_text", "body_html", "unique_body_html", "attachments"):
-        if not merged.get(key) and getattr(old, key):
-            merged[key] = (
-                getattr(old, key) if key != "attachments" else [a.model_dump() for a in old.attachments]
-            )
-    return Message.model_validate(merged).model_dump_json()
+def _where(folder_id: str | None, since: datetime | None, until: datetime | None) -> tuple[str, list[object]]:
+    clauses, args = ["1=1"], []
+    if folder_id:
+        clauses.append("folder_id = ?")
+        args.append(folder_id)
+    if since:
+        clauses.append("received_at >= ?")
+        args.append(_iso(since))
+    if until:
+        clauses.append("received_at <= ?")
+        args.append(_iso(until))
+    return " AND ".join(clauses), args

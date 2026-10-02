@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1600" viewBox="0 0 2600 1600" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector architecture</title>
-  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses pydantic domain models. The service calls the remote layer and the local SQLite store. The remote layer reads mail through Microsoft Graph with the Outlook Mobile client, and writes through Outlook Web OWS with the One Outlook Web client. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache, retained messages, and tombstones.</desc>
+  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses pydantic domain models. The service calls the remote layer and the local SQLite store. The remote layer reads mail through Microsoft Graph with the Outlook Mobile client, and writes through Outlook Web OWS with the One Outlook Web client. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache and a summary cache of listed messages.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -80,14 +80,14 @@
   <rect x="421" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="439" y="580">threads.py</text>
   <text class="detail" x="439" y="615">conversation fetch</text>
-  <text class="detail" x="439" y="643">local sort, merge</text>
-  <text class="detail" x="439" y="671">retained-deleted mail</text>
+  <text class="detail" x="439" y="643">local sort, copies once</text>
+  <text class="detail" x="439" y="671">bounded bodies, cursor</text>
 
   <rect x="742" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="760" y="580">reconcile.py</text>
-  <text class="detail" x="760" y="615">removed → GET by id</text>
-  <text class="detail" x="760" y="643">only 404 ⇒ deleted</text>
-  <text class="detail" x="760" y="671">moves matched by id</text>
+  <text class="section-title code" x="760" y="580">files.py</text>
+  <text class="detail" x="760" y="615">attachment downloads</text>
+  <text class="detail" x="760" y="643">original .eml (MIME)</text>
+  <text class="detail" x="760" y="671">kept for a week</text>
 
   <rect x="1063" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="1081" y="580">writes.py</text>
@@ -106,7 +106,7 @@
 
   <!-- Service uses store and remote. -->
   <path class="local-flow" d="M340 804 V866"/>
-  <text class="flow-label" x="360" y="842">retain / merge</text>
+  <text class="flow-label" x="360" y="842">cache</text>
   <path class="call-flow" d="M1170 800 V866"/>
   <text class="flow-label" x="1190" y="842">domain calls</text>
 
@@ -116,10 +116,10 @@
   <text class="card-title" x="100" y="903">LOCAL STORE</text>
   <text class="card-subtitle" x="100" y="927"><tspan class="code">store/</tspan> · SQLite per account (WAL)</text>
   <rect x="100" y="960" width="480" height="210" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="detail" x="120" y="995">Folder cache (TTL, folder delta)</text>
-  <text class="detail" x="120" y="1025">Retained messages + bodies</text>
-  <text class="detail" x="120" y="1055">Tombstones (deleted on server)</text>
-  <text class="muted" x="120" y="1110">Not stored: mailbox mirror,</text>
+  <text class="detail" x="120" y="995">Folder cache (TTL)</text>
+  <text class="detail" x="120" y="1025">Summaries of listed messages</text>
+  <text class="detail" x="120" y="1055">(instant preview, refresh=false)</text>
+  <text class="muted" x="120" y="1110">Not stored: bodies, mailbox mirror,</text>
   <text class="muted" x="120" y="1138">attachment bytes</text>
 
   <!-- Remote layer. -->
