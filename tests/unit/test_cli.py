@@ -60,9 +60,9 @@ def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]
     assert script.created == []  # no MSAL app (and so no network) for offline status
 
 
-def test_status_check_reports_failures_with_exit_code(capsys: pytest.CaptureFixture[str]) -> None:
+def test_status_check_reports_failures_but_only_read_is_required(capsys: pytest.CaptureFixture[str]) -> None:
     script = Script(accounts=[msal_account()], silent={READ: token_result(aud=GRAPH, scp="Mail.Read")})
-    assert run(["status", "--check", "--unsecure"], script) == cli.EXIT_AUTH_REQUIRED
+    assert run(["status", "--check", "--unsecure"], script) == cli.EXIT_OK
     out = capsys.readouterr().out
     assert "check: ok" in out
     assert "check: FAILED" in out  # the write profile has no token

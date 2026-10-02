@@ -6,6 +6,7 @@ Commands import their dependencies lazily, so that ``mcp`` never loads the web s
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from datetime import UTC, datetime
@@ -50,6 +51,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     mcp = sub.add_parser("mcp", help="Run the MCP server over stdio (started by your MCP client).")
     _add_unsecure(mcp)
+
+    ui = sub.add_parser("ui", help="Start the local web UI (stops when idle).")
+    ui.add_argument(
+        "--port", type=int, default=8765, help="Preferred port (default 8765; a free one if busy)."
+    )
+    ui.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
+    ui.add_argument("--idle-minutes", type=float, default=30, help="Stop after this many idle minutes.")
+    _add_unsecure(ui)
     return parser
 
 
@@ -71,6 +80,17 @@ def main(argv: list[str] | None = None, *, provider_factory: type[TokenProvider]
         from outlook_connector.surfaces import mcp_main
 
         mcp_main.run(unsecure=args.unsecure)  # stdout belongs to the MCP protocol from here on
+        return EXIT_OK
+    if args.command == "ui":
+        from outlook_connector.surfaces.web import main as web_main
+
+        with contextlib.suppress(KeyboardInterrupt):
+            web_main.run(
+                unsecure=args.unsecure,
+                port=args.port,
+                open_browser=not args.no_browser,
+                idle_minutes=args.idle_minutes,
+            )
         return EXIT_OK
     try:
         if provider_factory is None:
@@ -125,8 +145,9 @@ def _status(provider: TokenProvider, args: argparse.Namespace) -> int:
         print(json.dumps(_status_dict(status, checks), indent=2))
     else:
         _print_status(status, checks)
-    signed_in_everywhere_checked = all(c["ok"] for c in checks.values()) if checks else True
-    return EXIT_OK if signed_in_everywhere_checked else EXIT_AUTH_REQUIRED
+    # Only the read profile is required; the write profile is optional until send/mutations exist.
+    read_ok = checks.get("read", {"ok": True})["ok"]
+    return EXIT_OK if read_ok else EXIT_AUTH_REQUIRED
 
 
 # ---------------------------------------------------------------------- formatting

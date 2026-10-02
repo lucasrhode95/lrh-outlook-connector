@@ -227,7 +227,9 @@ class Mailbox:
         )
         self.store.upsert_summaries(items)
         total = None
-        if state is None and folder_id is None:
+        # A different engine (Microsoft Search) counts differently, so its total is only shown as an
+        # approximation when this result set is known to be incomplete.
+        if state is None and folder_id is None and link:
             try:
                 total = await self.reader.search_total(kql)
             except Exception:  # the total is a courtesy for coverage; never fail the search for it
@@ -258,7 +260,11 @@ class Mailbox:
                 notes=[
                     "Server-side search (Microsoft Graph); hits grouped by conversation, in rank order.",
                     "Messages retained locally after deletion on the server are not searched.",
-                    *([] if total is None else ["server_total counts matching messages, not conversations."]),
+                    *(
+                        []
+                        if total is None
+                        else ["server_total is an approximate count of matching messages (Microsoft Search)."]
+                    ),
                 ],
             ),
         )

@@ -35,6 +35,7 @@ packages = ["src/outlook_connector"]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 
 [tool.ruff]
 line-length = 110
