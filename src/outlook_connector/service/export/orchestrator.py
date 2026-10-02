@@ -215,14 +215,10 @@ class Exports:
         }
         needs_html = [m.id for m in summaries if inline_ids.get(m.id) and not m.is_deleted]
         html = (await self.reader.get_messages(needs_html, body_format="html")).messages if needs_html else {}
-        content_ids = dict(
-            zip(
-                needs_html,
-                await asyncio.gather(
-                    *(self.reader.attachment_content_ids(mid, inline_ids[mid]) for mid in needs_html)
-                ),
-                strict=True,
-            )
+        content_ids = (
+            await self.reader.attachment_content_ids({mid: inline_ids[mid] for mid in needs_html})
+            if needs_html
+            else {}
         )
 
         jobs: list[tuple[str, Attachment, Path | None]] = []

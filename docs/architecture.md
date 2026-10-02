@@ -166,7 +166,7 @@ lrh-outlook-connector/
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
 - `locate(ids)`: current folder or gone (404), for reconciliation.
 - `search(query)`: `$search`, field-scoped queries passed through.
-- `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`).
+- `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`, for the inline images of every message of an export at once: one `$batch` item per image, 20 per batch across messages).
 - `download_attachment(id, att_id)` and `download_mime(id)` stream to a file.
 - Every operation is named for error messages ("While listing attachments: …").
 
