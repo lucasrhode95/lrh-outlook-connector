@@ -323,3 +323,17 @@ async def test_downloads_never_share_a_file(exports: Exports) -> None:
         files.download_attachment("m3", "a1"), files.download_attachment("m3", "a1")
     )
     assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()
+
+
+async def test_identical_attachment_files_are_stored_once(exports: Exports, fake: FakeGraph) -> None:
+    for mid, day in (("sig1", "01"), ("sig2", "02")):
+        fake.add(
+            FakeMessage(
+                mid, "Status", "f-inbox", f"2026-10-{day}T09:00:00Z", conversation="c-sig",
+                attachments=[FakeAttachment(f"{mid}-logo", "logo.png", b"same-logo", "image/png")],
+            )
+        )  # fmt: skip
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-sig"], include_attachments=True))
+    stem = "2026-10-01 Status"
+    assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/logo.png"] and artifact.attachment_files == 1
+    assert zip_text(artifact.path, f"{stem}.txt").count(f"Attachment: {stem}/logo.png") == 2

@@ -8,6 +8,7 @@ TXT or JSONL rendering → packaging.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 import tempfile
 from collections import defaultdict
@@ -278,7 +279,8 @@ class Exports:
             name = policy.dedupe(policy.safe_name(f"{base}{suffix}", fallback=f"export{suffix}"), taken)
             file = TextFile(name=name, text="")
             names: set[str] = set()
-            rendered = [self._message(m, fetched, downloads, request, file, names) for m in members]
+            stored: dict[str, str] = {}  # content digest -> name in this file's folder
+            rendered = [self._message(m, fetched, downloads, request, file, names, stored) for m in members]
             if request.format == "jsonl":
                 file.text = "".join(jsonl_record(r, body_kind=request.body) + "\n" for r in rendered)
             else:
@@ -296,6 +298,7 @@ class Exports:
         request: ExportRequest,
         file: TextFile,
         names: set[str],
+        stored: dict[str, str],
     ) -> RenderedMessage:
         """One message's text, attachment lines (TXT) and attachment records (JSONL)."""
         lines: list[str] = []
@@ -310,15 +313,21 @@ class Exports:
                     lines.append(f"[Attachment unavailable: {label}]")
                     records.append(_attachment_record(attachment, unavailable=True))
                     continue
-                final = policy.dedupe(
-                    policy.safe_name(
-                        attachment.name,
-                        fallback=f"attachment-{len(names) + 1}",
-                        eml=attachment.kind == "item",
-                    ),
-                    names,
-                )
-                file.attachments.append((final, path))
+                # The same bytes (a signature logo on every message) are stored once; every
+                # message that carries them points to that file.
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                final = stored.get(digest)
+                if final is None:
+                    final = policy.dedupe(
+                        policy.safe_name(
+                            attachment.name,
+                            fallback=f"attachment-{len(names) + 1}",
+                            eml=attachment.kind == "item",
+                        ),
+                        names,
+                    )
+                    stored[digest] = final
+                    file.attachments.append((final, path))
                 lines.append(f"{file.folder}/{final} ({policy.size_label(path.stat().st_size)})")
                 records.append(_attachment_record(attachment, file=f"{file.folder}/{final}"))
             for a in listed:
