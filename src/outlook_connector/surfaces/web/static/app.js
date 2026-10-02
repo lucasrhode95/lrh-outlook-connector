@@ -11,7 +11,8 @@ const state = {
   mode: "list",          // "list" | "search"
   query: "",
   cursor: null,
-  threads: new Map(),    // key -> { key, conversationId, subject, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
+  folders: new Map(),    // id -> folder (for well-known aliases)
+  threads: new Map(),    // key -> { key, conversationId, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
   selectedThreads: new Set(),
   selectedMessages: new Set(),
   activeMessage: null,
@@ -95,6 +96,7 @@ function query(params) {
 async function loadFolders(refresh = false) {
   if (!$("folders").children.length || refresh) $("folders").replaceChildren(el("li", { class: "loading-item" }, spinner("Loading folders…")));
   const folders = await json(`/api/folders?${query({ refresh })}`);
+  state.folders = new Map(folders.map((f) => [f.id, f]));
   const list = $("folders");
   if (state.folder === "inbox") { // the landing folder, requested by alias before its id was known
     const inbox = folders.find((f) => f.well_known === "inbox");
@@ -118,12 +120,21 @@ function folderItem(id, name, depth, unread) {
     state.mode = "list";
     $("list-title").textContent = state.folderName;
     for (const li of $("folders").children) li.classList.toggle("active", li === item);
+    renderExportView();
     loadList(true);
   });
   return item;
 }
 
 // ------------------------------------------------------------------ list and search
+
+// Deleted Items and Junk are left out unless the toggle is on, or the user is inside one of them
+// (the server always lists a folder asked for by name; threads, counts and exports follow this).
+function includeDeleted() {
+  const folder = state.folders.get(state.folder);
+  const inside = state.mode === "list" && folder && ["deleteditems", "junkemail"].includes(folder.well_known);
+  return $("opt-deleted").checked || Boolean(inside);
+}
 
 function resetThreads() {
   state.threads = new Map();
@@ -134,7 +145,7 @@ function addMessage(summary, { matched = false } = {}) {
   const key = summary.conversation_id || summary.id;
   let thread = state.threads.get(key);
   if (!thread) {
-    thread = { key, conversationId: summary.conversation_id, subject: summary.subject, messages: new Map(), expanded: false, complete: false,
+    thread = { key, conversationId: summary.conversation_id, messages: new Map(), expanded: false, complete: false,
       size: undefined, sizeAtLeast: false };
     state.threads.set(key, thread);
   }
@@ -186,15 +197,16 @@ async function loadPage(reset, path, apply, loadingText, previewPath = null) {
   } finally {
     if (request === state.listRequest) {
       $("more").disabled = false;
-      $("more").textContent = "Load more";
+      $("more").textContent = "Load older messages";
     }
   }
 }
 
 function loadList(reset) {
   const { since, until } = dateBounds();
-  const path = `/api/messages?${query({ folder: state.folder, since, until, limit: 100, cursor: reset ? null : state.cursor })}`;
-  const preview = reset ? `/api/messages?${query({ folder: state.folder, since, until, limit: 100, refresh: false })}` : null;
+  const scope = { folder: state.folder, since, until, limit: 100, include_deleted_items: includeDeleted() };
+  const path = `/api/messages?${query({ ...scope, cursor: reset ? null : state.cursor })}`;
+  const preview = reset ? `/api/messages?${query({ ...scope, refresh: false })}` : null;
   return loadPage(reset, path, (page) => {
     for (const item of page.items) addMessage(item);
   }, "Loading messages…", preview);
@@ -202,7 +214,8 @@ function loadList(reset) {
 
 function runSearch(reset) {
   const { since, until } = dateBounds();
-  const path = `/api/search?${query({ q: state.query, since, until, folder: state.folder, limit: 50, cursor: reset ? null : state.cursor })}`;
+  const path = `/api/search?${query({ q: state.query, since, until, folder: state.folder, limit: 50,
+    include_deleted_items: includeDeleted(), cursor: reset ? null : state.cursor })}`;
   return loadPage(reset, path, (result) => {
     for (const hit of result.conversations) for (const message of hit.matching_messages) addMessage(message, { matched: true });
   }, "Searching the mailbox…");
@@ -216,7 +229,7 @@ async function loadSizes(request) {
     let sizes;
     try {
       sizes = await json("/api/thread-sizes", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), include_deleted_items: $("opt-deleted").checked }) });
+        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), include_deleted_items: includeDeleted() }) });
     } catch {
       return; // counts are a refinement; the rows keep working without them
     }
@@ -232,6 +245,8 @@ async function loadSizes(request) {
 
 function showCoverage(coverage) {
   const parts = [];
+  const hidden = (coverage.excluded || {}).deleted_or_junk;
+  if (hidden) parts.push(`${hidden} in Deleted Items / Junk hidden`);
   if (coverage.server_total !== null && coverage.server_total !== undefined) parts.push(`${coverage.server_total} matching messages on the server`);
   if (coverage.source !== "remote") parts.push(coverage.source);
   $("coverage").textContent = parts.join(" · ");
@@ -295,8 +310,7 @@ function renderSingle(thread) {
       checkbox,
       el("span", { class: "toggle" }),
       el("div", {},
-        el("div", { class: "subject" }, message.subject || "(no subject)",
-          message.is_deleted ? el("span", { class: "badge deleted" }, "deleted on server") : null),
+        el("div", { class: "subject" }, message.subject || "(no subject)", ...badges(message, state.folder === null)),
         el("div", { class: "who" }, who(message.sender))),
       el("span", { class: "date" }, formatDate(message.received_at || message.sent_at))));
 }
@@ -331,19 +345,27 @@ function renderThread(thread) {
   return node;
 }
 
+// Folder (optional), "also in" for merged copies of one message, and "deleted on server".
+function badges(message, withFolder) {
+  return [
+    withFolder && message.folder ? el("span", { class: "badge" }, message.folder) : null,
+    ...(message.also_in || []).map((folder) => el("span", { class: "badge copy", title: "Another copy of this message" }, `also in ${folder}`)),
+    message.is_deleted ? el("span", { class: "badge deleted" }, "deleted on server") : null,
+  ];
+}
+
 function renderMessage(message, thread) {
   const covered = state.selectedThreads.has(thread.conversationId);
   const checkbox = el("input", { type: "checkbox", disabled: covered, title: covered ? "Included with the thread" : "Export this message",
     onclick: (event) => event.stopPropagation(),
     onchange: (event) => { toggle(state.selectedMessages, message.id, event.target.checked); renderSelection(); } });
   checkbox.checked = covered || state.selectedMessages.has(message.id);
-  return el("div", { class: `msg-row${state.activeMessage === message.id ? " active" : ""}${message.is_read === false ? " unread" : ""}`,
-    onclick: () => openMessage(message.id) },
+  const classes = ["msg-row", state.activeMessage === message.id && "active", message.is_read === false && "unread",
+    message.matched && "matched"].filter(Boolean).join(" ");
+  return el("div", { class: classes, title: message.matched ? "Matches the search" : undefined, onclick: () => openMessage(message.id) },
     checkbox,
     el("div", {},
-      el("div", { class: "msg-subject" }, who(message.sender),
-        message.folder ? el("span", { class: "badge" }, message.folder) : null,
-        message.is_deleted ? el("span", { class: "badge deleted" }, "deleted on server") : null),
+      el("div", { class: "msg-subject" }, who(message.sender), ...badges(message, true)),
       el("div", { class: "who" }, message.preview || message.subject || "")),
     el("span", { class: "date" }, formatDate(message.received_at || message.sent_at)));
 }
@@ -358,7 +380,7 @@ async function expand(thread) {
     thread.loading = true;
     render();
     try {
-      const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: $("opt-deleted").checked })}`);
+      const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: includeDeleted() })}`);
       for (const entry of full.messages) thread.messages.set(entry.message.id, { ...entry.message, matched: thread.messages.get(entry.message.id)?.matched });
       // incomplete coverage: the conversation is larger than the server lists (a "1000+" thread)
       thread.complete = full.coverage.complete;
@@ -392,11 +414,31 @@ async function openMessage(id) {
   const m = content.message;
   $("reader-title").textContent = m.subject || "(no subject)";
   const rows = [["From", who(m.sender)], ["To", (m.to || []).map(who).join(SEPARATOR)], ["Cc", (m.cc || []).map(who).join(SEPARATOR)],
-    ["Date", m.received_at ? new Date(m.received_at).toLocaleString() : ""], ["Folder", m.folder || ""],
-    ["Attachments", (content.attachments || []).filter((a) => !a.is_inline).map((a) => a.name).join(SEPARATOR)]];
+    ["Date", m.received_at ? new Date(m.received_at).toLocaleString() : ""],
+    ["Folder", [m.folder, ...(m.also_in || [])].filter(Boolean).join(SEPARATOR)]];
+  const files = (content.attachments || []).filter((a) => !a.is_inline);
+  if (files.length) rows.push(["Attachments", files.map((a) => attachmentButton(m.id, a))]);
   if (m.is_deleted) rows.push(["Note", "Deleted on the server; shown from local retention."]);
-  $("reader-meta").replaceChildren(...rows.filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+  $("reader-meta").replaceChildren(...rows.filter(([, v]) => v && v.length).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
   $("reader-body").textContent = content.text;
+}
+
+function attachmentButton(messageId, attachment) {
+  const label = attachment.name || "attachment";
+  if (attachment.kind === "reference") return el("span", { class: "muted attachment" }, `${label} (cloud link)`);
+  return el("button", { type: "button", class: "attachment", title: "Download",
+    onclick: () => download(`/api/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`, {}) }, label);
+}
+
+// Fetch with the session token and hand the response to the browser as a download.
+async function download(path, options) {
+  const response = await api(path, options);
+  const url = URL.createObjectURL(await response.blob());
+  const link = el("a", { href: url, download: filenameFrom(response.headers.get("Content-Disposition")) });
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // ------------------------------------------------------------------ selection and export
@@ -418,15 +460,36 @@ function coveredByThread(messageId) {
   return false;
 }
 
+function exportOptions() {
+  return {
+    include_attachments: $("opt-attachments").checked,
+    combine: $("opt-files").value,
+    body: $("opt-full").checked ? "full" : "unique",
+    include_deleted_items: includeDeleted(),
+  };
+}
+
 function exportRequest() {
   return {
     conversation_ids: [...state.selectedThreads],
     message_ids: [...state.selectedMessages].filter((id) => !coveredByThread(id)),
-    include_attachments: $("opt-attachments").checked,
-    combine: $("opt-all").checked ? "all" : ($("opt-per-thread").checked ? "per_thread" : "none"),
-    body: $("opt-full").checked ? "full" : "unique",
-    include_deleted_items: $("opt-deleted").checked,
+    ...exportOptions(),
   };
+}
+
+// The whole current view: this folder (or the mailbox) within the chosen dates, up to 2,000 messages.
+function viewRequest() {
+  const { since, until } = dateBounds();
+  return { folder: state.folder, since, until, ...exportOptions() };
+}
+
+function renderExportView() {
+  const button = $("export-view");
+  const { since, until } = dateBounds();
+  button.hidden = state.mode !== "list";
+  button.disabled = !state.folder && !since && !until; // the whole mailbox needs a date range
+  button.title = button.disabled ? "Choose a date range to export from all mail"
+    : "Export every message of this folder and date range (up to 2,000)";
 }
 
 function filenameFrom(disposition) {
@@ -436,21 +499,15 @@ function filenameFrom(disposition) {
   return plain ? plain[1] : "outlook-export";
 }
 
-async function runExport() {
-  const button = $("export");
+async function runExport(button, request, label) {
   button.disabled = true;
   button.textContent = "Exporting…";
   try {
-    const response = await api("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(exportRequest()) });
-    const url = URL.createObjectURL(await response.blob());
-    const link = el("a", { href: url, download: filenameFrom(response.headers.get("Content-Disposition")) });
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  } finally {
-    button.textContent = "Export";
+    await download("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+  } catch { /* the banner shows the error */ } finally {
+    button.textContent = label;
     renderSelection();
+    renderExportView();
   }
 }
 
@@ -461,6 +518,7 @@ $("search-form").addEventListener("submit", (event) => {
   state.query = $("search").value.trim();
   state.mode = state.query ? "search" : "list";
   $("list-title").textContent = state.query ? `Search: ${state.query}` : state.folderName;
+  renderExportView();
   (state.query ? runSearch : loadList)(true);
 });
 $("filter").addEventListener("input", render);
@@ -508,6 +566,7 @@ function setCalendarOpen(open) {
   const range = `${$("since").value}|${$("until").value}`;
   if (range !== picker.applied) { // reload only when the range actually changed
     picker.applied = range;
+    renderExportView();
     (state.mode === "search" ? runSearch : loadList)(true);
   }
 }
@@ -560,16 +619,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !$("calendar").hidden) setCalendarOpen(false);
 });
 $("more").addEventListener("click", () => (state.mode === "search" ? runSearch : loadList)(false));
+$("export-view").addEventListener("click", () => runExport($("export-view"), viewRequest(), "export this view"));
 $("refresh-folders").addEventListener("click", () => loadFolders(true));
 $("reader-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
-$("opt-all").addEventListener("change", (event) => { $("opt-per-thread").disabled = event.target.checked; });
-$("opt-deleted").addEventListener("change", () => { // sizes are counted with or without Deleted Items / Junk
-  for (const thread of state.threads.values()) if (!thread.complete) thread.size = undefined;
-  render();
-  loadSizes(state.listRequest);
-});
+$("opt-deleted").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
 $("clear").addEventListener("click", () => { state.selectedThreads.clear(); state.selectedMessages.clear(); render(); });
-$("export").addEventListener("click", runExport);
+$("export").addEventListener("click", () => runExport($("export"), exportRequest(), "Export"));
 setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_000);
 
 (async function start() {
@@ -579,5 +634,6 @@ setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_
     showBanner(`Not signed in. Run \`${status.sign_in_command}\` in a terminal, then reload this page.`);
     return;
   }
+  renderExportView();
   await Promise.all([loadFolders(), loadList(true)]); // independent: load side by side
 })();
