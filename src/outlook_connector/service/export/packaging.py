@@ -1,7 +1,8 @@
 """Output packaging (requirements v4 §10.2): exactly one download.
 
-A flat .txt only when the result is a single text file with no attachment files. Otherwise one
-.zip: text files at the root, each text file's attachments in a sibling folder named after it.
+A flat file (.txt or .jsonl) only when the result is a single text file with no attachment files.
+Otherwise one .zip: text files at the root, each text file's attachments in a sibling folder
+named after it.
 """
 
 from __future__ import annotations
@@ -10,11 +11,10 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import IO, Any
 
-from outlook_connector import config
+from outlook_connector.service.localfiles import claim, kept_dir
 
-KEEP_EXPORTS_SECONDS = 7 * 24 * 3600
+CONTENT_TYPES = {".txt": "text/plain; charset=utf-8", ".jsonl": "application/x-ndjson; charset=utf-8"}
 
 
 @dataclass
@@ -36,42 +36,20 @@ class Package:
     size: int
 
 
-def exports_dir() -> Path:
-    directory = config.data_dir() / "exports"
-    directory.mkdir(parents=True, exist_ok=True)
-    cutoff = time.time() - KEEP_EXPORTS_SECONDS
-    for old in directory.iterdir():
-        if old.is_file() and old.stat().st_mtime < cutoff:
-            old.unlink(missing_ok=True)
-    return directory
-
-
-def _create(out_dir: Path, filename: str, **open_args: Any) -> tuple[Path, IO[Any]]:
-    """A new file that no other export (in this or another process) can also claim."""
-    stamp = time.strftime("%Y%m%d-%H%M%S")
-    stem, suffix = PurePath(filename).stem, PurePath(filename).suffix
-    counter = 1
-    while True:
-        name = f"{stamp} {filename}" if counter == 1 else f"{stamp} {stem} ({counter}){suffix}"
-        target = out_dir / name
-        try:
-            return target, target.open(**open_args)
-        except FileExistsError:
-            counter += 1
-
-
 def package(files: list[TextFile], *, base_name: str) -> Package:
     if not files:
         raise ValueError("Nothing to package.")
-    out_dir = exports_dir()
+    out_dir = kept_dir("exports")
+    stamp = time.strftime("%Y%m%d-%H%M%S")
     if len(files) == 1 and not files[0].attachments:
-        target, handle = _create(out_dir, files[0].name, mode="x", encoding="utf-8")
-        with handle:
-            handle.write(files[0].text)
-        return Package(target, files[0].name, "text/plain; charset=utf-8", target.stat().st_size)
+        only = files[0]
+        target = claim(out_dir, f"{stamp} {only.name}")
+        target.write_text(only.text, encoding="utf-8")
+        content_type = CONTENT_TYPES.get(PurePath(only.name).suffix, "text/plain; charset=utf-8")
+        return Package(target, only.name, content_type, target.stat().st_size)
     filename = f"{base_name}.zip"
-    target, handle = _create(out_dir, filename, mode="xb")
-    with handle, zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+    target = claim(out_dir, f"{stamp} {filename}")
+    with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for item in files:
             archive.writestr(item.name, item.text.encode("utf-8"))
             for name, source in item.attachments:

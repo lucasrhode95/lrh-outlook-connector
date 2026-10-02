@@ -51,7 +51,7 @@ def test_folders_messages_search_thread_and_message(client: TestClient) -> None:
     assert found["conversations"][0]["conversation_id"] == "c-rel"
     thread = client.get("/api/threads/c-rel").json()
     assert [t["message"]["id"] for t in thread["messages"]] == ["m1", "m2", "m3"]
-    assert thread["messages"][0]["text"] is None  # the UI lists threads without bodies
+    assert "text" not in thread["messages"][0]  # the UI lists threads without bodies
     message = client.get("/api/messages/m2", params={"body": "full"}).json()
     assert "> First report" in message["text"]
 
@@ -60,6 +60,14 @@ def test_thread_sizes(client: TestClient) -> None:
     sizes = client.post("/api/thread-sizes", json={"conversation_ids": ["c-rel", "c-lunch"]}).json()
     assert [(s["conversation_id"], s["messages"]) for s in sizes] == [("c-rel", 3), ("c-lunch", 1)]
     assert client.post("/api/thread-sizes", json={"conversation_ids": "c-rel"}).status_code == 400
+
+
+def test_attachment_download_and_junk_scope(client: TestClient) -> None:
+    response = client.get("/api/messages/m3/attachments/a1")
+    assert response.status_code == 200 and response.content == b"xlsx-bytes"
+    ids = [m["id"] for m in client.get("/api/messages").json()["items"]]
+    with_junk = client.get("/api/messages", params={"include_deleted_items": "true"}).json()["items"]
+    assert "m4" not in ids and "m4" in [m["id"] for m in with_junk]
 
 
 def test_dates_from_the_browser_are_accepted(client: TestClient) -> None:

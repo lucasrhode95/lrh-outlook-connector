@@ -46,6 +46,7 @@ class FakeMessage:
     unique_html: str | None = None
     is_read: bool = True
     attachments: list[FakeAttachment] = field(default_factory=list)
+    internet_id: str | None = None  # copies of one message (e.g. sent to yourself) share it
 
     def json(self, *, text_body: bool) -> dict[str, Any]:
         body = self.text if text_body else self.html
@@ -73,7 +74,7 @@ class FakeMessage:
             "categories": [],
             "flag": {"flagStatus": "notFlagged"},
             "bodyPreview": self.text[:50],
-            "internetMessageId": f"<{self.id}@example.com>",
+            "internetMessageId": self.internet_id or f"<{self.id}@example.com>",
             "body": {"contentType": kind, "content": body},
             "uniqueBody": {"contentType": kind, "content": unique},
         }
@@ -87,6 +88,8 @@ class FakeGraph:
     calls: list[str] = field(default_factory=list)
     throttle_next: int = 0  # respond 429 to this many upcoming top-level requests
     throttle_items: int = 0  # respond 429 to this many upcoming $batch sub-requests
+    reject_tokens: int = 0  # respond 401 (token rejected) to this many upcoming top-level requests
+    claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
     batch_sizes: list[int] = field(default_factory=list)
 
     # ------------------------------------------------------------------ helpers for tests
@@ -120,6 +123,14 @@ class FakeGraph:
     # ------------------------------------------------------------------ request handling
     def handle(self, request: httpx.Request) -> httpx.Response:
         self.calls.append(f"{request.method} {request.url.path}")
+        if self.reject_tokens:
+            self.reject_tokens -= 1
+            challenge = f'Bearer error="insufficient_claims", claims="{self.claims_challenge}"'
+            return httpx.Response(
+                401,
+                headers={"www-authenticate": challenge} if self.claims_challenge else {},
+                json={"error": {"code": "InvalidAuthenticationToken"}},
+            )
         if self.throttle_next:
             self.throttle_next -= 1
             return httpx.Response(
@@ -224,15 +235,28 @@ class FakeGraph:
         return self.paged([m.json(text_body=text_body) for m in rows], path, params)
 
     def search_matches(self, query: str, rows: list[FakeMessage] | None) -> list[FakeMessage]:
+        """Words must all appear; KQL received>=/<= date terms filter by (UTC) received date."""
         rows = list(self.messages.values()) if rows is None else rows
-        terms = [t.split(":", 1)[-1].lower() for t in query.split()]
-        return [m for m in rows if all(t in f"{m.subject} {m.text}".lower() for t in terms)]
+        words, dates = [], []
+        for term in query.split():
+            if bound := re.fullmatch(r"received(>=|<=)(\d{4}-\d{2}-\d{2})", term):
+                dates.append((bound[1], bound[2]))
+            else:
+                words.append(term.split(":", 1)[-1].lower())
+
+        def in_dates(m: FakeMessage) -> bool:
+            day = m.received[:10]
+            return all(day >= d if op == ">=" else day <= d for op, d in dates)
+
+        return [m for m in rows if in_dates(m) and all(w in f"{m.subject} {m.text}".lower() for w in words)]
 
     def paged(self, items: list[dict[str, Any]], path: str, params: dict[str, str]) -> dict[str, Any]:
         top = int(params.get("$top", 10))
         skip = int(params.get("$skip", 0))
         page = items[skip : skip + top]
         body: dict[str, Any] = {"value": page}
+        if params.get("$count") == "true":
+            body["@odata.count"] = len(items)
         if skip + top < len(items):
             body["@odata.nextLink"] = f"{ROOT}{path}?{urlencode({**params, '$skip': skip + top})}"
         return body
@@ -277,8 +301,16 @@ class StaticTokens:
     class _T:
         value = "test-token"
 
-    def get_token(self, profile: str) -> Any:
+    def __init__(self) -> None:
+        self.renewals: list[dict[str, Any]] = []
+
+    def get_token(self, profile: str, **renewal: Any) -> Any:
+        if renewal:
+            self.renewals.append(renewal)
         return self._T()
+
+    def sign_in_command(self, profile: str) -> str:
+        return f"outlook-connector auth {profile}"
 
 
 def sample_mailbox() -> FakeGraph:

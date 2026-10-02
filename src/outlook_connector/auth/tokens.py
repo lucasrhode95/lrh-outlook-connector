@@ -137,12 +137,20 @@ class TokenProvider:
     def sign_in_command(self, profile: str) -> str:
         return f"{config.CLI_NAME} auth {profile}" + (" --unsecure" if self.unsecure else "")
 
-    def get_token(self, profile: str) -> AccessToken:
-        """Silent acquisition (memory, then cache, refreshing if needed). Never prompts."""
+    def get_token(
+        self, profile: str, *, force_refresh: bool = False, claims_challenge: str | None = None
+    ) -> AccessToken:
+        """Silent acquisition (memory, then cache, refreshing if needed). Never prompts.
+
+        ``force_refresh`` (after the service rejected a token with 401) skips the in-memory and cached
+        access tokens; ``claims_challenge`` passes the service's continuous-access-evaluation challenge.
+        """
         spec = self._profile(profile)
         memo = self._memo.get(profile)
-        if memo and memo.expires_on and memo.expires_on - time.time() > _MEMO_MARGIN_SECONDS:
+        reuse = not force_refresh and claims_challenge is None
+        if reuse and memo and memo.expires_on and memo.expires_on - time.time() > _MEMO_MARGIN_SECONDS:
             return replace(memo, source="memory")
+        self._memo.pop(profile, None)
         with self._lock():
             app = self._retry(lambda: self._app(spec))
             account = self._bound_account(app.get_accounts())
@@ -150,8 +158,13 @@ class TokenProvider:
                 raise AuthenticationRequired(
                     f"No Microsoft sign-in found for '{profile}'.", command=self.sign_in_command(profile)
                 )
+            options: dict[str, Any] = {}
+            if force_refresh:
+                options["force_refresh"] = True
+            if claims_challenge:
+                options["claims_challenge"] = claims_challenge
             result = self._retry(
-                lambda: app.acquire_token_silent_with_error(list(spec.scopes), account=account)
+                lambda: app.acquire_token_silent_with_error(list(spec.scopes), account=account, **options)
             )
         token = self._token_from_result(profile, result)
         self._memo[profile] = token

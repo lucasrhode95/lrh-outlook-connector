@@ -56,8 +56,20 @@ class MailReader(Protocol):
 
     async def conversation_folders(
         self, conversation_ids: list[str]
-    ) -> dict[str, tuple[list[str | None], bool]]:
-        """Per conversation: the folder id of each message, and whether there are more than listed."""
+    ) -> dict[str, tuple[list[tuple[str | None, str | None]], bool]]:
+        """Per conversation: (folder id, Internet message id) of each message, and whether there are
+        more than listed."""
+        ...
+
+    async def count_messages(
+        self,
+        *,
+        folder_id: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        minus_folders: list[str],
+    ) -> int | None:
+        """Server count of messages in the window, minus those in ``minus_folders``; None if unknown."""
         ...
 
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message: ...
