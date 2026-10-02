@@ -61,7 +61,7 @@ def _utc(value: datetime | None) -> datetime | None:
 
 
 def build_server(context: AppContext) -> FastMCP:
-    mcp = FastMCP("outlook", instructions=INSTRUCTIONS, log_level="WARNING")
+    mcp = FastMCP("lrh-outlook", instructions=INSTRUCTIONS, log_level="WARNING")
 
     async def services() -> Services:
         return await context.services()
