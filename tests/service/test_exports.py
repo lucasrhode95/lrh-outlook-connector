@@ -293,7 +293,7 @@ async def test_copies_are_exported_once(exports: Exports, fake: FakeGraph) -> No
             )
         )
     artifact = await exports.export(ExportRequest(message_ids=["s1", "r1"]))
-    assert artifact.message_count == 1 and artifact.duplicates_merged == 1
+    assert artifact.message_count == 1
     assert "Also in: Sent Items" in Path(artifact.path).read_text(encoding="utf-8")
 
 
@@ -337,3 +337,17 @@ async def test_identical_attachment_files_are_stored_once(exports: Exports, fake
     stem = "2026-10-01 Status"
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/logo.png"] and artifact.attachment_files == 1
     assert zip_text(artifact.path, f"{stem}.txt").count(f"Attachment: {stem}/logo.png") == 2
+
+
+async def test_copies_on_different_pages_are_exported_once_naming_both_folders(
+    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for mid, folder, at in (
+        ("s9", "f-sent", "2026-10-01T09:00:00Z"),
+        ("r9", "f-inbox", "2026-10-01T09:00:01Z"),
+    ):
+        fake.add(FakeMessage(mid, "Note to self", folder, at, conversation="c-s9", internet_id="<s9@x>"))
+    monkeypatch.setattr("outlook_connector.service.export.orchestrator.RANGE_PAGE", 1)  # one message a page
+    artifact = await exports.export(ExportRequest(since=datetime(2026, 10, 1, tzinfo=UTC), format="jsonl"))
+    records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
+    assert [(r["id"], r["also_in"]) for r in records] == [("r9", ["Sent Items"])]

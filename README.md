@@ -61,8 +61,9 @@ server's count for the window.
 
 `export_messages` takes conversations, message ids and/or a range (`since`, `until`, `folder`,
 `received_only`), up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one JSON record
-per message for agents; `txt` is for people. It reports what it left out, merged or could not fetch;
-every exported message carries its message, conversation and Internet ids.
+per message for agents; `txt` is for people. It reports what it left out or could not fetch; every
+exported message carries its message, conversation and Internet ids, and a message that exists in
+several folders is exported once, with `also_in` naming the other folders.
 
 **Throttling.** Microsoft Graph allows about 4 concurrent requests and 10,000 requests per 10 minutes
 per mailbox; each item of a `$batch` (at most 20) counts. The connector keeps at most 4 requests and

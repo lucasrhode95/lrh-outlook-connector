@@ -147,7 +147,7 @@ The selection is any mix of **whole threads**, **individual messages** and a **r
 TXT content:
 
 - Headers per message: From, To, CC, date, subject and folder, the message, conversation and Internet ids, the other folders of merged copies, plus a deleted marker when relevant.
-- The file header says what was left out by folder, merged as copies, or unavailable (a body that could not be fetched is marked in place; the export does not fail).
+- The file header says what was left out by folder or unavailable; a merged copy is named on its message (`Also in:`) (a body that could not be fetched is marked in place; the export does not fail).
 - Then the body.
 - The output must never contain tokens, signed URLs or authorization headers.
 
