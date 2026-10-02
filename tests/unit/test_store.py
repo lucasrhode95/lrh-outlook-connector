@@ -88,3 +88,16 @@ def test_two_store_instances_share_the_file(tmp_path: Path) -> None:
     one, two = Store(tmp_path / "m.sqlite3", "fp"), Store(tmp_path / "m.sqlite3", "fp")
     one.upsert_summaries([summary("a", day=1)])
     assert [m.id for m in two.window(folder_id=None, since=None, until=None)] == ["a"]
+
+
+def test_damaged_store_is_moved_aside_and_rebuilt(tmp_path: Path) -> None:
+    path = tmp_path / "mail.sqlite3"
+    store = Store(path, owner="fp")
+    store.upsert_summaries([summary(f"m{i}", day=1 + i % 28) for i in range(400)])
+    with path.open("r+b") as handle:  # clobber a data page in the middle of the file
+        handle.seek(path.stat().st_size // 2)
+        handle.write(b"\x00garbage" * 512)
+    fresh = Store(path, owner="fp")
+    assert fresh.window(folder_id=None, since=None, until=None) == []
+    quarantined = [p for p in tmp_path.iterdir() if p.name.startswith("corrupt-")]
+    assert len(quarantined) == 1 and (quarantined[0] / "mail.sqlite3").exists()
