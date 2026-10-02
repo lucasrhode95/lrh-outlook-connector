@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -25,7 +26,13 @@ from urllib.parse import urlsplit
 
 import httpx
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled, Upstream
+from outlook_connector.domain.errors import (
+    AuthenticationRequired,
+    InvalidRequest,
+    NotFound,
+    Throttled,
+    Upstream,
+)
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +60,11 @@ class _Token(Protocol):
 
 
 class TokenSource(Protocol):
-    def get_token(self, profile: str) -> _Token: ...
+    def get_token(
+        self, profile: str, *, force_refresh: bool = False, claims_challenge: str | None = None
+    ) -> _Token: ...
+
+    def sign_in_command(self, profile: str) -> str: ...
 
 
 class Transport:
@@ -95,11 +106,11 @@ class Transport:
         _check_host(url)
         retry = (method.upper() == "GET") if retry is None else retry
         attempts = self._max_attempts if retry else 1
-        for attempt in range(1, attempts + 1):
-            request_headers = {
-                "Authorization": f"Bearer {self._tokens.get_token(profile).value}",
-                **(headers or {}),
-            }
+        renewal: dict[str, Any] | None = None  # set after a 401: renew the token once, then retry
+        attempt = 0
+        while attempt < attempts:
+            attempt += 1
+            request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
             started = time.monotonic()
             try:
                 async with self._limit:
@@ -125,6 +136,12 @@ class Transport:
                 response.status_code,
                 (time.monotonic() - started) * 1000,
             )
+            if response.status_code == 401:
+                if renewal is None:  # the token was rejected (revoked, expired early): renew once
+                    renewal = _renewal(response)
+                    attempt -= 1
+                    continue
+                raise self._sign_in_required(profile, response)
             if response.status_code in RETRY_STATUSES and attempt < attempts:
                 await self._sleep(_retry_after(response, attempt))
                 continue
@@ -132,6 +149,16 @@ class Transport:
                 return response
             raise _error_for(response)
         raise AssertionError("unreachable")
+
+    def _bearer(self, profile: str, renewal: dict[str, Any] | None) -> str:
+        return f"Bearer {self._tokens.get_token(profile, **(renewal or {})).value}"
+
+    def _sign_in_required(self, profile: str, response: httpx.Response) -> AuthenticationRequired:
+        code = error_code(response) or "no error code"
+        return AuthenticationRequired(
+            f"Microsoft rejected the sign-in for this request (HTTP 401, {code}), also after renewing it.",
+            command=self._tokens.sign_in_command(profile),
+        )
 
     async def json(self, method: str, url: str, **kwargs: Any) -> Any:
         response = await self.request(method, url, **kwargs)
@@ -149,21 +176,28 @@ class Transport:
     ) -> tuple[str | None, int]:
         """Stream a GET response body into ``dest``. Returns (content type, size)."""
         _check_host(url)
-        request_headers = {
-            "Authorization": f"Bearer {self._tokens.get_token(profile).value}",
-            **(headers or {}),
-        }
-        async with self._limit, self._client.stream("GET", url, headers=request_headers) as response:
-            if not response.is_success:
-                await response.aread()
-                raise _error_for(response)
-            size = 0
-            async for chunk in response.aiter_bytes():
-                size += len(chunk)
-                if size > max_bytes:
-                    raise InvalidRequest(f"Download exceeds the {max_bytes // (1024 * 1024)} MiB limit.")
-                dest.write(chunk)
-            return response.headers.get("content-type"), size
+        renewal: dict[str, Any] | None = None
+        while True:
+            request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
+            async with self._limit, self._client.stream("GET", url, headers=request_headers) as response:
+                if response.status_code == 401:
+                    await response.aread()
+                    if renewal is None:
+                        renewal = _renewal(response)
+                        continue
+                    raise self._sign_in_required(profile, response)
+                if not response.is_success:
+                    await response.aread()
+                    raise _error_for(response)
+                dest.seek(0)
+                dest.truncate()
+                size = 0
+                async for chunk in response.aiter_bytes():
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise InvalidRequest(f"Download exceeds the {max_bytes // (1024 * 1024)} MiB limit.")
+                    dest.write(chunk)
+                return response.headers.get("content-type"), size
 
 
 def _check_host(url: str) -> None:
@@ -173,7 +207,23 @@ def _check_host(url: str) -> None:
 
 
 def _path(url: str) -> str:
-    return urlsplit(url).path
+    """The URL path for logs, with ids (long segments) replaced: logs never carry ids in clear."""
+    return "/".join("{id}" if len(part) > 32 else part for part in urlsplit(url).path.split("/"))
+
+
+_CLAIMS = re.compile(r'claims="([^"]+)"')
+
+
+def _renewal(response: httpx.Response) -> dict[str, Any]:
+    """How to renew a token the service rejected: force a refresh, with the CAE claims challenge if any."""
+    challenge = _CLAIMS.search(response.headers.get("www-authenticate", ""))
+    if challenge:
+        try:
+            claims = base64.b64decode(challenge.group(1) + "=" * (-len(challenge.group(1)) % 4)).decode()
+            return {"claims_challenge": claims}
+        except (ValueError, UnicodeDecodeError):
+            pass
+    return {"force_refresh": True}
 
 
 def _retry_after(response: httpx.Response, attempt: int) -> float:
@@ -243,8 +293,8 @@ def describe_failure(
         )
     if status == 400:
         return InvalidRequest(f"{prefix}{where} rejected the request ({text}).{suffix}")
-    if status in (401, 403):
-        return Upstream(f"{prefix}{where} refused access ({text}).{suffix}")
+    if status == 403:  # authorization denied for this item or action; the sign-in itself is fine
+        return Upstream(f"{prefix}{where} denied access ({text}).{suffix}")
     return Upstream(f"{prefix}{where} returned an error ({text}).{suffix}")
 
 

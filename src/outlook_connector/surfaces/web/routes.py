@@ -133,6 +133,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             limit=_int(request, "limit", 100),
             refresh=_flag(request, "refresh", True),
             cursor=request.query_params.get("cursor") or None,
+            include_deleted_items=_flag(request, "include_deleted_items"),
         )
         return _json(page)
 
@@ -144,6 +145,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             folder=request.query_params.get("folder") or None,
             limit=_int(request, "limit", 50),
             cursor=request.query_params.get("cursor") or None,
+            include_deleted_items=_flag(request, "include_deleted_items"),
         )
         return _json(result)
 
@@ -160,7 +162,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         ids = payload.get("conversation_ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
             raise InvalidRequest("conversation_ids must be a list of strings.")
-        sizes = await (await context.services()).threads.sizes(
+        sizes = await (await context.services()).mailbox.conversation_sizes(
             ids, include_deleted_items=bool(payload.get("include_deleted_items"))
         )
         return _json(sizes)
@@ -176,6 +178,12 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         )
         return _json(content)
 
+    async def attachment(request: Request) -> Response:
+        saved = await (await context.services()).files.download_attachment(
+            request.path_params["message_id"], request.path_params["attachment_id"]
+        )
+        return FileResponse(saved.path, media_type=saved.content_type, filename=saved.name)
+
     async def export(request: Request) -> Response:
         export_request = ExportRequest.model_validate(await request.json())
         artifact = await (await context.services()).exports.export(export_request)
@@ -190,6 +198,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         Route("/api/folders", api(folders)),
         Route("/api/messages", api(messages)),
         Route("/api/messages/{message_id}", api(message)),
+        Route("/api/messages/{message_id}/attachments/{attachment_id}", api(attachment)),
         Route("/api/search", api(search)),
         Route("/api/thread-sizes", api(thread_sizes), methods=["POST"]),
         Route("/api/threads/{conversation_id}", api(thread)),

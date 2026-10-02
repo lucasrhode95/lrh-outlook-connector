@@ -11,6 +11,7 @@ files are moved to a ``corrupt-<timestamp>`` folder next to it and a fresh store
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from outlook_connector import config
 from outlook_connector.domain.errors import AccountMismatch, ConnectorError
-from outlook_connector.domain.models import Folder, Message, MessageSummary
+from outlook_connector.domain.models import DERIVED_FIELDS, Folder, Message, MessageSummary
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -50,6 +51,9 @@ CREATE INDEX IF NOT EXISTS messages_received ON messages (received_at);
 
 log = logging.getLogger(__name__)
 
+# The summary column holds exactly the summary fields: never bodies, never per-result fields.
+SUMMARY_COLUMNS = frozenset(MessageSummary.model_fields) - DERIVED_FIELDS
+
 
 def store_path(fingerprint: str) -> Path:
     return config.data_dir() / "accounts" / fingerprint / "mail.sqlite3"
@@ -66,6 +70,8 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and not self._healthy():
             self._quarantine()
+        with contextlib.closing(sqlite3.connect(self.path, timeout=15)) as db:
+            db.execute("PRAGMA journal_mode=WAL")  # persistent: set once per database file
         with self._tx() as db:
             db.executescript(SCHEMA)
             row = db.execute("SELECT value FROM meta WHERE key = 'owner'").fetchone()
@@ -102,10 +108,8 @@ class Store:
 
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
-        db = sqlite3.connect(self.path, timeout=15)
+        db = sqlite3.connect(self.path, timeout=15)  # timeout = busy timeout for concurrent processes
         try:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.execute("PRAGMA busy_timeout=15000")
             with db:  # one transaction
                 yield db
         finally:
@@ -138,7 +142,7 @@ class Store:
         now = time.time()
         rows = [
             (m.id, m.conversation_id, m.folder_id, _iso(m.received_at),
-             m.model_dump_json(exclude={"is_deleted", "deleted_at", "folder"}), now)
+             m.model_dump_json(include=SUMMARY_COLUMNS), now)
             for m in items
         ]  # fmt: skip
         with self._tx() as db:
@@ -169,18 +173,33 @@ class Store:
             ).fetchone()
         return _message_from_row(row) if row else None
 
+    def messages(self, ids: Iterable[str]) -> dict[str, Message]:
+        """Retained messages (with content where retained), in one query."""
+        rows = self._rows("summary, content, is_deleted, deleted_at", "id", ids)
+        return {m.id: m for m in (_message_from_row(r) for r in rows)}
+
     def summaries(self, ids: Iterable[str]) -> dict[str, MessageSummary]:
-        ids = list(ids)
-        if not ids:
-            return {}
+        rows = self._rows("summary, NULL, is_deleted, deleted_at", "id", ids)
+        return {m.id: m for m in (_summary_from_row(r) for r in rows)}
+
+    def conversations(self, conversation_ids: Iterable[str]) -> dict[str, list[MessageSummary]]:
+        """Retained summaries per conversation, in one query."""
+        out: dict[str, list[MessageSummary]] = {}
+        for row in self._rows("summary, NULL, is_deleted, deleted_at", "conversation_id", conversation_ids):
+            summary = _summary_from_row(row)
+            out.setdefault(summary.conversation_id or "", []).append(summary)
+        return out
+
+    def _rows(self, columns: str, key: str, values: Iterable[str]) -> list[tuple]:
+        values = list(dict.fromkeys(values))
+        rows: list[tuple] = []
         with self._tx() as db:
-            rows = db.execute(
-                "SELECT summary, NULL, is_deleted, deleted_at FROM messages "
-                f"WHERE id IN ({','.join('?' * len(ids))})",
-                ids,
-            ).fetchall()
-        out = [_summary_from_row(r) for r in rows]
-        return {m.id: m for m in out}
+            for start in range(0, len(values), 500):  # well under SQLite's bound-parameter limit
+                chunk = values[start : start + 500]
+                rows += db.execute(
+                    f"SELECT {columns} FROM messages WHERE {key} IN ({','.join('?' * len(chunk))})", chunk
+                ).fetchall()
+        return rows
 
     def window(
         self,
@@ -215,12 +234,7 @@ class Store:
         return [_summary_from_row(r) for r in rows]
 
     def conversation(self, conversation_id: str) -> list[MessageSummary]:
-        with self._tx() as db:
-            rows = db.execute(
-                "SELECT summary, NULL, is_deleted, deleted_at FROM messages WHERE conversation_id = ?",
-                (conversation_id,),
-            ).fetchall()
-        return [_summary_from_row(r) for r in rows]
+        return self.conversations([conversation_id]).get(conversation_id, [])
 
     def mark_deleted(self, ids: Iterable[str], when: datetime | None = None) -> None:
         stamp = _iso(when or datetime.now(UTC))

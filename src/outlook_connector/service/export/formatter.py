@@ -1,10 +1,12 @@
-"""Plain-text rendering of exported messages (requirements v4 §10.1). AI- and human-readable."""
+"""Rendering of exported messages (requirements v4 §10.1): TXT for people, JSONL for agents."""
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import Any
 
 from outlook_connector.domain.models import Message, MessageSummary, Recipient
 
@@ -17,6 +19,8 @@ class RenderedMessage:
     message: MessageSummary
     text: str
     attachment_lines: list[str] = field(default_factory=list)
+    unavailable: str | None = None  # why the body is missing (``text`` then holds the marker)
+    attachments: list[dict[str, Any]] = field(default_factory=list)  # JSONL attachment records
 
 
 def stamp(value: datetime | None) -> str:
@@ -28,9 +32,7 @@ def people(values: Sequence[Recipient]) -> str:
     return "; ".join(r.display() for r in values)
 
 
-def body_text(message: Message | None, kind: str) -> str:
-    if message is None:
-        return "(Content unavailable: deleted on the server and never retained by this app.)"
+def body_text(message: Message, kind: str) -> str:
     return message.body(kind).strip() or "(No text content.)"  # type: ignore[arg-type]
 
 
@@ -50,6 +52,8 @@ def render_message(item: RenderedMessage, *, position: str) -> str:
         lines.append(f"Conversation id: {m.conversation_id}")
     if m.internet_message_id:
         lines.append(f"Internet id:     {m.internet_message_id}")
+    if m.also_in:
+        lines.append(f"Also in: {'; '.join(m.also_in)} (same message, exported once)")
     if m.is_deleted:
         deleted = f" on {stamp(m.deleted_at)}" if m.deleted_at else ""
         lines.append(f"!! DELETED on the server{deleted}. This is the copy retained by outlook-connector.")
@@ -93,3 +97,32 @@ def render_file(
             current = conversation
         parts.append(render_message(item, position=f"{index}/{len(items)}"))
     return "\n\n".join(parts).rstrip() + "\n"
+
+
+def jsonl_record(item: RenderedMessage, *, body_kind: str) -> str:
+    """One JSON line per message: source ids, dates, people and the body, for agents and trackers."""
+    m = item.message
+
+    def person(r: Recipient | None) -> dict[str, str | None] | None:
+        return {"name": r.name, "address": r.address} if r else None
+
+    record = {
+        "id": m.id,
+        "conversation_id": m.conversation_id,
+        "internet_message_id": m.internet_message_id,
+        "folder": m.folder,
+        "also_in": m.also_in,
+        "received_at": m.received_at.isoformat() if m.received_at else None,
+        "sent_at": m.sent_at.isoformat() if m.sent_at else None,
+        "subject": m.subject,
+        "from": person(m.sender),
+        "to": [person(r) for r in m.to],
+        "cc": [person(r) for r in m.cc],
+        "is_deleted": m.is_deleted,
+        "deleted_at": m.deleted_at.isoformat() if m.deleted_at else None,
+        "body_kind": body_kind,
+        "body": None if item.unavailable else item.text,
+        "body_unavailable": item.unavailable,
+        "attachments": item.attachments,
+    }
+    return json.dumps(record, ensure_ascii=False)
