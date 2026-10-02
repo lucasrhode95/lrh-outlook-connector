@@ -12,7 +12,7 @@ from typing import Any, TypeVar, cast
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary
 from outlook_connector.remote import graph_mapping as mapping
 from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph, raise_for_failures, relative, sub_failure
-from outlook_connector.remote.ports import BodyFormat, FetchedMessages
+from outlook_connector.remote.ports import BodyFormat, FetchedMessages, FetchedSummaries
 from outlook_connector.remote.transport import operation
 
 WELL_KNOWN = (
@@ -210,6 +210,28 @@ class GraphMailReader:
             else:
                 out.failed[mid] = str(sub_failure(response))
         return out
+
+    @_named("reading message state")
+    async def get_summaries(self, message_ids: list[str]) -> FetchedSummaries:
+        requests = {
+            mid: relative(f"/me/messages/{mid}", {"$select": mapping.SUMMARY_FIELDS}) for mid in message_ids
+        }
+        out = FetchedSummaries()
+        for mid, response in (await self._graph.batch(requests)).items() if requests else []:
+            if response.status == 404:
+                out.summaries[mid] = None
+            elif response.ok:
+                out.summaries[mid] = mapping.summary(response.body)
+            else:
+                out.failed[mid] = str(sub_failure(response))
+        return out
+
+    @_named("reading the category list")
+    async def master_categories(self) -> list[str]:
+        data = await self._graph.get("/me/outlook/masterCategories", {"$select": "displayName"})
+        return [
+            c["displayName"] for c in data.get("value", []) if isinstance(c, dict) and c.get("displayName")
+        ]
 
     @_named("listing attachments")
     async def list_attachments(self, message_id: str) -> list[Attachment]:
