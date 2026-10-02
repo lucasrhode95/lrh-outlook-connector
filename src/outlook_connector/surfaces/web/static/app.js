@@ -358,9 +358,10 @@ async function expand(thread) {
     try {
       const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: $("opt-deleted").checked })}`);
       for (const entry of full.messages) thread.messages.set(entry.message.id, { ...entry.message, matched: thread.messages.get(entry.message.id)?.matched });
-      thread.complete = true;
+      // incomplete coverage: the conversation is larger than the server lists (a "1000+" thread)
+      thread.complete = full.coverage.complete;
       thread.size = full.messages.length;
-      thread.sizeAtLeast = false;
+      thread.sizeAtLeast = !full.coverage.complete;
     } finally {
       thread.loading = false;
     }

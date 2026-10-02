@@ -51,6 +51,7 @@ class Graph:
     def __init__(self, transport: Transport, *, profile: str = "read") -> None:
         self._transport = transport
         self._profile = profile
+        self._batch_gate = asyncio.Semaphore(BATCH_CONCURRENCY)
 
     def _absolute(self, path_or_url: str) -> str:
         if path_or_url.startswith("https://"):
@@ -106,17 +107,17 @@ class Graph:
 
         - Batch request ids are numbers assigned here, never the caller's keys: Graph compares them
           case-insensitively, and immutable ids can differ only by case.
-        - At most BATCH_LIMIT requests per batch and BATCH_CONCURRENCY batches in flight, because
+        - At most BATCH_LIMIT requests per batch and BATCH_CONCURRENCY batches in flight across all
+          concurrent calls, because
           Exchange Online throttles more than a few concurrent requests per mailbox (sub-requests count).
         - Throttled sub-requests (429) are re-sent in new batches of at most BATCH_LIMIT after the
           advised delay, up to BATCH_RETRIES rounds. What is still throttled is returned as 429.
         """
         results: dict[str, SubResponse] = {}
         pending = list(requests)
-        gate = asyncio.Semaphore(BATCH_CONCURRENCY)
 
         async def send(keys: list[str]) -> dict[str, SubResponse]:
-            async with gate:
+            async with self._batch_gate:  # shared by every batch() call of this process
                 return await self._batch_once({k: requests[k] for k in keys}, prefer)
 
         for attempt in range(BATCH_RETRIES + 1):
