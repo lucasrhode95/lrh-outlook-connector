@@ -178,11 +178,10 @@ async def test_locate_reports_folder_or_none(fake: FakeGraph) -> None:
     assert await reader_for(fake).locate(["m1", "gone"]) == {"m1": "f-inbox", "gone": None}
 
 
-async def test_search_and_total(fake: FakeGraph) -> None:
+async def test_search(fake: FakeGraph) -> None:
     reader = reader_for(fake)
     hits, link = await reader.search(query="relatório", folder_id=None, page_size=25, page=None)
     assert {m.id for m in hits} == {"m1", "m2", "m3"} and link is None
-    assert await reader.search_total("relatório") == 3
 
 
 async def test_attachment_content_ids_and_downloads(fake: FakeGraph, tmp_path: Path) -> None:

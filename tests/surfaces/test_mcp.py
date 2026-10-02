@@ -89,7 +89,7 @@ async def test_list_messages_received_only(server: FastMCP) -> None:
 
 async def test_export_by_range_and_throttling_guidance(server: FastMCP) -> None:
     artifact = await call(server, "export_messages", since="2026-09-30T00:00:00", limit=10)
-    assert artifact["message_count"] == 1 and artifact["messages_unavailable"] == 0
+    assert artifact["message_count"] == 1
     assert "4 concurrent requests and 10,000 requests per 10 minutes" in (server.instructions or "")
 
 

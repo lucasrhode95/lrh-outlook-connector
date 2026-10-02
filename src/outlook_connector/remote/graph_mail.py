@@ -125,18 +125,6 @@ class GraphMailReader:
             items, link = await self._graph.page(path, params)
         return [mapping.summary(i) for i in items], link
 
-    @_named("counting search results")
-    async def search_total(self, query: str) -> int | None:
-        body = {
-            "requests": [{"entityTypes": ["message"], "query": {"queryString": query}, "from": 0, "size": 1}]
-        }
-        data = await self._graph.post("/search/query", body)
-        for value in data.get("value", []):
-            for container in value.get("hitsContainers", []):
-                if isinstance(container.get("total"), int):
-                    return container["total"]
-        return None
-
     @_named("listing a conversation")
     async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
         # $orderby cannot be combined with this filter (InefficientFilter, research §3.4): sort locally.

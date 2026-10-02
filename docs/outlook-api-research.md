@@ -81,7 +81,7 @@ Three pages of 25 per backend.
 
 - All three backends fold accents (`relatório` ≡ `relatorio`).
 - After resolving Substrate's `ImmutableId`s through Graph, `subject:relatório` returned the **identical 50 conversations** from both. For `relatório be`, all 52 `$search` conversations appear in Substrate's top 75.
-- **Conclusion:** adopt Graph `$search`, and group hits by `conversationId` locally. `/search/query` is optional, for a server total.
+- **Conclusion:** adopt Graph `$search`, and group hits by `conversationId` locally. `/search/query` is not used: its total comes from another engine and ignores the folder rules.
 
 ### 3.4 Conversations and reply headers (`threads.py`)
 

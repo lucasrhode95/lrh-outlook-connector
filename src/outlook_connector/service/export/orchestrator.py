@@ -98,7 +98,6 @@ class Exports:
             attachments_unavailable=unavailable_files,
             attachment_listing_failures=len(attachment_failures),
             messages_excluded=selection.excluded,
-            messages_unavailable=len(missing),
             unavailable_message_ids=list(missing),
         )
 
