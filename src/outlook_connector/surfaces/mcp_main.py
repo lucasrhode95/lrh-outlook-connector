@@ -1,8 +1,9 @@
 """MCP server over stdio: thin tools over the shared service (architecture §8).
 
 One process per agent session. Nothing touches the network until the first tool call.
-Reads never change the mailbox (not even read state). The write tools save drafts and send mail;
-sending needs the user's confirmation of the exact message (requirements v4 §11.1).
+Reads never change the mailbox (not even read state). The write tools save drafts, send mail
+(only with the user's confirmation of the exact message, requirements v4 §11.1) and change
+messages named by id (§11.2), each with a result per message.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from outlook_connector.domain.models import (
     Folder,
     MessageContent,
     MessagePage,
+    MutationResult,
     OutgoingMessage,
     SearchResult,
     SendResult,
@@ -80,6 +82,13 @@ original, added by Outlook) and ask them to confirm it; (3) only after they conf
 the same message and the proposal's confirmation code as user_confirmation. Never confirm on the \
 user's behalf. A message changed after confirmation is refused: propose and confirm again. If \
 send_email returns status "unknown", do not send again; ask the user to check Sent Items and Outbox.
+- Changing messages: set_read_state, set_flag, categorize, move_messages and delete_messages take \
+explicit message ids (from list, search or get_thread), at most 100 per call, never a query; \
+set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
+(already so; nothing sent), not_found, failed (with Outlook's code) or unknown (no clear answer; \
+check before repeating). categorize adds only categories that already exist. delete_messages moves \
+to Deleted Items; messages already there are left alone (there is no permanent delete). Act only \
+on messages the user asked about, and say which ones before changing many.
 - Writes need the write sign-in (`outlook-connector auth write`).
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
@@ -94,6 +103,12 @@ LOCAL_FILE = ToolAnnotations(
 )
 DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
 SEND = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
+CHANGE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+RELOCATE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
+
+MessageIds = Annotated[
+    list[str], Field(description="Explicit message ids (at most 100), from list, search or get_thread.")
+]
 
 
 IncludeDeleted = Annotated[
@@ -341,6 +356,52 @@ def build_server(context: AppContext) -> FastMCP:
         the message differs from the confirmed proposal. Never retried: on status "unknown", ask the
         user to check Sent Items and Outbox instead of sending again."""
         return await (await services()).writes.send(message, user_confirmation)
+
+    @mcp.tool(annotations=CHANGE)
+    async def set_read_state(
+        read: bool,
+        message_ids: MessageIds | None = None,
+        conversation_ids: Annotated[
+            list[str] | None, Field(description="Also every message of these conversations, in scope.")
+        ] = None,
+        include_deleted_items: IncludeDeleted = False,
+    ) -> MutationResult:
+        """Mark messages read or unread (read receipts are never sent). A result per message."""
+        return await (await services()).mutations.set_read(
+            message_ids or [],
+            read,
+            conversation_ids=conversation_ids,
+            include_deleted_items=include_deleted_items,
+        )
+
+    @mcp.tool(annotations=CHANGE)
+    async def set_flag(message_ids: MessageIds, flagged: bool) -> MutationResult:
+        """Flag or unflag messages. A result per message."""
+        return await (await services()).mutations.set_flag(message_ids, flagged)
+
+    @mcp.tool(annotations=CHANGE)
+    async def categorize(
+        message_ids: MessageIds,
+        add: Annotated[list[str] | None, Field(description="Existing category names to add.")] = None,
+        remove: Annotated[list[str] | None, Field(description="Category names to remove.")] = None,
+    ) -> MutationResult:
+        """Add and/or remove categories on messages; other categories stay. Only categories that
+        already exist in the mailbox can be added. A result per message."""
+        return await (await services()).mutations.categorize(message_ids, add=add, remove=remove)
+
+    @mcp.tool(annotations=RELOCATE)
+    async def move_messages(
+        message_ids: MessageIds,
+        folder: Annotated[str, Field(description="Target folder: path, alias (archive, inbox) or id.")],
+    ) -> MutationResult:
+        """Move messages to a folder (not Deleted Items: use delete_messages). A result per message."""
+        return await (await services()).mutations.move(message_ids, folder)
+
+    @mcp.tool(annotations=RELOCATE)
+    async def delete_messages(message_ids: MessageIds) -> MutationResult:
+        """Move messages to Deleted Items. Messages already there are left alone; nothing is ever
+        deleted permanently. A result per message."""
+        return await (await services()).mutations.delete(message_ids)
 
     return mcp
 
