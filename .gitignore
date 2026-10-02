@@ -1,0 +1,95 @@
+# App-owned MSAL cache (stored outside the repository by default)
+.teams_token_cache.json
+.teams_token_cache*
+*.token_cache
+*.token-cache
+tokens.json
+
+# Generated full-export snapshots are recoverable from the SQLite archive
+*.exports/
+
+# Locally indexed Teams message archive (database and SQLite sidecars)
+.teams_search_index*
+*.sqlite3
+*.sqlite3-*
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Environment / secrets
+.local/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Packaging / build outputs
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+exports/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs / editors
+.idea/
+.vscode/
+*.iml
+*.code-workspace
+.history/
+
+# AI coding agents / assistants
+.codex/
+.claude/
+.cursor/
+.continue/
+.windsurf/
+.aider*
+.roo/
+.cline/
+
+# Logs / temporary files
+*.log
+*.log.*
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+~$*
+
+# OS metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
