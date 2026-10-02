@@ -39,7 +39,7 @@ There is no daemon. Three entry points, all short-lived:
   - The web stack (Starlette, uvicorn) is imported only by `ui`, never by `mcp`.
   - The folder cache refreshes lazily with a short TTL, using cheap folder delta.
 - **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote `nextLink` or offset plus the original selection). They survive a client restart.
-- **Exports run in the process that asked.** The UI shows progress in-process. An MCP export completes inside the tool call and returns a resource or file path. There is no background job queue.
+- **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue (and, so far, no progress reporting: exports of a few threads take seconds).
 
 ## 3. Layers
 
@@ -217,7 +217,7 @@ lrh-outlook-connector/
 - Every write returns per-item results and updates the store afterwards.
 
 **`export/`:**
-- `orchestrator.py` resolves a selection (threads + individual messages, deduplicated). It hydrates through `$batch` with bounded concurrency, formats, attaches and packages. It returns an `ExportArtifact` and reports progress through a callback.
+- `orchestrator.py` resolves a selection (threads + individual messages, deduplicated). It hydrates through `$batch` with bounded concurrency, formats, attaches and packages. It returns an `ExportArtifact`.
 - `formatter.py` renders the TXT: per-message headers, a deleted marker, `uniqueBody` by default and `full` optional, plus attachment lines.
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
@@ -236,7 +236,7 @@ lrh-outlook-connector/
 - Server instructions repeat the send-authorization rule.
 
 **`web/`:**
-- Starlette JSON API over the same service calls, plus `POST /api/export` (one download) and export progress.
+- Starlette JSON API over the same service calls, plus `POST /api/export` (one download) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
   - a thread-grouped list;
   - a folder picker and a "recent, all mail" view;
@@ -301,7 +301,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
 | `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |
 
-Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/export` plus `GET /api/export/{id}/progress`. Write tools are MCP-first. UI write actions are optional later.
+Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 
 ## 9. Cross-cutting concerns
 
