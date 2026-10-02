@@ -22,6 +22,7 @@ from urllib.parse import quote
 from outlook_connector.domain.errors import NotFound, Upstream
 from outlook_connector.domain.models import EmailProposal
 from outlook_connector.remote import ids
+from outlook_connector.remote.ports import FolderTarget
 from outlook_connector.remote.transport import Transport, operation
 
 OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
@@ -51,8 +52,9 @@ class Ows:
         """Claims of the write token (tid, oid, upn): the account writes act as."""
         return self._tokens.get_token(self._profile).claims()
 
-    async def call(self, action: str, body: dict[str, Any]) -> list[dict[str, Any]]:
-        """Send one action; return its item results (all successful) or raise."""
+    async def call(self, action: str, body: dict[str, Any], *, strict: bool = True) -> list[dict[str, Any]]:
+        """Send one action; return its item results, in request order. ``strict``: raise unless
+        every item succeeded (otherwise the caller reads each item's outcome)."""
         envelope = {
             "__type": f"{action}JsonRequest:#Exchange",
             "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": SERVER_VERSION},
@@ -82,15 +84,17 @@ class Ows:
             json_body=None if in_header else envelope,
             write=True,
         )
-        return _items(data, action)
+        return _items(data, action, strict=strict)
 
 
-def _items(data: Any, action: str) -> list[dict[str, Any]]:
+def _items(data: Any, action: str, *, strict: bool) -> list[dict[str, Any]]:
     body = data.get("Body") if isinstance(data, dict) else None
     messages = body.get("ResponseMessages") if isinstance(body, dict) else None
     items = messages.get("Items") if isinstance(messages, dict) else None
     if not isinstance(items, list) or not items:
         raise Upstream(f"Outlook answered {action} without item results.")
+    if not strict:
+        return [item if isinstance(item, dict) else {} for item in items]
     for item in items:
         if not isinstance(item, dict) or item.get("ResponseClass") not in SUCCESS:
             raise item_error(item if isinstance(item, dict) else {}, action)
@@ -104,6 +108,15 @@ def item_error(item: dict[str, Any], action: str) -> Exception:
     if code in ("ErrorItemNotFound", "ErrorInvalidIdMalformed", "ErrorInvalidIdNotAnItemAttachmentId"):
         return NotFound(f"Outlook did not find the item ({detail}).")
     return Upstream(f"Outlook refused the change ({detail}).")
+
+
+def succeeded(item: dict[str, Any]) -> bool:
+    return item.get("ResponseClass") in SUCCESS
+
+
+def outcome(item: dict[str, Any]) -> str | None:
+    """None when the item succeeded, else its response code (e.g. ErrorItemNotFound)."""
+    return None if succeeded(item) else str(item.get("ResponseCode") or item.get("ResponseClass") or "Error")
 
 
 def _address(address: str) -> dict[str, str]:
@@ -140,6 +153,89 @@ class OwsMailWriter:
         """Send once and keep a copy in Sent Items. Never retried."""
         with operation("sending a message"):
             await self._ows.call("CreateItem", _create(message, "SendAndSaveCopy"))
+
+    # ---------------------------------------------------------------- mutations (research §4.2)
+    # Each returns {message id: None when done, else Outlook's response code}, one request per call
+    # (the service keeps calls small). Ids are Graph immutable ids; they survive moves.
+
+    async def set_read(self, message_ids: list[str], is_read: bool) -> dict[str, str | None]:
+        with operation("changing read state"):
+            changes = {mid: ("message:IsRead", {"IsRead": is_read}) for mid in message_ids}
+            return await self._update(changes)
+
+    async def set_flag(self, message_ids: list[str], flagged: bool) -> dict[str, str | None]:
+        status = "Flagged" if flagged else "NotFlagged"
+        flag = {"Flag": {"__type": "FlagType:#Exchange", "FlagStatus": status}}
+        with operation("changing flags"):
+            return await self._update({mid: ("item:Flag", flag) for mid in message_ids})
+
+    async def set_categories(self, categories: dict[str, list[str]]) -> dict[str, str | None]:
+        """The full category list per message (replaces what it had)."""
+        with operation("changing categories"):
+            return await self._update(
+                {mid: ("item:Categories", {"Categories": names}) for mid, names in categories.items()}
+            )
+
+    async def move(self, message_ids: list[str], folder: FolderTarget) -> dict[str, str | None]:
+        body = {
+            "ToFolderId": {"__type": "TargetFolderId:#Exchange", "BaseFolderId": _folder(folder)},
+            "ItemIds": [_item_id(mid) for mid in message_ids],
+            "ReturnNewItemIds": True,
+        }
+        with operation("moving messages"):
+            return _per_id(message_ids, await self._ows.call("MoveItem", body, strict=False))
+
+    async def delete(self, message_ids: list[str]) -> dict[str, str | None]:
+        """Move to Deleted Items (``MoveToDeletedItems``). There is no hard delete."""
+        body = {
+            "ItemIds": [_item_id(mid) for mid in message_ids],
+            "DeleteType": "MoveToDeletedItems",
+            "SendMeetingCancellations": "SendToNone",
+            "AffectedTaskOccurrences": "AllOccurrences",
+            "SuppressReadReceipts": True,
+        }
+        with operation("deleting messages"):
+            return _per_id(message_ids, await self._ows.call("DeleteItem", body, strict=False))
+
+    async def _update(self, changes: dict[str, tuple[str, dict[str, Any]]]) -> dict[str, str | None]:
+        """``UpdateItem`` with one ``SetItemField`` per message, as proven (research §4.2)."""
+        body = {
+            "ItemChanges": [
+                {
+                    "__type": "ItemChange:#Exchange",
+                    "ItemId": _item_id(mid),
+                    "Updates": [
+                        {
+                            "__type": "SetItemField:#Exchange",
+                            "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": field_uri},
+                            "Item": {"__type": "Message:#Exchange", **props},
+                        }
+                    ],
+                }
+                for mid, (field_uri, props) in changes.items()
+            ],
+            "ConflictResolution": "AlwaysOverwrite",
+            "MessageDisposition": "SaveOnly",
+            "SuppressReadReceipts": True,
+            "SendCalendarInvitationsOrCancellations": "SendToNone",
+        }
+        return _per_id(list(changes), await self._ows.call("UpdateItem", body, strict=False))
+
+
+def _folder(target: FolderTarget) -> dict[str, str]:
+    if target.well_known:
+        return {"__type": "DistinguishedFolderId:#Exchange", "Id": target.well_known}
+    return {"__type": "FolderId:#Exchange", "Id": ids.to_ows(target.folder_id)}
+
+
+def _item_id(message_id: str) -> dict[str, str]:
+    return {"__type": "ItemId:#Exchange", "Id": ids.to_ows(message_id)}
+
+
+def _per_id(message_ids: list[str], items: list[dict[str, Any]]) -> dict[str, str | None]:
+    if len(items) != len(message_ids):
+        raise Upstream(f"Outlook answered {len(items)} item results for {len(message_ids)} messages.")
+    return {mid: outcome(item) for mid, item in zip(message_ids, items, strict=True)}
 
 
 def _create(message: EmailProposal, disposition: str) -> dict[str, Any]:
