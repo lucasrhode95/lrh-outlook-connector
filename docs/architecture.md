@@ -241,7 +241,7 @@ lrh-outlook-connector/
   - non-inline attachments by default;
   - inline images only when the rendered body references their `cid:`;
   - `itemAttachment` → `.eml`;
-  - sanitized, deduplicated names;
+  - sanitized, deduplicated names; identical files (same bytes, e.g. a signature logo on every message) are stored once per output file, and every message points to that file;
   - a failure becomes an `[Attachment unavailable: name]` line.
 - `packaging.py` decides the output: one flat `.txt` only when the result is a single TXT with no attachment files, otherwise one `.zip` (TXTs at the root, `<stem>/` folders for attachments). The file is created exclusively in the exports directory (a numbered suffix on a name clash, so concurrent exports never overwrite each other).
 
