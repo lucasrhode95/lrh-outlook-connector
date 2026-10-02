@@ -37,9 +37,10 @@ There is no daemon. Three entry points, all short-lived:
 - **Startup cost matters**, because every agent session pays it.
   - Nothing runs at startup: no sync, no folder walk, no token refresh before the first call.
   - The web stack (Starlette, uvicorn) is imported only by `ui`, never by `mcp`.
-  - The folder cache refreshes lazily with a short TTL, using cheap folder delta.
+  - Cached data is shown first: folders come from the cache immediately and a stale cache (older than 10 minutes) refreshes in the background; the UI draws locally retained messages, then replaces them with the server's list.
+  - Each process builds its MSAL clients once and keeps access tokens in memory until shortly before expiry (rebuilding the client costs a network round trip).
 - **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote `nextLink` or offset plus the original selection). They survive a client restart.
-- **Exports run in the process that asked.** The UI shows progress in-process. An MCP export completes inside the tool call and returns a resource or file path. There is no background job queue.
+- **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue (and, so far, no progress reporting: exports of a few threads take seconds).
 
 ## 3. Layers
 
@@ -61,60 +62,58 @@ The diagram at the top shows the layers, top to bottom:
 
 ```
 lrh-outlook-connector/
-├─ pyproject.toml · uv.lock        # Python ≥3.12; deps: mcp, msal, msal-extensions
-│                                  # (mcp already brings httpx, pydantic, starlette, uvicorn, anyio)
+├─ pyproject.toml                  # Python ≥3.12; msal, msal-extensions[portalocker], mcp, httpx, pydantic,
+│                                  # starlette, uvicorn (uv- and pip-compatible; dev group: pytest, ruff)
 ├─ README.md · AGENTS.md
 ├─ docs/                           # requirements v4, roadmap, research, this file
 ├─ research/                       # stdlib probes + README (independent of the package)
 ├─ src/outlook_connector/
-│  ├─ __main__.py                  # CLI dispatch: auth · mcp · ui · status (lazy imports per command)
-│  ├─ bootstrap.py                 # lazy factory: config → auth → transport → clients → store → service
-│  ├─ config.py                    # frozen settings: client ids, scopes, allowed hosts, paths, limits
-│  ├─ logging.py                   # stdlib logging + redaction filter
+│  ├─ __main__.py                  # CLI dispatch: auth · status · mcp · ui (lazy imports per command)
+│  ├─ bootstrap.py                 # lazy composition: tokens → transport → reader → store → services
+│  ├─ config.py                    # client profiles, denied pairs, data directory, cache paths
 │  │
 │  ├─ auth/
 │  │  └─ tokens.py                 # one centralized TokenProvider; named profiles are config
 │  │
 │  ├─ remote/                      # all Microsoft protocol knowledge (async)
-│  │  ├─ ports.py                  # MailReader / MailWriter protocols the service depends on
+│  │  ├─ ports.py                  # MailReader protocol the service depends on (MailWriter: send phase)
 │  │  ├─ transport.py              # shared httpx.AsyncClient and request policy
-│  │  ├─ ids.py                    # Graph immutable id ↔ OWS id; conversation ids
-│  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference
-│  │  ├─ graph_mail.py             # mail reads (folders, list, get, conversation, search, attachments, MIME)
-│  │  ├─ graph_mapping.py          # Graph JSON → domain models
-│  │  └─ ows.py                    # OWS envelope + write actions
+│  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference, downloads
+│  │  ├─ graph_mail.py             # MailReader over Graph
+│  │  └─ graph_mapping.py          # Graph JSON → domain models
+│  │                               # later: ows.py (MailWriter) + ids.py (Graph ↔ OWS ids)
 │  │
 │  ├─ domain/
 │  │  ├─ models.py                 # pydantic models (the single schema source)
 │  │  └─ errors.py                 # domain errors
 │  │
 │  ├─ store/
-│  │  ├─ db.py                     # sqlite3 connection policy, owner fingerprint check
-│  │  ├─ schema.sql                # current schema
-│  │  └─ retained.py               # folder cache, retained messages/bodies, tombstones
+│  │  └─ db.py                     # account-bound SQLite: folder cache, retained messages, tombstones
 │  │
 │  ├─ service/
 │  │  ├─ mailbox.py                # folders, list, get, search
 │  │  ├─ threads.py                # conversation retrieval (+ branch labelling later)
-│  │  ├─ reconcile.py              # deleted/moved detection and retention merge
-│  │  ├─ writes.py                 # send + mailbox mutations
+│  │  ├─ reconcile.py              # deleted/moved detection
+│  │  ├─ cursors.py                # self-contained continuation cursors
+│  │  ├─ files.py                  # attachment and .eml downloads for agents
 │  │  └─ export/
 │  │     ├─ orchestrator.py        # ExportRequest → ExportArtifact (the only export path)
 │  │     ├─ formatter.py           # TXT rendering
 │  │     ├─ attachments.py         # attachment selection policy + safe filenames
 │  │     └─ packaging.py           # flat TXT vs single ZIP
+│  │                               # later: writes.py (send + mailbox changes)
 │  │
 │  └─ surfaces/
-│     ├─ mcp_main.py               # FastMCP (stdio) tools + resources
+│     ├─ mcp_main.py               # FastMCP (stdio) tools
 │     └─ web/
-│        ├─ main.py                # Starlette app + uvicorn launch (imported only by `ui`)
-│        ├─ routes.py              # JSON API, export download, progress
-│        └─ static/                # index.html, app.js (ES modules, no build step), app.css
+│        ├─ main.py                # uvicorn launch + idle shutdown (imported only by `ui`)
+│        ├─ routes.py              # Starlette JSON API, session-token/Host guard, export download
+│        └─ static/                # index.html, app.js (ES module, no build step), app.css
 └─ tests/
-   ├─ fakes/                       # httpx.MockTransport handlers with synthetic Graph/OWS payloads
-   ├─ unit/                        # ids, mapping, formatter, packaging, attachment policy, reconcile
-   ├─ service/                     # threads, search grouping, retention merge, writes (against fakes)
-   └─ surfaces/                    # MCP contract (schemas, annotations), web routes
+   ├─ fakes/                       # fake MSAL; in-memory Graph mailbox over httpx.MockTransport
+   ├─ unit/                        # config, tokens, CLI, Graph reader, store, reconcile
+   ├─ service/                     # mailbox, threads, exports (against the fake Graph)
+   └─ surfaces/                    # MCP contract, web routes
 ```
 
 ## 5. Module responsibilities
@@ -124,8 +123,8 @@ lrh-outlook-connector/
 - **One centralized provider** serving any number of named profiles (`client_id` + resource scope), all defined in `config.py`. Cache, locking, fail-closed handling and the account check are shared. Profiles today (research §2):
   - `read`: Outlook Mobile `27922004-…` → `https://graph.microsoft.com/Mail.Read`.
   - `write`: One Outlook Web `9199bf20-…` → `https://outlook.office.com/.default`.
-- MSAL `PublicClientApplication` per profile. Silent acquisition first. Device code only from the `auth` command, so surfaces never start an interactive sign-in. They raise `AuthenticationRequired` with the exact command to run.
-- Encrypted cache via `msal-extensions` by default, **fail-closed** when unavailable. `--unsecure` selects a separate plaintext cache under `.local/` with a loud warning.
+- One MSAL `PublicClientApplication` per profile per process; the access token is kept in memory until 5 minutes before expiry. Silent acquisition first. Device code only from the `auth` command, so surfaces never start an interactive sign-in. They raise `AuthenticationRequired` with the exact command to run.
+- Encrypted cache via `msal-extensions` by default, **fail-closed** when unavailable. `--unsecure` selects a separate, clearly named plaintext cache file in the same data directory, with a warning on every use. Every process finds it at the same path, wherever it was started.
 - Cross-process lock around cache reads and writes.
 - The account fingerprint (`tid`+`oid`) must match the store owner (§7).
 - The `write` profile is optional. Read-only use works without it, and write tools report "write sign-in required".
@@ -195,7 +194,7 @@ lrh-outlook-connector/
 ### 5.8 `service/`
 
 **`mailbox.py`:**
-- `list_folders` uses the cache when fresh and folder delta otherwise.
+- `list_folders` answers from the cache immediately (stale-while-revalidate: older than 10 minutes triggers a background refresh); only an empty cache or `refresh=true` waits for Graph, whose folder levels are fetched in parallel.
 - `list_messages(selection, refresh=True)` fetches from remote, merges retained rows that are deleted remotely (labelled), and returns `Page` + `Coverage`.
 - `get_message(id, offset, max_chars, body)` returns a bounded body with continuation and retains what it fetched.
 - `search(query, since?, until?, folder?)` runs Graph `$search` and groups hits by `conversationId`. Coverage reports "server search; retained-deleted mail not included".
@@ -219,7 +218,7 @@ lrh-outlook-connector/
 - Every write returns per-item results and updates the store afterwards.
 
 **`export/`:**
-- `orchestrator.py` resolves a selection (threads + individual messages, deduplicated). It hydrates through `$batch` with bounded concurrency, formats, attaches and packages. It returns an `ExportArtifact` and reports progress through a callback.
+- `orchestrator.py` resolves a selection (threads + individual messages, deduplicated). It hydrates through `$batch` with bounded concurrency, formats, attaches and packages. It returns an `ExportArtifact`.
 - `formatter.py` renders the TXT: per-message headers, a deleted marker, `uniqueBody` by default and `full` optional, plus attachment lines.
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
@@ -238,7 +237,7 @@ lrh-outlook-connector/
 - Server instructions repeat the send-authorization rule.
 
 **`web/`:**
-- Starlette JSON API over the same service calls, plus `POST /api/export` (one download) and export progress.
+- Starlette JSON API over the same service calls, plus `POST /api/export` (one download) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
   - a thread-grouped list;
   - a folder picker and a "recent, all mail" view;
@@ -283,8 +282,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 - **Item key:** `(fingerprint, mailbox, Graph immutable id)`. Immutable ids survive moves within the mailbox (verified).
 - **Conversation key:** Graph `conversationId`.
 - **Locations:**
-  - secure token cache: OS user data directory;
-  - dev token cache: `.local/` (`--unsecure`);
+  - token cache: `%LOCALAPPDATA%/lrh-outlook-connector/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
+  - `OUTLOOK_CONNECTOR_HOME` overrides the data directory (tests, portability);
   - store: `%LOCALAPPDATA%/lrh-outlook-connector/<fingerprint>/mail.sqlite3`;
   - export temp files: OS temp directory, cleaned after delivery.
 
@@ -303,7 +302,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
 | `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |
 
-Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/export` plus `GET /api/export/{id}/progress`. Write tools are MCP-first. UI write actions are optional later.
+Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`) and add `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 
 ## 9. Cross-cutting concerns
 
@@ -339,5 +338,5 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 
 | # | Question | Decision (2026-10-02) |
 |---|---|---|
-| A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache under `.local/` is available during development. |
+| A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache (a separate file in the data directory) is available during development. |
 | A2 | Package / CLI name | **`outlook_connector` / `outlook-connector`** |

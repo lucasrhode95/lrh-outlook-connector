@@ -1,0 +1,68 @@
+"""The ports the service depends on (architecture §6.1).
+
+Adapters: remote/graph_mail.py implements MailReader. MailWriter (OWS) arrives with the send phase.
+Swapping an adapter (another tenant, a policy change) must not change anything above this file.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from pathlib import Path
+from typing import Literal, Protocol
+
+from outlook_connector.domain.models import (
+    Attachment,
+    Folder,
+    Message,
+    MessageSummary,
+)
+
+BodyFormat = Literal["text", "html"]
+
+
+class MailReader(Protocol):
+    async def list_folders(self) -> list[Folder]: ...
+
+    async def list_messages(
+        self,
+        *,
+        folder_id: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        page_size: int,
+        page: str | None,
+    ) -> tuple[list[MessageSummary], str | None]:
+        """One page of messages, newest first. ``page`` is an opaque continuation from a previous call."""
+        ...
+
+    async def search(
+        self, *, query: str, folder_id: str | None, page_size: int, page: str | None
+    ) -> tuple[list[MessageSummary], str | None]: ...
+
+    async def search_total(self, query: str) -> int | None: ...
+
+    async def conversation(self, conversation_id: str) -> list[MessageSummary]:
+        """Every message of the conversation in every folder (unsorted)."""
+        ...
+
+    async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message: ...
+
+    async def get_messages(
+        self, message_ids: list[str], *, body_format: BodyFormat = "text"
+    ) -> dict[str, Message | None]:
+        """Batch fetch with bodies. ``None`` for ids that no longer exist."""
+        ...
+
+    async def locate(self, message_ids: list[str]) -> dict[str, str | None]:
+        """Current folder id per message, ``None`` when the message no longer exists."""
+        ...
+
+    async def list_attachments(self, message_id: str) -> list[Attachment]: ...
+
+    async def attachment_content_ids(
+        self, message_id: str, attachment_ids: list[str]
+    ) -> dict[str, str | None]: ...
+
+    async def download_attachment(self, message_id: str, attachment_id: str, dest: Path) -> int: ...
+
+    async def download_mime(self, message_id: str, dest: Path) -> int: ...

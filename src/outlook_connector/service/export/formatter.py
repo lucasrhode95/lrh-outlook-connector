@@ -1,0 +1,77 @@
+"""Plain-text rendering of exported messages (requirements v4 §10.1). AI- and human-readable."""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from outlook_connector.domain.models import Message, MessageSummary, Recipient
+
+RULE = "=" * 78
+THIN = "-" * 78
+
+
+@dataclass
+class RenderedMessage:
+    message: MessageSummary
+    text: str
+    attachment_lines: list[str] = field(default_factory=list)
+
+
+def stamp(value: datetime | None) -> str:
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC") if value else "(no date)"
+
+
+def people(values: Sequence[Recipient]) -> str:
+    return ", ".join(r.display() for r in values)
+
+
+def body_text(message: Message | None, kind: str) -> str:
+    if message is None:
+        return "(Content unavailable: deleted on the server and never retained by this app.)"
+    return message.body(kind).strip() or "(No text content.)"  # type: ignore[arg-type]
+
+
+def render_message(item: RenderedMessage, *, position: str) -> str:
+    m = item.message
+    lines = [RULE, f"[{position}] {stamp(m.received_at or m.sent_at)}"]
+    lines.append(f"From:    {m.sender.display() if m.sender else '(unknown)'}")
+    if m.to:
+        lines.append(f"To:      {people(m.to)}")
+    if m.cc:
+        lines.append(f"Cc:      {people(m.cc)}")
+    lines.append(f"Subject: {m.subject or '(no subject)'}")
+    if m.folder:
+        lines.append(f"Folder:  {m.folder}")
+    if m.is_deleted:
+        deleted = f" on {stamp(m.deleted_at)}" if m.deleted_at else ""
+        lines.append(f"!! DELETED on the server{deleted}. This is the copy retained by outlook-connector.")
+    for line in item.attachment_lines:
+        lines.append(f"Attachment: {line}")
+    lines.append(THIN)
+    lines.append(item.text)
+    return "\n".join(lines)
+
+
+def render_file(title: str, items: list[RenderedMessage], *, body_kind: str, sections: bool) -> str:
+    """One TXT file. With ``sections``, consecutive messages of different conversations get a header."""
+    dates = [m.message.received_at or m.message.sent_at for m in items]
+    known = [d for d in dates if d]
+    span = f"{stamp(min(known))} to {stamp(max(known))}" if known else "no dates"
+    head = [
+        title,
+        f"Messages: {len(items)} ({span})",
+        f"Exported: {stamp(datetime.now(UTC))} by outlook-connector; body: "
+        + ("without quoted history" if body_kind == "unique" else "full, including quoted history"),
+        "",
+    ]
+    parts = ["\n".join(head)]
+    current: str | None = None
+    for index, item in enumerate(items, start=1):
+        conversation = item.message.conversation_id or item.message.id
+        if sections and conversation != current:
+            parts.append(f"\n### Conversation: {item.message.subject or '(no subject)'}\n")
+            current = conversation
+        parts.append(render_message(item, position=f"{index}/{len(items)}"))
+    return "\n\n".join(parts).rstrip() + "\n"

@@ -68,7 +68,7 @@ Authentication requirements:
 
 - Never use browser tokens, cookies, storage, canaries or profiles.
 - Encrypted persistence via `msal-extensions` by default. If secure storage is unavailable, **fail closed**.
-- `--unsecure` is an explicit development mode: separate cache under gitignored `.local/`, a loud warning, never implicit.
+- `--unsecure` is an explicit development mode: a separate plaintext cache file outside the repository, a warning on every use, never implicit.
 - Interactive sign-in happens only through `outlook-connector auth [read|write]`. UI and MCP calls use silent auth and return an actionable "sign-in required" error.
 - Cross-process cache locking, because several processes may run at once.
 - Sign-in is per client: the read client for the MVP, the write client when send ships. A token is used only if its account matches the bound account (§5).
@@ -89,7 +89,7 @@ Authentication requirements:
 
 Lazy population:
 
-- **Folders** are loaded eagerly, cached, and refreshed with folder delta. This is cheap: about 22 records.
+- **Folders** are cached and served from the cache immediately; a cache older than 10 minutes is refreshed in the background. A full refresh is cheap: about 23 folders in under a second.
 - **Message metadata is not mirrored.** It is fetched by list/search/thread calls and upserted only as needed for retention and export. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2).
 - **Bodies and attachments** are fetched only on read or export. Attachment bytes are never cached automatically.
 - **Retention:** remote deletes and moves never erase known local content. When a message disappears remotely, mark it `is_deleted` with `deleted_at` when known, and keep any body already retained. Moves update `parentFolderId`, which is safe because immutable IDs survive moves within a mailbox. A Graph delta `@removed` is ambiguous between a move and a delete. Resolve it with a direct GET on the immutable ID before marking the message deleted.
