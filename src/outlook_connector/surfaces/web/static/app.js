@@ -376,8 +376,101 @@ $("search-form").addEventListener("submit", (event) => {
   (state.query ? runSearch : loadList)(true);
 });
 $("filter").addEventListener("input", render);
-$("since").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
-$("until").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
+
+// ------------------------------------------------------------------ date range picker (same behaviour as lrh-teams)
+
+const picker = { month: new Date(), choosingEnd: false, draftStart: null, applied: "|" }; // applied = "since|until"
+picker.month.setDate(1);
+
+function dateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function dateFromKey(value) {
+  const [year, month, day] = value.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function formatKey(value) {
+  return dateFromKey(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function setDateRange(start, end) {
+  $("since").value = start || "";
+  $("until").value = end || "";
+  $("range-label").textContent = !start ? "Any date"
+    : start === end ? formatKey(start) : `${formatKey(start)} – ${formatKey(end)}`;
+  renderCalendar();
+}
+
+function setCalendarOpen(open) {
+  $("calendar").hidden = !open;
+  $("range-toggle").setAttribute("aria-expanded", String(open));
+  if (open) {
+    // open towards whichever side has room for the 330px calendar
+    const box = $("range-picker").getBoundingClientRect();
+    $("calendar").classList.toggle("align-right", box.left + 340 > window.innerWidth);
+    picker.month = $("since").value ? dateFromKey($("since").value) : new Date();
+    picker.month.setDate(1);
+    picker.choosingEnd = false;
+    picker.draftStart = null;
+    renderCalendar();
+    return;
+  }
+  const range = `${$("since").value}|${$("until").value}`;
+  if (range !== picker.applied) { // reload only when the range actually changed
+    picker.applied = range;
+    (state.mode === "search" ? runSearch : loadList)(true);
+  }
+}
+
+function renderCalendar() {
+  $("calendar-month").textContent = picker.month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  $("calendar-hint").textContent = picker.choosingEnd
+    ? "Choose an end date, or press Done to keep one day."
+    : "Click once for one day; click again to set the end date.";
+  const first = new Date(picker.month.getFullYear(), picker.month.getMonth(), 1);
+  const mondayOffset = (first.getDay() + 6) % 7;
+  const start = $("since").value;
+  const end = $("until").value;
+  const days = [];
+  for (let index = 0; index < 42; index += 1) {
+    const day = new Date(first.getFullYear(), first.getMonth(), 1 - mondayOffset + index);
+    const key = dateKey(day);
+    const classes = ["calendar-day"];
+    if (day.getMonth() !== picker.month.getMonth()) classes.push("outside-month");
+    if (start && end && key >= start && key <= end) classes.push("in-range");
+    if (start && key === start) classes.push("range-start");
+    if (end && key === end) classes.push("range-end");
+    days.push(el("button", { type: "button", class: classes.join(" "), "aria-label": day.toLocaleDateString(undefined, { dateStyle: "full" }),
+      onclick: () => chooseDate(key) }, day.getDate()));
+  }
+  $("calendar-days").replaceChildren(...days);
+}
+
+function chooseDate(key) {
+  if (!picker.choosingEnd || key < picker.draftStart) {
+    picker.draftStart = key;
+    picker.choosingEnd = true;
+    setDateRange(key, key);
+    return;
+  }
+  setDateRange(picker.draftStart, key);
+  picker.choosingEnd = false;
+  setCalendarOpen(false);
+}
+
+$("range-toggle").addEventListener("click", () => setCalendarOpen($("calendar").hidden));
+$("previous-month").addEventListener("click", () => { picker.month.setMonth(picker.month.getMonth() - 1); renderCalendar(); });
+$("next-month").addEventListener("click", () => { picker.month.setMonth(picker.month.getMonth() + 1); renderCalendar(); });
+$("clear-dates").addEventListener("click", () => { picker.choosingEnd = false; setDateRange("", ""); setCalendarOpen(false); });
+$("calendar-done").addEventListener("click", () => setCalendarOpen(false));
+document.addEventListener("pointerdown", (event) => {
+  if (!$("calendar").hidden && !$("range-picker").contains(event.target)) setCalendarOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("calendar").hidden) setCalendarOpen(false);
+});
 $("more").addEventListener("click", () => (state.mode === "search" ? runSearch : loadList)(false));
 $("refresh-folders").addEventListener("click", () => loadFolders(true));
 $("reader-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
