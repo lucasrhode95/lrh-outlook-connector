@@ -151,6 +151,40 @@ async def test_inline_only_attachments_are_found_when_exporting_files(
     assert "2026-09-30 Chart/chart.png" in zip_names(artifact.path)
 
 
+async def test_inline_image_ids_of_many_messages_are_read_in_shared_batches(
+    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for n in range(12):  # a signature image on every message, as in real mail
+        fake.add(
+            FakeMessage(
+                f"sig{n}",
+                f"Note {n}",
+                "f-inbox",
+                f"2026-09-30T08:{n:02d}:00Z",
+                conversation=f"c-sig{n}",
+                attachments=[
+                    FakeAttachment(f"s{n}a", "logo.png", b"png", "image/png", inline=True, content_id="L"),
+                    FakeAttachment(f"s{n}b", "pic.png", b"pic", "image/png", inline=True, content_id="P"),
+                ],
+                html='<img src="cid:P">',
+            )
+        )
+    lookups: list[int] = []
+    original = fake.batch
+
+    def recording(body):
+        urls = [r["url"] for r in body["requests"]]
+        if any("contentId" in u for u in urls):
+            lookups.append(len(urls))
+        return original(body)
+
+    monkeypatch.setattr(fake, "batch", recording)
+    ids = [f"sig{n}" for n in range(12)]
+    artifact = await exports.export(ExportRequest(message_ids=ids, include_attachments=True, combine="all"))
+    assert sorted(lookups) == [4, 20]  # 24 attachments of 12 messages: two batches, not twelve
+    assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
+
+
 async def test_cached_message_deleted_on_the_server_is_labelled(exports: Exports, fake: FakeGraph) -> None:
     await exports.export(ExportRequest(message_ids=["m3"]))  # caches m3's summary and body
     del fake.messages["m3"]

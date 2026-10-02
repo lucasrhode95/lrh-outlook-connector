@@ -150,8 +150,8 @@ async def test_batch_concurrency_is_shared_across_calls(
             in_flight -= 1
 
     monkeypatch.setattr(graph, "_batch_once", counting)
-    # like the export's inline attachment lookups: many small batch() calls at once
-    await asyncio.gather(*(reader.attachment_content_ids("m3", ["a2", "a3"]) for _ in range(8)))
+    # many small batch() calls at once
+    await asyncio.gather(*(reader.attachment_content_ids({"m3": ["a2", "a3"]}) for _ in range(8)))
     assert peak == BATCH_CONCURRENCY
 
 
@@ -186,7 +186,8 @@ async def test_search(fake: FakeGraph) -> None:
 
 async def test_attachment_content_ids_and_downloads(fake: FakeGraph, tmp_path: Path) -> None:
     reader = reader_for(fake)
-    assert await reader.attachment_content_ids("m3", ["a2", "a3"]) == {"a2": "img1", "a3": "sig"}
+    found = await reader.attachment_content_ids({"m3": ["a2", "a3"], "m1": []})
+    assert found == {"m3": {"a2": "img1", "a3": "sig"}, "m1": {}}
     size = await reader.download_attachment("m3", "a1", tmp_path / "numbers.xlsx")
     assert size == len(b"xlsx-bytes") and (tmp_path / "numbers.xlsx").read_bytes() == b"xlsx-bytes"
     assert await reader.download_mime("m1", tmp_path / "m1.eml") > 0
