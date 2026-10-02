@@ -24,7 +24,8 @@ def stamp(value: datetime | None) -> str:
 
 
 def people(values: Sequence[Recipient]) -> str:
-    return ", ".join(r.display() for r in values)
+    # "; " as in Outlook: display names are often "Last, First", so a comma would be ambiguous
+    return "; ".join(r.display() for r in values)
 
 
 def body_text(message: Message | None, kind: str) -> str:

@@ -2,6 +2,8 @@
 
 const TOKEN = document.querySelector('meta[name="session-token"]').content;
 const $ = (id) => document.getElementById(id);
+// Between people (and file names): display names are often "Last, First", so not a comma.
+const SEPARATOR = "; ";
 
 const state = {
   folder: "inbox",       // folder id, "inbox" until the folder list resolves it, or null for the whole mailbox
@@ -305,7 +307,7 @@ function renderThread(thread) {
   const when = (m) => Date.parse(m.received_at || m.sent_at || 0);
   const messages = [...thread.messages.values()].sort((a, b) => when(b) - when(a));
   const newest = messages[0];
-  const senders = [...new Set(messages.map((m) => who(m.sender)))].join(", ");
+  const senders = [...new Set(messages.map((m) => who(m.sender)))].join(SEPARATOR);
   const unread = messages.some((m) => m.is_read === false);
   const selectable = Boolean(thread.conversationId);
   const checkbox = el("input", { type: "checkbox", title: "Export the whole thread", disabled: !selectable,
@@ -389,9 +391,9 @@ async function openMessage(id) {
   if (request !== state.readerRequest) return; // another message was clicked meanwhile
   const m = content.message;
   $("reader-title").textContent = m.subject || "(no subject)";
-  const rows = [["From", who(m.sender)], ["To", (m.to || []).map(who).join(", ")], ["Cc", (m.cc || []).map(who).join(", ")],
+  const rows = [["From", who(m.sender)], ["To", (m.to || []).map(who).join(SEPARATOR)], ["Cc", (m.cc || []).map(who).join(SEPARATOR)],
     ["Date", m.received_at ? new Date(m.received_at).toLocaleString() : ""], ["Folder", m.folder || ""],
-    ["Attachments", (content.attachments || []).filter((a) => !a.is_inline).map((a) => a.name).join(", ")]];
+    ["Attachments", (content.attachments || []).filter((a) => !a.is_inline).map((a) => a.name).join(SEPARATOR)]];
   if (m.is_deleted) rows.push(["Note", "Deleted on the server; shown from local retention."]);
   $("reader-meta").replaceChildren(...rows.filter(([, v]) => v).flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
   $("reader-body").textContent = content.text;
