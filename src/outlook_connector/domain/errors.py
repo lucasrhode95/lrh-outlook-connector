@@ -41,7 +41,3 @@ class Throttled(ConnectorError):
 
 class Upstream(ConnectorError):
     """A Microsoft service could not be reached or returned an unexpected failure."""
-
-
-class WriteOutcomeUnknown(ConnectorError):
-    """A write may or may not have happened (for example a timeout after sending). Never retry blindly."""
