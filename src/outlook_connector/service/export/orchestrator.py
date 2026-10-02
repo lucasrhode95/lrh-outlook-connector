@@ -42,7 +42,6 @@ class Selection:
     summaries: list[MessageSummary]
     excluded: dict[str, int] = field(default_factory=dict)  # ExclusionReason -> messages left out
     known: dict[str, Message] = field(default_factory=dict)  # fetched with bodies while selecting
-    duplicates: int = 0  # copies merged into one message
 
 
 @dataclass
@@ -101,7 +100,6 @@ class Exports:
             messages_excluded=selection.excluded,
             messages_unavailable=len(missing),
             unavailable_message_ids=list(missing),
-            duplicates_merged=selection.duplicates,
         )
 
     # ---------------------------------------------------------------- selection
@@ -131,14 +129,14 @@ class Exports:
         selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
         merged, _ = await self.mailbox.finish(selected.values())  # copies across conversations and pages
         _check_limit({m.id: m for m in merged}, request.limit)
-        return Selection(
-            sorted(merged, key=oldest_first), dict(excluded), known, duplicates=len(selected) - len(merged)
-        )
+        return Selection(sorted(merged, key=oldest_first), dict(excluded), known)
 
     async def _select_range(
         self, request: ExportRequest, selected: dict[str, MessageSummary], excluded: dict[str, int]
     ) -> None:
-        """Every message in the window, page by page, with the listing's scope rules."""
+        """Every message in the window, page by page, with the listing's scope rules. Copies on
+        different pages are all kept here, so the final merge sees them and names every folder in
+        ``also_in``."""
         cursor: str | None = None
         while True:
             page = await self.mailbox.list_messages(
@@ -149,11 +147,13 @@ class Exports:
                 cursor=cursor,
                 received_only=request.received_only,
                 include_deleted_items=request.include_deleted_items,
+                skip_returned_copies=False,
             )
             _add(excluded, page.coverage.excluded)
             for item in page.items:
                 selected.setdefault(item.id, item)
-            _check_limit(selected, request.limit, more=page.cursor is not None)
+            unique = {m.internet_message_id or m.id: m for m in selected.values()}  # copies count once
+            _check_limit(unique, request.limit, more=page.cursor is not None)
             cursor = page.cursor
             if cursor is None:
                 return
@@ -267,8 +267,6 @@ class Exports:
             f"Left out: {count} message(s) {EXCLUSION_TEXT[key]}."
             for key, count in selection.excluded.items()
         ]
-        if selection.duplicates:
-            notes.append(f"Merged: {selection.duplicates} copy(ies) of the same message, exported once.")
         if fetched.missing:
             notes.append(f"Unavailable: {len(fetched.missing)} message body(ies); they are marked below.")
         combine = "all" if request.format == "jsonl" else request.combine

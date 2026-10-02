@@ -223,6 +223,5 @@ class ExportArtifact(Compact):
     attachments_unavailable: int  # attachment files that could not be downloaded
     attachment_listing_failures: int = 0  # messages whose attachments could not be listed
     messages_excluded: dict[str, int] = Field(default_factory=dict)  # ExclusionReason -> count
-    duplicates_merged: int = 0  # copies of the same message (same Internet id) exported once
     messages_unavailable: int = 0  # selected, but the body could not be fetched (marked in the file)
     unavailable_message_ids: list[str] = Field(default_factory=list)

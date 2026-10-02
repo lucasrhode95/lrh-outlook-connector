@@ -202,8 +202,13 @@ class Mailbox:
         include_deleted_items: bool = False,
         include_total: bool = False,
         detail: Detail = "full",
+        skip_returned_copies: bool = True,
     ) -> MessagePage:
-        """Newest first. Scope rules in the module docstring; a named folder is listed as a whole."""
+        """Newest first. Scope rules in the module docstring; a named folder is listed as a whole.
+
+        ``skip_returned_copies``: drop copies of a message an earlier page already returned. A caller
+        that merges every page at the end (the export) turns it off to keep each copy's folder.
+        """
         if not 1 <= limit <= 200:
             raise InvalidRequest("limit must be between 1 and 200.")
         if since and until and since > until:
@@ -259,7 +264,7 @@ class Mailbox:
             if upper:
                 deleted = [m for m in deleted if m.received_at and m.received_at < upper]
         items, excluded = await self.finish(sorted(fetched + deleted, key=_newest_first), skip)
-        items, seen = _skip_seen(items, state)
+        items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
         notes: list[str] = []
         if skip and not complete:
