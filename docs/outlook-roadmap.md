@@ -2,7 +2,7 @@
 
 The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
 
-Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Send and mailbox changes are next.
+Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. A hardening pass after the 90-day review (H1–H3) is built and tested against the fake mailbox; its batched paths still need a live check (V1). Send and mailbox changes are next.
 
 **Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
 
@@ -24,15 +24,24 @@ Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mail
 |---|---|---|
 | A1 Token provider | **Done** (live: encrypted DPAPI cache, silent refresh) | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
 | A2 CLI | **Done** | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
-| B1 Graph reader | **Done** | `MailReader` over Graph: folders (+delta), list, get, conversation, `$search`, attachments, MIME, `$batch` |
+| B1 Graph reader | **Done** | `MailReader` over Graph: folders, list, get, conversation, `$search`, attachments, MIME, `$batch`. Folder delta (S2) is not used: the folder cache refreshes in full. |
 | S1 Store | **Done** | Account-bound SQLite: folder cache, retained messages, tombstones |
 | S3 Reconciliation | **Done** | Remove → GET by id → tombstone only on 404. Never erase known bodies. |
-| L1 `list_messages` | **Done** | Folder or mailbox-wide, `since`/`until`, limit, `refresh` |
-| T1 `get_thread` | **Done** | Conversation across folders, local sort, retained-deleted merge, bounded |
+| L1 `list_messages` | **Done** | Folder or mailbox-wide, `since`/`until`, limit, `refresh`, `received_only` (no Sent/Drafts/Outbox/Deleted/Junk) |
+| T1 `get_thread` | **Done** | Conversation across folders, local sort, retained-deleted merge, bounded; the cursor keeps the original selection; truncation past 1,000 messages is reported |
 | L2 `search_messages` | **Done** | Graph `$search`, grouped by conversation, coverage |
-| E1 Export | **Done** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download |
+| E1 Export | **Done** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download. Also a range selection (`since`/`until`/`folder`/`received_only`), `limit` up to 2,000, source ids per message, counts of what was left out or unavailable. |
 | M1 MCP surface | **Done** (read-only tools) | Read tools and resources (architecture §8) |
-| U1 Local UI | **Done** | Thread-grouped list, search, in-memory filter, selection, export (v4 O3) |
+| U1 Local UI | **Done** | Thread-grouped list (opens on the Inbox; real conversation sizes, one-message conversations as plain rows; newest message on top), search, in-memory filter, selection, export (v4 O3) |
+
+## Hardening (90-day review, 2026-10-02)
+
+| Item | Status | Scope |
+|---|---|---|
+| H1 Safe `$batch` | **Done** | Numbered batch request ids (Graph compares ids case-insensitively). At most 2 batches and 4 requests in flight. Throttled items re-sent in batches of ≤20 after `Retry-After`. Per-item results. (OUTLOOK-02, OUTLOOK-03; likely cause of OUTLOOK-01) |
+| H2 Diagnostics | **Done** | Errors name the operation, status, Graph code and message, request id, and failed batch-item count. Throttling limits stated to clients. (OUTLOOK-01) |
+| H3 Partial exports | **Done** | Unfetchable bodies marked and listed instead of failing the export |
+| V1 Live check | **Pending** | Re-run the 1,500-message export against the real mailbox; check conversation sizes and batched attachment listing live |
 
 ## Send
 
@@ -60,3 +69,6 @@ Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mail
 | X4 Substrate search | **Parked** | Works (research §5). Graph `$search` has equal recall. |
 | X5 Local full-text search | **Parked** | Online search was chosen |
 | X6 Attachment text extraction | **Parked** | Agents receive raw files |
+| X7 Resumable export with progress | **Parked** | Review suggestion. Not needed while exports finish in one call with per-item gaps (H1–H3); revisit if a real export still hits limits. |
+| X8 Range export in the UI | **Parked** | The UI exports selected threads/messages; range export is MCP-only for now. |
+| X9 Folder delta | **Parked** | Researched (S2); a full folder refresh takes under a second. |
