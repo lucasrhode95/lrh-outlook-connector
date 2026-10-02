@@ -17,6 +17,9 @@ tokens.json
 *.db
 *.db-*
 
+# Raw Outlook Web capture: contains live OAuth tokens and mailbox content
+web-app-download/
+
 # Environment / secrets
 .local/
 .env
