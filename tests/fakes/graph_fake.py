@@ -86,6 +86,8 @@ class FakeGraph:
     messages: dict[str, FakeMessage] = field(default_factory=dict)
     calls: list[str] = field(default_factory=list)
     throttle_next: int = 0  # respond 429 to this many upcoming top-level requests
+    throttle_items: int = 0  # respond 429 to this many upcoming $batch sub-requests
+    batch_sizes: list[int] = field(default_factory=list)
 
     # ------------------------------------------------------------------ helpers for tests
     def add_folder(
@@ -129,17 +131,18 @@ class FakeGraph:
         path = request.url.path.removeprefix("/v1.0")
         params = {k: v[0] for k, v in parse_qs(urlsplit(str(request.url)).query).items()}
         status, body, content = self.route(request.method, path, params, prefer, request)
+        request_id = {"request-id": f"req-{len(self.calls)}"}
         if content is not None:
             return httpx.Response(
-                status, content=content, headers={"content-type": "application/octet-stream"}
+                status, content=content, headers={"content-type": "application/octet-stream", **request_id}
             )
-        return httpx.Response(status, json=body)
+        return httpx.Response(status, json=body, headers=request_id)
 
     def route(
         self, method: str, path: str, params: dict[str, str], prefer: str, request: httpx.Request | None
     ):
         if method == "POST" and path == "/$batch":
-            return 200, self.batch(json.loads(request.content)), None
+            return self.batch(json.loads(request.content))
         if method == "POST" and path == "/search/query":
             q = json.loads(request.content)["requests"][0]["query"]["queryString"]
             total = len(self.search_matches(q, None))
@@ -234,17 +237,34 @@ class FakeGraph:
             body["@odata.nextLink"] = f"{ROOT}{path}?{urlencode({**params, '$skip': skip + top})}"
         return body
 
-    def batch(self, payload: dict[str, Any]) -> dict[str, Any]:
-        assert len(payload["requests"]) <= 20, "Graph allows at most 20 requests per batch"
+    def batch(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any], None]:
+        """Like Graph: a batch over 20 requests, or with ids equal ignoring case, is rejected whole."""
+        requests = payload["requests"]
+        self.batch_sizes.append(len(requests))
+        if len(requests) > 20:
+            return 400, {"error": {"code": "BadRequest", "message": "Too many requests in batch."}}, None
+        if len({str(sub["id"]).lower() for sub in requests}) < len(requests):
+            return 400, {"error": {"code": "BadRequest", "message": "Duplicate request id."}}, None
         responses = []
-        for sub in payload["requests"]:
+        for sub in requests:
+            if self.throttle_items:
+                self.throttle_items -= 1
+                responses.append(
+                    {
+                        "id": sub["id"],
+                        "status": 429,
+                        "headers": {"Retry-After": "1"},
+                        "body": {"error": {"code": "ApplicationThrottled", "message": "Too many requests."}},
+                    }
+                )
+                continue
             url = urlsplit(sub["url"])
             params = {k: v[0] for k, v in parse_qs(url.query).items()}
             prefer = sub.get("headers", {}).get("Prefer", "")
             assert 'IdType="ImmutableId"' in prefer
             status, body, _ = self.route(sub["method"], url.path, params, prefer, None)
             responses.append({"id": sub["id"], "status": status, "body": body})
-        return {"responses": responses}
+        return 200, {"responses": responses}, None
 
 
 def _dt(value: str) -> datetime:

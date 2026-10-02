@@ -15,6 +15,7 @@ from pydantic import Field
 
 from outlook_connector.bootstrap import AppContext, Services
 from outlook_connector.domain.models import (
+    EXPORT_MAX_MESSAGES,
     Attachment,
     BodyKind,
     CombineMode,
@@ -44,7 +45,14 @@ without quoted history by default. get_message reads one message with offset/max
 - Messages with is_deleted=true were deleted on the server and come from local retention.
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.
-- export_messages writes one .txt or .zip export and returns its local path.
+- export_messages writes one .txt or .zip export and returns its local path. Select conversations, \
+message ids, and/or a range (since/until/folder/received_only) in one call; at most 2,000 messages \
+(`limit` lowers that). For a large period, export the range rather than enumerating ids. Read \
+messages_excluded and messages_unavailable in the result; each message in the file carries its ids.
+- Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
+per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
+Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
+many small ones. On a throttling error, wait at least a minute before retrying.
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself.
 """
@@ -200,11 +208,41 @@ def build_server(context: AppContext) -> FastMCP:
         ] = "per_thread",
         body: Literal["unique", "full"] = "unique",
         include_deleted_items: bool = False,
+        since: Annotated[
+            datetime | None, Field(description="Range selection: inclusive lower bound (ISO 8601).")
+        ] = None,
+        until: Annotated[
+            datetime | None, Field(description="Range selection: inclusive upper bound (ISO 8601).")
+        ] = None,
+        folder: Annotated[
+            str | None,
+            Field(description="Range selection: folder path, alias or id (default: whole mailbox)."),
+        ] = None,
+        received_only: Annotated[
+            bool, Field(description="Range selection: leave out Sent Items, Drafts and Outbox.")
+        ] = False,
+        limit: Annotated[
+            int,
+            Field(
+                ge=1,
+                le=EXPORT_MAX_MESSAGES,
+                description="Refuse the export if the selection holds more messages than this.",
+            ),
+        ] = EXPORT_MAX_MESSAGES,
     ) -> ExportArtifact:
-        """Export conversations and/or messages to one local .txt or .zip and return its path."""
+        """Export conversations, messages and/or a date range to one local .txt or .zip; returns its path.
+
+        Deleted Items and Junk Email are left out unless include_deleted_items=true; the result counts
+        what was left out and lists messages whose body could not be fetched.
+        """
         request = ExportRequest(
             conversation_ids=conversation_ids or [],
             message_ids=message_ids or [],
+            since=_utc(since),
+            until=_utc(until),
+            folder=folder,
+            received_only=received_only,
+            limit=limit,
             include_attachments=include_attachments,
             combine=combine,
             body=body,

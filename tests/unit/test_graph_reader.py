@@ -76,9 +76,9 @@ async def test_conversation_folders_in_one_batch(fake: FakeGraph) -> None:
 
 
 async def test_list_attachments_many_in_one_batch(fake: FakeGraph) -> None:
-    result = await reader_for(fake).list_attachments_many(["m3", "m5"])
+    result, failed = await reader_for(fake).list_attachments_many(["m3", "m5"])
     assert [a.name for a in result["m3"]] == ["numbers.xlsx", "image001.png", "logo.png"]
-    assert result["m5"] == [] and fake.calls == ["POST /v1.0/$batch"]
+    assert result["m5"] == [] and not failed and fake.calls == ["POST /v1.0/$batch"]
 
 
 async def test_get_message_text_and_html_with_attachments(fake: FakeGraph) -> None:
@@ -101,9 +101,44 @@ async def test_get_message_missing_raises_not_found(fake: FakeGraph) -> None:
 async def test_batch_get_returns_none_for_missing(fake: FakeGraph) -> None:
     ids = [f"m{i}" for i in range(1, 6)] + [f"gone{i}" for i in range(20)]  # forces two batch chunks
     result = await reader_for(fake).get_messages(ids)
-    assert result["m1"] and result["m1"].unique_body_text == "First report"
-    assert all(result[f"gone{i}"] is None for i in range(20))
+    assert result.messages["m1"] and result.messages["m1"].unique_body_text == "First report"
+    assert all(result.messages[f"gone{i}"] is None for i in range(20)) and not result.failed
     assert fake.calls.count("POST /v1.0/$batch") == 2
+
+
+async def test_batch_request_ids_never_collide_ignoring_case(fake: FakeGraph) -> None:
+    # Immutable ids can differ only by case; Graph rejects a batch whose request ids do.
+    fake.add(FakeMessage("AAkx", "upper", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-a"))
+    fake.add(FakeMessage("AAkX", "lower", "f-inbox", "2026-09-01T00:01:00Z", conversation="c-b"))
+    result = await reader_for(fake).get_messages(["AAkx", "AAkX"])
+    assert {mid: m.subject for mid, m in result.messages.items() if m} == {"AAkx": "upper", "AAkX": "lower"}
+
+
+async def test_throttled_batch_items_are_retried_in_batches_of_at_most_20(fake: FakeGraph) -> None:
+    ids = [f"gone{i}" for i in range(60)]
+    fake.throttle_items = 45  # spread over three batches; one retry batch of 45 would be rejected
+    result = await reader_for(fake).get_messages(ids)
+    assert not result.failed and all(result.messages[i] is None for i in ids)
+    assert max(fake.batch_sizes) <= 20 and sum(fake.batch_sizes) == 60 + 45
+
+
+async def test_persistently_throttled_items_are_reported_not_raised(fake: FakeGraph) -> None:
+    fake.throttle_items = 10_000
+    result = await reader_for(fake).get_messages(["m1", "m2"])
+    assert set(result.failed) == {"m1", "m2"} and not result.messages
+    reason = result.failed["m1"]
+    assert "While fetching message bodies" in reason and "HTTP 429, ApplicationThrottled" in reason
+    assert "4 concurrent requests" in reason
+
+
+async def test_errors_name_the_operation_code_message_and_request_id(fake: FakeGraph) -> None:
+    with pytest.raises(InvalidRequest) as caught:
+        await reader_for(fake).list_messages(
+            folder_id="no-such-route/x", since=None, until=None, page_size=5, page=None
+        )
+    text = str(caught.value)
+    assert text.startswith("While listing messages: graph.microsoft.com rejected the request (HTTP 400")
+    assert "UnsupportedByFake" in text and "request-id req-" in text
 
 
 async def test_locate_reports_folder_or_none(fake: FakeGraph) -> None:

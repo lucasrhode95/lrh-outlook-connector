@@ -46,6 +46,18 @@ The client starts one `outlook-connector mcp` process per session. Tools: `list_
 `save_message_mime`, `export_messages`, `auth_status`. They are read-only: nothing changes the mailbox,
 not even read state.
 
+`export_messages` takes conversations, message ids and/or a range (`since`, `until`, `folder`,
+`received_only`), up to 2,000 messages (`limit` lowers that). It reports what it left out by folder and
+any message whose body could not be fetched; every exported message carries its message and
+conversation ids.
+
+**Throttling.** Microsoft Graph allows about 4 concurrent requests and 10,000 requests per 10 minutes
+per mailbox; each item of a `$batch` (at most 20) counts. The connector keeps at most 4 requests and
+2 batches in flight, re-sends throttled batch items in new batches of at most 20 after the advised
+delay, and reports items that stay throttled instead of failing the whole call. Agents are told to
+avoid parallel tool calls and to prefer one range export over many small calls. Errors name the
+operation, the Graph error code and message, and the request id.
+
 **You (local UI).** Start it when you need it. It opens a browser tab and stops after 30 idle minutes:
 
 ```bash
