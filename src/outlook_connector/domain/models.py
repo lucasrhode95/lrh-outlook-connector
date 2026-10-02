@@ -7,15 +7,41 @@ them, and nothing else knows Graph field names.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
 
 BodyKind = Literal["unique", "full", "html"]
 CombineMode = Literal["per_thread", "all", "none"]
+ExportFormat = Literal["txt", "jsonl"]
+Detail = Literal["compact", "full"]
+
+# Why messages were left out of a result (Coverage.excluded, ExportArtifact.messages_excluded keys).
+ExclusionReason = Literal["deleted_or_junk", "outgoing"]
+EXCLUSION_TEXT: dict[str, str] = {
+    "deleted_or_junk": "in Deleted Items or Junk Email (include_deleted_items=false)",
+    "outgoing": "in Sent Items, Drafts or Outbox (received_only=true)",
+}
 
 
-class Recipient(BaseModel):
+class Compact(BaseModel):
+    """Serializes optional fields only when set (not null, not an empty list): MCP results stay small,
+    and a missing field means its default. Required fields are always present."""
+
+    @model_serializer(mode="wrap")
+    def _drop_empty(self, handler: SerializerFunctionWrapHandler) -> Any:
+        data = handler(self)
+        if not isinstance(data, dict):
+            return data
+        fields = type(self).model_fields
+        return {
+            k: v
+            for k, v in data.items()
+            if (k in fields and fields[k].is_required()) or (v is not None and v != [] and v != {})
+        }
+
+
+class Recipient(Compact):
     name: str | None = None
     address: str | None = None
 
@@ -25,7 +51,7 @@ class Recipient(BaseModel):
         return self.address or self.name or "(unknown)"
 
 
-class Folder(BaseModel):
+class Folder(Compact):
     id: str
     parent_id: str | None = None
     name: str
@@ -37,7 +63,7 @@ class Folder(BaseModel):
     hidden: bool = False
 
 
-class MessageSummary(BaseModel):
+class MessageSummary(Compact):
     id: str  # Graph immutable id
     conversation_id: str | None = None
     folder_id: str | None = None
@@ -58,9 +84,14 @@ class MessageSummary(BaseModel):
     internet_message_id: str | None = None
     is_deleted: bool = False  # retained locally after the server copy disappeared
     deleted_at: datetime | None = None
+    also_in: list[str] = Field(default_factory=list)  # folders holding another copy (same Internet id)
 
 
-class Attachment(BaseModel):
+# Filled by the service per result, never stored with the message.
+DERIVED_FIELDS = frozenset({"folder", "is_deleted", "deleted_at", "also_in"})
+
+
+class Attachment(Compact):
     id: str
     message_id: str
     name: str | None = None
@@ -87,37 +118,43 @@ class Message(MessageSummary):
         return self.body_text or ""
 
 
-class Coverage(BaseModel):
-    """What a result actually covers. Agents must read this before treating results as complete."""
+class Coverage(Compact):
+    """What a result actually covers. Agents must read this before treating results as complete.
+
+    ``complete``: nothing more is retrievable for this request (otherwise follow ``cursor``, or read
+    ``notes``). ``excluded``: messages left out by folder, per reason.
+    """
 
     source: Literal["remote", "local", "remote+local"]
     complete: bool
-    more_available: bool = False
     server_total: int | None = None
+    excluded: dict[str, int] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 
 
-class MessagePage(BaseModel):
+class MessagePage(Compact):
     items: list[MessageSummary]
     cursor: str | None = None
     coverage: Coverage
 
 
-class ConversationHit(BaseModel):
+class ConversationHit(Compact):
     conversation_id: str | None
     subject: str | None
     last_received_at: datetime | None
     matching_messages: list[MessageSummary]
+    message_count: int | None = None  # the whole conversation, counted like get_thread
+    message_count_at_least: bool = False
 
 
-class SearchResult(BaseModel):
+class SearchResult(Compact):
     query: str
     conversations: list[ConversationHit]
     cursor: str | None = None
     coverage: Coverage
 
 
-class MessageContent(BaseModel):
+class MessageContent(Compact):
     message: MessageSummary
     body_kind: BodyKind
     text: str
@@ -127,13 +164,13 @@ class MessageContent(BaseModel):
     attachments: list[Attachment] = Field(default_factory=list)
 
 
-class ThreadMessage(BaseModel):
+class ThreadMessage(Compact):
     message: MessageSummary
     text: str | None = None  # bounded body when requested
     truncated: bool = False
 
 
-class Thread(BaseModel):
+class Thread(Compact):
     conversation_id: str
     subject: str | None
     messages: list[ThreadMessage]
@@ -141,7 +178,7 @@ class Thread(BaseModel):
     coverage: Coverage
 
 
-class ThreadSize(BaseModel):
+class ThreadSize(Compact):
     conversation_id: str
     messages: int  # what get_thread would list with the same include_deleted_items
     at_least: bool = False  # the conversation is larger than the server listed in one request
@@ -159,8 +196,9 @@ class ExportRequest(BaseModel):
     since: datetime | None = None
     until: datetime | None = None
     folder: str | None = None  # path, alias or id; None = whole mailbox
-    received_only: bool = False  # leave out Sent Items, Drafts and Outbox
+    received_only: bool = False  # leave out Sent Items, Drafts and Outbox (range selection only)
     limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
+    format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
     include_attachments: bool = False
     combine: CombineMode = "per_thread"
     body: Literal["unique", "full"] = "unique"
@@ -171,7 +209,7 @@ class ExportRequest(BaseModel):
         return bool(self.since or self.until or self.folder or self.received_only)
 
 
-class ExportArtifact(BaseModel):
+class ExportArtifact(Compact):
     path: str
     filename: str
     content_type: str
@@ -179,7 +217,9 @@ class ExportArtifact(BaseModel):
     message_count: int
     text_files: int
     attachment_files: int
-    attachments_unavailable: int
-    messages_excluded: dict[str, int] = Field(default_factory=dict)  # reason -> count left out by folder
+    attachments_unavailable: int  # attachment files that could not be downloaded
+    attachment_listing_failures: int = 0  # messages whose attachments could not be listed
+    messages_excluded: dict[str, int] = Field(default_factory=dict)  # ExclusionReason -> count
+    duplicates_merged: int = 0  # copies of the same message (same Internet id) exported once
     messages_unavailable: int = 0  # selected, but the body could not be fetched (marked in the file)
     unavailable_message_ids: list[str] = Field(default_factory=list)

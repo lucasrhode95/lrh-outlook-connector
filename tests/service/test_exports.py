@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,13 +11,14 @@ import pytest
 from pydantic import ValidationError
 
 from outlook_connector.domain.errors import InvalidRequest
-from outlook_connector.domain.models import ExportRequest, Recipient
+from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.export.attachments import dedupe, safe_name
 from outlook_connector.service.export.formatter import people
-from outlook_connector.service.export.orchestrator import DELETED_OR_JUNK, NOT_RECEIVED, Exports
+from outlook_connector.service.export.orchestrator import Exports
+from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads
 from outlook_connector.store.db import Store
@@ -185,14 +188,14 @@ async def test_range_export_selects_the_window_and_counts_what_it_leaves_out(exp
         )
     )
     assert artifact.message_count == 3  # m1, m2, m3; junk m4 left out, m5 outside the window
-    assert artifact.messages_excluded == {DELETED_OR_JUNK: 1} and artifact.messages_unavailable == 0
+    assert artifact.messages_excluded == {"deleted_or_junk": 1} and artifact.messages_unavailable == 0
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert f"Left out: 1 message(s) {DELETED_OR_JUNK}." in text and "buy now" not in text
+    assert f"Left out: 1 message(s) {EXCLUSION_TEXT['deleted_or_junk']}." in text and "buy now" not in text
 
 
 async def test_range_export_received_only_and_deleted_items(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(received_only=True, include_deleted_items=True))
-    assert artifact.message_count == 4 and artifact.messages_excluded == {NOT_RECEIVED: 1}  # m2 is sent
+    assert artifact.message_count == 4 and artifact.messages_excluded == {"outgoing": 1}  # m2 is sent
 
 
 async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None:
@@ -269,3 +272,54 @@ def test_safe_names() -> None:
     assert safe_name("   ", fallback="file") == "file"
     taken: set[str] = set()
     assert [dedupe(n, taken) for n in ("r.pdf", "R.pdf", "r.pdf")] == ["r.pdf", "R (2).pdf", "r (3).pdf"]
+
+
+async def test_range_export_keeps_retained_messages_on_every_page(
+    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await exports.threads.get_thread("c-rel")  # retains m1 (the oldest message)
+    del fake.messages["m1"]
+    monkeypatch.setattr("outlook_connector.service.export.orchestrator.RANGE_PAGE", 2)
+    artifact = await exports.export(ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), combine="all"))
+    assert artifact.message_count == 4  # m5, m3, m2 live + m1 retained; m4 in Junk left out
+    assert "!! DELETED on the server" in Path(artifact.path).read_text(encoding="utf-8")
+
+
+async def test_copies_are_exported_once(exports: Exports, fake: FakeGraph) -> None:
+    for mid, folder in (("s1", "f-sent"), ("r1", "f-inbox")):
+        fake.add(
+            FakeMessage(
+                mid, "To myself", folder, "2026-10-01T09:00:00Z", conversation="c-s", internet_id="<s@x>"
+            )
+        )
+    artifact = await exports.export(ExportRequest(message_ids=["s1", "r1"]))
+    assert artifact.message_count == 1 and artifact.duplicates_merged == 1
+    assert "Also in: Sent Items" in Path(artifact.path).read_text(encoding="utf-8")
+
+
+async def test_jsonl_export_has_one_record_per_message(exports: Exports) -> None:
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], format="jsonl"))
+    assert artifact.filename.endswith(".jsonl") and artifact.content_type.startswith("application/x-ndjson")
+    records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
+    assert [r["id"] for r in records] == ["m1", "m2", "m3"]
+    assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report"
+    assert records[2]["attachments"][0]["name"] == "numbers.xlsx" and records[0]["from"]["address"]
+
+
+async def test_jsonl_export_with_attachment_files_is_a_zip(exports: Exports) -> None:
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], format="jsonl", include_attachments=True)
+    )
+    names = zip_names(artifact.path)
+    jsonl = next(n for n in names if n.endswith(".jsonl"))
+    records = [json.loads(line) for line in zip_text(artifact.path, jsonl).splitlines()]
+    files = [a["file"] for r in records for a in r["attachments"] if "file" in a]
+    assert files and all(f in names for f in files)
+
+
+async def test_downloads_never_share_a_file(exports: Exports) -> None:
+    files = Files(exports.mailbox)
+    first, second = await asyncio.gather(
+        files.download_attachment("m3", "a1"), files.download_attachment("m3", "a1")
+    )
+    assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()

@@ -46,6 +46,16 @@ def test_silent_token_from_cache() -> None:
     assert "value=" not in repr(token)  # token values never appear in reprs or logs
 
 
+def test_renewal_after_a_rejected_token_bypasses_the_memo() -> None:
+    script = Script(accounts=[msal_account()], silent={READ: token_result(aud=GRAPH, scp="Mail.Read")})
+    tokens_ = provider(script)
+    tokens_.get_token("read")
+    tokens_.get_token("read")  # served from memory
+    tokens_.get_token("read", force_refresh=True)
+    tokens_.get_token("read", claims_challenge='{"access_token":{}}')
+    assert script.silent_options == [{}, {"force_refresh": True}, {"claims_challenge": '{"access_token":{}}'}]
+
+
 def test_no_account_requires_sign_in_with_exact_command() -> None:
     with pytest.raises(AuthenticationRequired) as err:
         provider(Script()).get_token("read")

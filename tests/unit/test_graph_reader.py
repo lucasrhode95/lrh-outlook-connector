@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
 import pytest
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled
+from outlook_connector.domain.errors import (
+    AuthenticationRequired,
+    InvalidRequest,
+    NotFound,
+    Throttled,
+    Upstream,
+)
 from outlook_connector.remote.graph import BATCH_CONCURRENCY, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
+from outlook_connector.remote.transport import _path as transport_path
 from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 
@@ -71,8 +79,8 @@ async def test_large_conversation_reports_truncation(
 
 async def test_conversation_folders_in_one_batch(fake: FakeGraph) -> None:
     result = await reader_for(fake).conversation_folders(["c-rel", "c-lunch", "c-none"])
-    assert sorted(result["c-rel"][0]) == ["f-inbox", "f-junk", "f-rie", "f-sent"]
-    assert result["c-lunch"] == (["f-inbox"], False) and result["c-none"] == ([], False)
+    assert sorted(folder for folder, _ in result["c-rel"][0]) == ["f-inbox", "f-junk", "f-rie", "f-sent"]
+    assert result["c-lunch"] == ([("f-inbox", "<m5@example.com>")], False) and result["c-none"] == ([], False)
     assert fake.calls == ["POST /v1.0/$batch"]
 
 
@@ -131,13 +139,13 @@ async def test_batch_concurrency_is_shared_across_calls(
     original = graph._batch_once
     in_flight = peak = 0
 
-    async def counting(requests, prefer):  # type: ignore[no-untyped-def]
+    async def counting(requests, prefer, headers):  # type: ignore[no-untyped-def]
         nonlocal in_flight, peak
         in_flight += 1
         peak = max(peak, in_flight)
         await asyncio.sleep(0.01)
         try:
-            return await original(requests, prefer)
+            return await original(requests, prefer, headers)
         finally:
             in_flight -= 1
 
@@ -213,3 +221,45 @@ async def test_odata_quotes_are_escaped_in_conversation_ids() -> None:
     fake.add(FakeMessage("q1", "quote", "f", "2026-09-01T00:00:00Z", conversation="it's"))
     messages, _ = await reader_for(fake).conversation("it's")
     assert [m.id for m in messages] == ["q1"]
+
+
+async def test_rejected_token_is_renewed_once(fake: FakeGraph) -> None:
+    tokens_ = StaticTokens()
+    fake.reject_tokens = 1
+    reader = GraphMailReader(Graph(Transport(tokens_, client=httpx.AsyncClient(transport=fake.transport()))))
+    assert await reader.list_folders()
+    assert tokens_.renewals == [{"force_refresh": True}]
+
+
+async def test_claims_challenge_is_passed_on(fake: FakeGraph) -> None:
+    tokens_ = StaticTokens()
+    fake.reject_tokens, fake.claims_challenge = 1, base64.b64encode(b'{"access_token":{}}').decode()
+    reader = GraphMailReader(Graph(Transport(tokens_, client=httpx.AsyncClient(transport=fake.transport()))))
+    await reader.list_folders()
+    assert tokens_.renewals == [{"claims_challenge": '{"access_token":{}}'}]
+
+
+async def test_token_still_rejected_after_renewal_asks_to_sign_in(fake: FakeGraph) -> None:
+    fake.reject_tokens = 2
+    with pytest.raises(AuthenticationRequired, match="outlook-connector auth read"):
+        await reader_for(fake).list_folders()
+
+
+async def test_access_denied_is_not_a_sign_in_problem(
+    fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = fake.route
+
+    def deny(method, path, params, prefer, request):  # type: ignore[no-untyped-def]
+        if path == "/me/messages/m1":
+            return 403, {"error": {"code": "ErrorAccessDenied"}}, None
+        return original(method, path, params, prefer, request)
+
+    monkeypatch.setattr(fake, "route", deny)
+    with pytest.raises(Upstream, match="denied access"):
+        await reader_for(fake).get_message("m1")
+
+
+def test_logged_paths_never_carry_ids() -> None:
+    url = "https://graph.microsoft.com/v1.0/me/messages/" + "A" * 120 + "/attachments"
+    assert transport_path(url) == "/v1.0/me/messages/{id}/attachments"

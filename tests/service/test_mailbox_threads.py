@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -54,8 +56,9 @@ async def test_resolve_folder_path_and_unknown(mailbox: Mailbox) -> None:
 
 async def test_list_messages_pages_with_self_contained_cursor(mailbox: Mailbox) -> None:
     first = await mailbox.list_messages(limit=2)
-    assert [m.id for m in first.items] == ["m5", "m4"]
-    assert first.cursor and first.coverage.more_available and not first.coverage.complete
+    assert [m.id for m in first.items] == ["m5"]  # m4 is in Junk Email, left out by default
+    assert first.coverage.excluded == {"deleted_or_junk": 1}
+    assert first.cursor and not first.coverage.complete
     assert first.items[0].folder == "Inbox"
     second = await mailbox.list_messages(limit=2, cursor=first.cursor)
     assert [m.id for m in second.items] == ["m3", "m2"]
@@ -78,7 +81,48 @@ async def test_server_deleted_messages_are_retained_and_labelled(mailbox: Mailbo
 async def test_received_only_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
     page = await mailbox.list_messages(received_only=True)
     assert [m.id for m in page.items] == ["m5", "m3", "m1"]
-    assert any("received_only" in n for n in page.coverage.notes)
+    assert page.coverage.excluded == {"deleted_or_junk": 1, "outgoing": 1}
+
+
+async def test_deleted_items_and_junk_are_left_out_unless_asked_or_named(mailbox: Mailbox) -> None:
+    assert "m4" not in [m.id for m in (await mailbox.list_messages()).items]
+    assert "m4" in [m.id for m in (await mailbox.list_messages(include_deleted_items=True)).items]
+    named = await mailbox.list_messages(folder="junkemail")  # a folder asked for by name is listed
+    assert [m.id for m in named.items] == ["m4"] and not named.coverage.excluded
+
+
+async def test_retained_deleted_messages_appear_on_the_page_that_covers_them(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    await Threads(mailbox).get_thread("c-rel")  # the app reads m1 (Sep 28 09:00), retaining it
+    del fake.messages["m1"]
+    seen, cursor = [], None
+    while True:
+        page = await mailbox.list_messages(limit=1, cursor=cursor, include_deleted_items=True)
+        seen += [m.id for m in page.items]
+        if not (cursor := page.cursor):
+            break
+    assert seen == ["m5", "m4", "m3", "m2", "m1"]  # m1 comes from retention on the last page, once
+
+
+async def test_list_total_counts_the_server_scope(mailbox: Mailbox) -> None:
+    page = await mailbox.list_messages(include_total=True)
+    assert page.coverage.server_total == 4  # five messages minus the one in Junk Email
+
+
+async def test_copies_of_one_message_are_shown_once(mailbox: Mailbox, fake: FakeGraph) -> None:
+    for mid, folder in (("self-sent", "f-sent"), ("self-recv", "f-inbox")):
+        fake.add(
+            FakeMessage(mid, "Note to self", folder, "2026-10-01T09:00:00Z", conversation="c-self",
+                        internet_id="<self@example.com>")
+        )  # fmt: skip
+    page = await mailbox.list_messages()
+    copy = next(m for m in page.items if m.conversation_id == "c-self")
+    assert [m.id for m in page.items].count(copy.id) == 1 and copy.id == "self-recv"
+    assert copy.also_in == ["Sent Items"]
+    thread = await Threads(mailbox).get_thread("c-self")
+    assert [t.message.id for t in thread.messages] == ["self-recv"]
+    assert (await mailbox.conversation_sizes(["c-self"]))[0].messages == 1
 
 
 async def test_received_only_scans_past_filtered_pages_and_keeps_it_in_the_cursor(
@@ -95,7 +139,8 @@ async def test_received_only_scans_past_filtered_pages_and_keeps_it_in_the_curso
 async def test_local_only_listing_says_so(mailbox: Mailbox) -> None:
     await mailbox.list_messages()
     page = await mailbox.list_messages(refresh=False)
-    assert page.coverage.source == "local" and not page.coverage.complete and len(page.items) == 5
+    assert page.coverage.source == "local" and not page.coverage.complete and len(page.items) == 4
+    assert page.coverage.excluded == {"deleted_or_junk": 1}
 
 
 async def test_list_messages_validation(mailbox: Mailbox) -> None:
@@ -206,14 +251,14 @@ async def test_truncated_conversation_is_not_reported_complete(
 
 async def test_thread_sizes_count_like_get_thread(mailbox: Mailbox, fake: FakeGraph) -> None:
     threads = Threads(mailbox)
-    sizes = {s.conversation_id: s.messages for s in await threads.sizes(["c-rel", "c-lunch"])}
+    sizes = {s.conversation_id: s.messages for s in await mailbox.conversation_sizes(["c-rel", "c-lunch"])}
     assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_thread
-    with_junk = await threads.sizes(["c-rel"], include_deleted_items=True)
+    with_junk = await mailbox.conversation_sizes(["c-rel"], include_deleted_items=True)
     assert with_junk[0].messages == 4 and not with_junk[0].at_least
     await threads.get_thread("c-rel")
     del fake.messages["m2"]
     await threads.get_thread("c-rel")  # m2 is now retained as deleted on the server
-    assert (await threads.sizes(["c-rel"]))[0].messages == 3
+    assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 3
 
 
 async def test_single_oversized_message_is_truncated_not_skipped(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -266,3 +311,60 @@ async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_backgro
     finally:
         mailbox_module.FOLDER_TTL_SECONDS = saved
     assert "f-new" in {f.id for f in (await mailbox.folders())}
+
+
+async def test_thread_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox, fake: FakeGraph) -> None:
+    fake.add(
+        FakeMessage("big", "Huge", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-big", text="x" * 5000)
+    )
+    thread = await Threads(mailbox).get_thread("c-big", max_chars=1000)
+    assert thread.messages[0].truncated and thread.cursor is None and thread.coverage.complete
+
+
+async def test_truncated_listing_stays_incomplete_when_bodies_fit(
+    mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
+    thread = await Threads(mailbox).get_thread("c-rel", max_chars=100_000)
+    assert not thread.coverage.complete
+
+
+async def test_summaries_are_stored_without_bodies(mailbox: Mailbox, tmp_path: Path) -> None:
+    await Threads(mailbox).get_thread("c-rel")
+    row = (
+        sqlite3.connect(tmp_path / "m.sqlite3")
+        .execute("SELECT summary FROM messages WHERE id='m1'")
+        .fetchone()
+    )
+    assert not {"body_text", "unique_body_text", "attachments", "bcc"} & set(json.loads(row[0]))
+
+
+async def test_search_dates_are_exact_whatever_the_time_zone(mailbox: Mailbox) -> None:
+    # m1 Sep 28 09:00, m2 Sep 28 10:00, m3 Sep 29 08:00 (UTC); KQL only knows dates
+    result = await mailbox.search(
+        "relatório",
+        since=datetime(2026, 9, 28, 9, 30, tzinfo=UTC),
+        until=datetime(2026, 9, 29, 7, tzinfo=UTC),
+    )
+    assert [m.id for hit in result.conversations for m in hit.matching_messages] == ["m2"]
+
+
+async def test_search_hits_carry_the_conversation_size(mailbox: Mailbox) -> None:
+    result = await mailbox.search("relatório")
+    assert result.conversations[0].message_count == 3  # m4 in Junk is not counted by default
+
+
+async def test_unknown_folder_name_refreshes_the_folder_list(mailbox: Mailbox, fake: FakeGraph) -> None:
+    await mailbox.folders()
+    fake.add_folder("f-new", "Brand new", parent="f-inbox")
+    assert (await mailbox.resolve_folder("Inbox/Brand new")).id == "f-new"
+
+
+async def test_attachments_of_a_deleted_message_come_from_retention(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    await mailbox.get_message("m3")  # retains the attachment list
+    del fake.messages["m3"]
+    attachments = await mailbox.attachments("m3")
+    assert [a.name for a in attachments][0] == "numbers.xlsx"
+    assert mailbox.store.summaries(["m3"])["m3"].is_deleted
