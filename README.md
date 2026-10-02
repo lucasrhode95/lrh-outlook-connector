@@ -1,6 +1,6 @@
 # Outlook connector
 
-A local connector for one user's Exchange Online mailbox. It has two surfaces: an MCP server for agents and a small local web UI for exports. Reads go through Microsoft Graph. Writes (drafts and sending; mailbox changes are next) go through Outlook Web, because Graph write access is unavailable to the usable Microsoft first-party clients.
+A local connector for one user's Exchange Online mailbox. It has two surfaces: an MCP server for agents and a small local web UI for exports. Reads go through Microsoft Graph. Writes (drafts, sending and mailbox changes) go through Outlook Web, because Graph write access is unavailable to the usable Microsoft first-party clients.
 
 - **What it must do:** [docs/outlook-requirements-v4.md](docs/outlook-requirements-v4.md)
 - **How it is built:** [docs/architecture.md](docs/architecture.md)
@@ -23,7 +23,7 @@ Sign-in uses Microsoft's device-code flow and is only ever started from this com
 
 ```bash
 outlook-connector auth read     # Graph reads (needed for everything)
-outlook-connector auth write    # drafts and sending (and mailbox changes, later)
+outlook-connector auth write    # drafts, sending and mailbox changes
 outlook-connector status        # offline: account, profiles, cache location
 outlook-connector status --check  # also refreshes each token (only read is required)
 ```
@@ -51,6 +51,11 @@ reply into Drafts and never sends it. `send_email` sends only a message you conf
 confirm; any change to the recipients, subject or body afterwards is refused. A send is never
 retried; if Outlook gives no clear answer, the connector looks in Sent Items and otherwise tells you
 to check before anything is sent again.
+
+Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `categorize`, `move_messages` and
+`delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)
+and return a result per message: done, unchanged, not found, failed or unknown. Only existing
+categories can be added. Delete moves to Deleted Items and never deletes permanently.
 
 Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issues (the copies
 Outlook files when two versions of an item collide while syncing) are left out unless

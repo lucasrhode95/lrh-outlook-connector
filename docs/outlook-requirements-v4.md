@@ -194,9 +194,10 @@ Requirements:
 - **Authorization:** the user's MCP client allow/deny prompt is the safeguard for mutations. There is no server-side plan or confirmation token. To keep that prompt meaningful:
   - Write tools take **explicit message IDs** and an explicit target. There is no "move everything matching a query" on the server.
   - They are never auto-approved by annotation: `readOnlyHint=false`. `destructiveHint=true` for move and delete, `false` for read-state, flag and categories.
-- **Per-item results:** each tool returns a result per item (moved / already there / not found / failed). Partial failure is reported, never hidden. Moves are not retried blindly. On an ambiguous result, re-read the item's folder.
+- **Per-item results:** each tool returns a result per item: `done`, `unchanged` (already so; nothing sent), `not_found`, `failed` (with Outlook's code) or `unknown`. Partial failure is reported, never hidden. Nothing is retried. On an ambiguous result, the items are read back: `done` where the change is visible, `unknown` elsewhere.
+- **Delete** moves to Deleted Items; messages already in Deleted Items are left alone, so nothing is ever deleted permanently. **Categories** can only be added if they already exist in the mailbox's category list. **Read state** also works per conversation (every message in scope).
 - **Folder targets** are resolved through `list_folders`. Creating folders is out of scope until requested.
-- **Local consistency:** after a successful mutation, update the local store (folder, read state, flags, categories).
+- **Local consistency:** changed messages are dropped from the summary cache, so the next listing caches their new state.
 
 ## 12. Phases
 

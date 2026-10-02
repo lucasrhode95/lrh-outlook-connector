@@ -67,10 +67,11 @@ Ordered by risk: reversible state changes first, then moves and deletes.
 
 | Item | Status | Scope |
 |---|---|---|
-| W4 Read/unread | **Pending** | Per item, and per conversation (`ApplyConversationAction`) |
-| W5 Flag / categories | **Pending** | Existing categories only, unless creation is requested later |
-| W2 Move to folder | **Pending** | Explicit ids + target. Per-item results. Store update. |
-| W3 Delete (soft) | **Pending** | `DeleteItem` `MoveToDeletedItems`. Never purge. |
+| W4 Read/unread | **Partial**: built and fake-tested; live check V3 pending | `set_read_state`: per message, and per conversation (every message in scope, all copies) with `UpdateItem`; read receipts suppressed |
+| W5 Flag / categories | **Partial**: built and fake-tested; live check V3 pending | `set_flag`; `categorize(add, remove)` keeps other categories and adds only names in the mailbox's category list (Graph `masterCategories`; whether the read sign-in may read it is part of V3) |
+| W2 Move to folder | **Partial**: built and fake-tested; live check V3 pending | `move_messages`: explicit ids + a target resolved like `list_folders`; well-known targets by alias (proven), other folders by id (V3). Deleted Items refused (use delete). Per-message results |
+| V3 Live mutation check | **Pending — needs you** | On a few test messages you name: read/unread (one message, then one conversation), flag and unflag, add and remove an existing category (and confirm `masterCategories` is readable), a move to Archive and to a project folder (the folder-id target) and back, and a delete, then restore from Deleted Items in Outlook. |
+| W3 Delete (soft) | **Partial**: built and fake-tested; live check V3 pending | `delete_messages`: `DeleteItem` `MoveToDeletedItems`; messages already in Deleted Items are left alone. Never purge. |
 
 ## Later and parked
 
