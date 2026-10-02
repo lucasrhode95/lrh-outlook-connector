@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="session-token" content="{{SESSION_TOKEN}}">
+  <title>Outlook connector</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <strong class="brand">Outlook connector</strong>
+    <form id="search-form" class="search" autocomplete="off">
+      <input id="search" type="search" placeholder="Search the mailbox (e.g. budget review, from:alice, subject:invoice)">
+      <button type="submit">Search</button>
+    </form>
+    <input id="filter" type="search" placeholder="Filter loaded threads" aria-label="Filter loaded threads">
+    <div class="range-picker" id="range-picker">
+      <button id="range-toggle" class="range-toggle" type="button" aria-haspopup="dialog" aria-expanded="false"
+              title="Message date range">
+        <span id="range-label">Any date</span><span aria-hidden="true">⌄</span>
+      </button>
+      <div id="calendar" class="calendar" role="dialog" aria-label="Choose an inclusive message date range" hidden>
+        <div class="calendar-header">
+          <button id="previous-month" class="calendar-nav" type="button" aria-label="Previous month">‹</button>
+          <strong id="calendar-month"></strong>
+          <button id="next-month" class="calendar-nav" type="button" aria-label="Next month">›</button>
+        </div>
+        <div class="weekdays" aria-hidden="true"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+        <div id="calendar-days" class="calendar-days"></div>
+        <div class="calendar-footer">
+          <button id="clear-dates" type="button" aria-label="Clear date range (any date)">Clear</button>
+          <span id="calendar-hint" class="calendar-hint">Click once for one day; click again to set the end date.</span>
+          <button id="calendar-done" type="button">Done</button>
+        </div>
+      </div>
+      <input id="since" type="hidden">
+      <input id="until" type="hidden">
+    </div>
+    <span id="account" class="muted"></span>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main class="layout">
+    <nav class="sidebar">
+      <div class="sidebar-head">
+        <span>Folders</span>
+        <button id="refresh-folders" class="link" title="Reload folders from Outlook">refresh</button>
+      </div>
+      <ul id="folders"></ul>
+    </nav>
+
+    <section class="list">
+      <div class="list-head">
+        <span id="list-title">Recent mail</span>
+        <span id="coverage" class="muted"></span>
+      </div>
+      <div id="threads"></div>
+      <button id="more" class="more" hidden>Load more</button>
+    </section>
+
+    <aside class="reader">
+      <div class="reader-head">
+        <span id="reader-title" class="muted">Select a message to read it</span>
+        <label class="muted"><input id="reader-full" type="checkbox"> include quoted history</label>
+      </div>
+      <dl id="reader-meta" class="meta"></dl>
+      <pre id="reader-body" class="body"></pre>
+    </aside>
+  </main>
+
+  <footer class="exportbar">
+    <span id="selection" class="muted">Nothing selected</span>
+    <label><input id="opt-attachments" type="checkbox"> include attachments</label>
+    <label><input id="opt-per-thread" type="checkbox" checked> combine messages of the same thread</label>
+    <label><input id="opt-all" type="checkbox"> combine all into one file</label>
+    <label><input id="opt-full" type="checkbox"> include quoted history</label>
+    <label><input id="opt-deleted" type="checkbox"> include Deleted Items / Junk</label>
+    <button id="clear">Clear</button>
+    <button id="export" class="primary" disabled>Export</button>
+  </footer>
+
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
