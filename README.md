@@ -45,11 +45,17 @@ The client starts one `outlook-connector mcp` process per session. Tools: `list_
 `save_message_mime`, `export_messages`, `auth_status`. They are read-only: nothing changes the mailbox,
 not even read state.
 
-Every tool follows the same scope rules: Deleted Items and Junk Email are left out unless
-`include_deleted_items=true` (a folder you name is always included), `received_only=true` also leaves
+Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issues (the copies
+Outlook files when two versions of an item collide while syncing) are left out unless
+`include_deleted_items=true` (a folder you name is always included; a subfolder counts with its
+parent, so a folder you deleted in Outlook counts as Deleted Items). `received_only=true` also leaves
 out Sent Items, Drafts and Outbox, and `coverage.excluded` counts what was left out. Copies of one
 message (mail sent to yourself or to a list you are on) are shown once, with `also_in` naming the
-other folders. List and search results are compact by default (`detail="full"` for every field);
+other folders.
+
+**Out of reach:** hidden folders, and items outside the mail folders (Teams meeting records,
+settings and other non-mail items), are never listed, searched, counted, threaded or exported, and
+`list_folders` does not show them. Search covers mail only. List and search results are compact by default (`detail="full"` for every field);
 search hits carry the conversation's message count, and `list_messages(include_total=true)` returns the
 server's count for the window.
 
@@ -78,8 +84,8 @@ message is a plain row; a real thread shows its message count across all folders
 top), search the mailbox, filter what is loaded, read messages and download their attachments, tick
 threads or single messages, and export them as one `.txt` or `.zip` (one file per thread, one for
 everything, or one per message; attachments optional). "export this view" exports the whole current
-folder and date range. Deleted Items and Junk are hidden unless you tick "Deleted / Junk" (they are
-always shown inside those folders).
+folder and date range. Deleted Items, Junk and Sync Issues are left out unless you tick
+"Deleted / Junk" (they are always shown inside those folders). Hidden folders are not listed.
 
 Exports and downloaded attachments go to the data directory (`%LOCALAPPDATA%\lrh-outlook-connector`)
 and are removed after a week. The local store there keeps only the folder cache and copies of messages

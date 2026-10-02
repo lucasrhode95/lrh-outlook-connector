@@ -40,10 +40,15 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
-- Scope, the same for every tool: Deleted Items and Junk Email are left out unless \
-include_deleted_items=true (a folder you name is always included). received_only=true also \
-leaves out Sent Items, Drafts and Outbox: use it for "the latest mail I received", which includes \
-mail that rules filed into other folders. coverage.excluded counts what was left out.
+- Scope, the same for every tool: Deleted Items, Junk Email and Sync Issues (Outlook's own \
+conflict copies) are left out unless include_deleted_items=true (a folder you name is always \
+included; subfolders count with their parent). received_only=true also leaves out Sent Items, \
+Drafts and Outbox: use it for "the latest mail I received", which includes mail that rules filed \
+into other folders. coverage.excluded counts what was left out.
+- Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
+and other non-mail items), are never listed, searched, counted, threaded or exported, and \
+list_folders does not show them; coverage.excluded.hidden counts any that were dropped. Search \
+covers mail only.
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
 - Reading: get_thread returns a whole conversation across folders, oldest first, with bodies \
@@ -76,7 +81,11 @@ LOCAL_FILE = ToolAnnotations(
 
 
 IncludeDeleted = Annotated[
-    bool, Field(description="Include Deleted Items and Junk Email (a folder you name is always included).")
+    bool,
+    Field(
+        description="Include Deleted Items, Junk Email and Sync Issues "
+        "(a folder you name is always included)."
+    ),
 ]
 ReceivedOnly = Annotated[bool, Field(description="Leave out Sent Items, Drafts and Outbox.")]
 DetailLevel = Annotated[
@@ -110,7 +119,9 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_folders(refresh: bool = False) -> list[Folder]:
-        """Mail folders with paths (e.g. Inbox/Projects/RIE), well-known aliases and counts."""
+        """Mail folders with paths (e.g. Inbox/Projects/RIE), well-known aliases and counts.
+
+        Hidden folders are out of reach and not listed."""
         return await (await services()).mailbox.folders(refresh=refresh)
 
     @mcp.tool(annotations=READ_ONLY)
@@ -165,8 +176,8 @@ def build_server(context: AppContext) -> FastMCP:
         include_deleted_items: IncludeDeleted = False,
         detail: DetailLevel = "compact",
     ) -> SearchResult:
-        """Server-side mailbox search; hits grouped by conversation in rank order, with each
-        conversation's message_count."""
+        """Server-side search of mail only (hidden folders and non-mail items are left out); hits
+        grouped by conversation in rank order, with each conversation's message_count."""
         return await (await services()).mailbox.search(
             query,
             since=_utc(since),

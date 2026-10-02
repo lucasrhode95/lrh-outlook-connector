@@ -62,14 +62,10 @@ class MailReader(Protocol):
         ...
 
     async def count_messages(
-        self,
-        *,
-        folder_id: str | None,
-        since: datetime | None,
-        until: datetime | None,
-        minus_folders: list[str],
-    ) -> int | None:
-        """Server count of messages in the window, minus those in ``minus_folders``; None if unknown."""
+        self, *, folder_ids: list[str], since: datetime | None, until: datetime | None
+    ) -> dict[str, int] | None:
+        """Server count of messages in the window per folder (not its subfolders); None if any
+        count is unavailable."""
         ...
 
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message: ...

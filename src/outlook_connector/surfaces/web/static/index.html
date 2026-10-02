@@ -11,7 +11,7 @@
   <header class="topbar">
     <strong class="brand">Outlook connector</strong>
     <form id="search-form" class="search" autocomplete="off">
-      <input id="search" type="search" placeholder="Search the mailbox (e.g. budget review, from:alice, subject:invoice)">
+      <input id="search" type="search" placeholder="Search mail (e.g. budget review, from:alice, subject:invoice)">
       <button type="submit">Search</button>
     </form>
     <input id="filter" type="search" placeholder="Filter loaded threads" aria-label="Filter loaded threads">
@@ -55,7 +55,7 @@
       <div class="list-head">
         <span id="list-title">Inbox</span>
         <span id="coverage" class="muted"></span>
-        <label class="muted" title="Also list, count and export messages in Deleted Items and Junk Email (always on inside those folders)">
+        <label class="muted" title="Also list, count and export messages in Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies); always on inside those folders">
           <input id="opt-deleted" type="checkbox"> Deleted / Junk</label>
         <button id="export-view" class="link" title="Export every message of this folder and date range">export this view</button>
       </div>

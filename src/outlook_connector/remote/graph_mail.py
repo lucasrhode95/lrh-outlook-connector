@@ -17,7 +17,8 @@ from outlook_connector.remote.transport import operation
 
 WELL_KNOWN = (
     "inbox", "sentitems", "drafts", "outbox", "deleteditems", "junkemail", "archive",
-    "recoverableitemsdeletions", "searchfolders", "conversationhistory", "syncissues",
+    "recoverableitemsdeletions", "searchfolders", "conversationhistory",
+    "syncissues", "conflicts", "localfailures", "serverfailures",
 )  # fmt: skip
 MAX_CONVERSATION = 1000
 
@@ -175,19 +176,13 @@ class GraphMailReader:
 
     @_named("counting messages")
     async def count_messages(
-        self,
-        *,
-        folder_id: str | None,
-        since: datetime | None,
-        until: datetime | None,
-        minus_folders: list[str],
-    ) -> int | None:
-        """Messages in the window on the server, minus those in ``minus_folders``. One $batch."""
+        self, *, folder_ids: list[str], since: datetime | None, until: datetime | None
+    ) -> dict[str, int] | None:
+        """Messages in the window per folder (that folder only, not its subfolders), in $batch."""
         params = {"$count": "true", "$top": 1, "$select": "id", "$filter": _window(since, until)}
-        path = f"/me/mailFolders/{folder_id}/messages" if folder_id else "/me/messages"
-        requests = {"all": relative(path, params)} | {
-            f"minus-{i}": relative(f"/me/mailFolders/{fid}/messages", params)
-            for i, fid in enumerate(minus_folders)
+        requests = {
+            str(index): relative(f"/me/mailFolders/{fid}/messages", params)
+            for index, fid in enumerate(folder_ids)
         }
         responses = await self._graph.batch(requests, headers={"ConsistencyLevel": "eventual"})
         counts: dict[str, int] = {}
@@ -195,8 +190,8 @@ class GraphMailReader:
             count = response.body.get("@odata.count")
             if not response.ok or not isinstance(count, int):
                 return None
-            counts[key] = count
-        return counts.pop("all") - sum(counts.values())
+            counts[folder_ids[int(key)]] = count
+        return counts
 
     @_named("reading a message")
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message:

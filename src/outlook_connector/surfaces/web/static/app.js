@@ -104,7 +104,6 @@ async function loadFolders(refresh = false) {
   }
   list.replaceChildren(folderItem(null, "All mail (recent)", 0, null));
   for (const folder of folders) {
-    if (folder.hidden) continue;
     const depth = (folder.path.match(/\//g) || []).length;
     list.append(folderItem(folder.id, folder.name, depth, folder.unread));
   }
@@ -128,12 +127,22 @@ function folderItem(id, name, depth, unread) {
 
 // ------------------------------------------------------------------ list and search
 
-// Deleted Items and Junk are left out unless the toggle is on, or the user is inside one of them
-// (the server always lists a folder asked for by name; threads, counts and exports follow this).
+// Deleted Items, Junk and Sync Issues are left out unless the toggle is on, or the user is inside one
+// of them (the server always lists a folder asked for by name; threads, counts and exports follow this).
 function includeDeleted() {
-  const folder = state.folders.get(state.folder);
-  const inside = state.mode === "list" && folder && ["deleteditems", "junkemail"].includes(folder.well_known);
-  return $("opt-deleted").checked || Boolean(inside);
+  return $("opt-deleted").checked || (state.mode === "list" && insideLeftOutFolder(state.folder));
+}
+
+// Deleted Items, Junk Email, Sync Issues, or a folder inside one of them (a folder deleted in
+// Outlook moves into Deleted Items), the same rule as the server's.
+const LEFT_OUT_FOLDERS = ["deleteditems", "junkemail", "syncissues", "conflicts", "localfailures", "serverfailures"];
+function insideLeftOutFolder(id) {
+  const seen = new Set();
+  for (let folder = state.folders.get(id); folder && !seen.has(folder.id); folder = state.folders.get(folder.parent_id)) {
+    seen.add(folder.id);
+    if (LEFT_OUT_FOLDERS.includes(folder.well_known)) return true;
+  }
+  return false;
 }
 
 function resetThreads() {
@@ -245,8 +254,9 @@ async function loadSizes(request) {
 
 function showCoverage(coverage) {
   const parts = [];
-  const hidden = (coverage.excluded || {}).deleted_or_junk;
-  if (hidden) parts.push(`${hidden} in Deleted Items / Junk hidden`);
+  const excluded = coverage.excluded || {};
+  const notShown = (excluded.deleted_or_junk || 0) + (excluded.sync_issues || 0);
+  if (notShown) parts.push(`${notShown} in Deleted / Junk / Sync Issues not shown`);
   if (coverage.server_total !== null && coverage.server_total !== undefined) parts.push(`${coverage.server_total} matching messages on the server`);
   if (coverage.source !== "remote") parts.push(coverage.source);
   $("coverage").textContent = parts.join(" · ");

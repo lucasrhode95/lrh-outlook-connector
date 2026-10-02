@@ -98,7 +98,7 @@ Lazy population:
 
 ## 8. Listing, threads and search
 
-**Scope, shared by list, search, thread and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included. `received_only` also leaves out Sent Items, Drafts and Outbox. Results count what was left out. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, thread and export:** Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies) are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. `received_only` also leaves out Sent Items, Drafts and Outbox. Results count what was left out. **Hidden folders and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total helps plan large reads.
 
