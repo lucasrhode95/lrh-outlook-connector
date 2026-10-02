@@ -1,8 +1,8 @@
 """Conversation retrieval (requirements v4 §8, research §3.4).
 
 A thread is an Exchange conversation: every message with one conversationId across all folders.
-Graph cannot sort that query, so messages are sorted here. Retained messages deleted on the
-server are merged in and labelled, and copies of one message are shown once (mailbox.py).
+Graph cannot sort that query, so messages are sorted here. Copies of one message are shown once
+(mailbox.py).
 Bodies are optional and bounded, with a cursor.
 """
 
@@ -22,7 +22,7 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
-from outlook_connector.service.mailbox import NEVER_RETAINED, Mailbox, has_content, unavailable
+from outlook_connector.service.mailbox import GONE, Mailbox, unavailable
 
 BODY_BATCH = 10
 _PREFIX = re.compile(r"^\s*((re|res|fw|fwd|enc|aw|wg|sv|tr|rv)\s*:\s*)+", re.IGNORECASE)
@@ -46,15 +46,12 @@ class Threads:
     ) -> tuple[list[MessageSummary], dict[str, int], bool]:
         """All messages of the conversation, oldest first, what was left out by folder, and whether
         the server listing was truncated (more than MAX_CONVERSATION messages)."""
-        reader, store = self.mailbox.reader, self.mailbox.store
-        remote, truncated = await reader.conversation(conversation_id)
-        store.upsert_summaries(remote)
-        await self.mailbox.reconciler.after_conversation(conversation_id, remote)
-        retained_deleted = [m for m in store.conversation(conversation_id) if m.is_deleted]
-        if not remote and not retained_deleted:
-            raise NotFound(f"No conversation {conversation_id} on the server or locally.")
+        remote, truncated = await self.mailbox.reader.conversation(conversation_id)
+        if not remote:
+            raise NotFound(f"No conversation {conversation_id} on the server.")
+        self.mailbox.store.upsert_summaries(remote)
         skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
-        items, excluded = await self.mailbox.finish(sorted(remote + retained_deleted, key=oldest_first), skip)
+        items, excluded = await self.mailbox.finish(sorted(remote, key=oldest_first), skip)
         return items, excluded, truncated
 
     async def get_thread(
@@ -90,23 +87,19 @@ class Threads:
             )
         for reason, count in excluded.items():
             notes.append(f"{count} message(s) left out: {EXCLUSION_TEXT[reason]}.")
-        if any(m.is_deleted for m in items):
-            notes.append(
-                "Messages marked is_deleted=true were deleted on the server; shown from local retention."
-            )
         if any(m.also_in for m in items):
             notes.append("Copies of one message are shown once; also_in names the other folders.")
 
         entries: list[ThreadMessage] = []
         next_start: int | None = None
-        retryable = 0  # bodies the server could not deliver now (unlike ones never retained)
+        retryable = 0  # bodies the server could not deliver now (not deleted ones)
         if include_bodies:
             budget = max_chars
             index = start
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
                 bodies, missing = await self.bodies(chunk)
-                retryable += sum(1 for reason in missing.values() if reason != NEVER_RETAINED)
+                retryable += sum(1 for reason in missing.values() if reason != GONE)
                 for offset, summary in enumerate(chunk):
                     found = bodies.get(summary.id)
                     text = found.body(body) if found else unavailable(missing[summary.id])
@@ -143,7 +136,6 @@ class Threads:
             if next_start is not None
             else None,
             coverage=Coverage(
-                source="remote+local" if any(m.is_deleted for m in items) else "remote",
                 complete=next_start is None and not listing_truncated and not retryable,
                 excluded=excluded,
                 notes=notes,
@@ -153,35 +145,14 @@ class Threads:
     async def bodies(
         self, summaries: list[MessageSummary], *, known: dict[str, Message] | None = None
     ) -> tuple[dict[str, Message], dict[str, str]]:
-        """Text bodies: from the server, or the retained copy for messages deleted there.
+        """Text bodies from the server, in batches.
 
-        ``known``: messages already fetched with bodies, used as they are. Messages the server no
-        longer has are marked deleted, in the store and on ``summaries``. Returns (bodies by id,
+        ``known``: messages already fetched with bodies, used as they are. Returns (bodies by id,
         reason per message without a body): every summary is in exactly one of the two.
         """
-        store = self.mailbox.store
-        known = known or {}
-        live = [m.id for m in summaries if not m.is_deleted and m.id not in known]
-        fetched = await self.mailbox.reader.get_messages(live) if live else FetchedMessages()
-        found = [m for m in fetched.messages.values() if m is not None]
-        store.save_messages(found)
-        gone = {mid for mid, m in fetched.messages.items() if m is None}
-        if gone:
-            store.mark_deleted(gone)
-            for summary in summaries:
-                if summary.id in gone:
-                    summary.is_deleted = True
-        out: dict[str, Message] = {m.id: m for m in found} | {
-            mid: m for mid, m in known.items() if mid in {s.id for s in summaries}
-        }
-        retained = store.messages(s.id for s in summaries if s.id not in out)
-        missing: dict[str, str] = {}
-        for summary in summaries:
-            if summary.id in out:
-                continue
-            copy = retained.get(summary.id)
-            if copy is not None and has_content(copy):  # a row without content is only a summary
-                out[summary.id] = copy
-            else:
-                missing[summary.id] = fetched.failed.get(summary.id, NEVER_RETAINED)
+        known = {s.id: known[s.id] for s in summaries if known and s.id in known}
+        wanted = [s.id for s in summaries if s.id not in known]
+        fetched = await self.mailbox.reader.get_messages(wanted) if wanted else FetchedMessages()
+        out = known | {mid: m for mid, m in fetched.messages.items() if m is not None}
+        missing = {s.id: fetched.failed.get(s.id, GONE) for s in summaries if s.id not in out}
         return out, missing

@@ -75,10 +75,6 @@ class MailReader(Protocol):
         """Batch fetch with bodies. Per-item failures are reported, not raised."""
         ...
 
-    async def locate(self, message_ids: list[str]) -> dict[str, str | None]:
-        """Current folder id per message, ``None`` when the message no longer exists."""
-        ...
-
     async def list_attachments(self, message_id: str) -> list[Attachment]: ...
 
     async def list_attachments_many(

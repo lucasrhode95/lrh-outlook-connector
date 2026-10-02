@@ -37,7 +37,7 @@ There is no daemon. Three entry points, all short-lived:
 - **Startup cost matters**, because every agent session pays it.
   - Nothing runs at startup: no sync, no folder walk, no token refresh before the first call.
   - The web stack (Starlette, uvicorn) is imported only by `ui`, never by `mcp`.
-  - Cached data is shown first: folders come from the cache immediately and a stale cache (older than 10 minutes) refreshes in the background; the UI draws locally retained messages, then replaces them with the server's list.
+  - Cached data is shown first: folders come from the cache immediately and a stale cache (older than 10 minutes) refreshes in the background; the UI draws cached message summaries, then replaces them with the server's list.
   - Each process builds its MSAL clients once and keeps access tokens in memory until shortly before expiry (rebuilding the client costs a network round trip).
 - **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote `nextLink` or offset plus the original selection). They survive a client restart.
 - **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue and no progress reporting. An export holds at most 2,000 messages; it fetches bodies in bounded `$batch` rounds and finishes with per-message gaps marked rather than failing as a whole (§5.8).
@@ -88,12 +88,11 @@ lrh-outlook-connector/
 │  │  └─ errors.py                 # domain errors
 │  │
 │  ├─ store/
-│  │  └─ db.py                     # account-bound SQLite: folder cache, retained messages, tombstones
+│  │  └─ db.py                     # account-bound SQLite: folder cache, summary cache
 │  │
 │  ├─ service/
 │  │  ├─ mailbox.py                # folders, list, get, search
 │  │  ├─ threads.py                # conversation retrieval (+ branch labelling later)
-│  │  ├─ reconcile.py              # deleted/moved detection
 │  │  ├─ cursors.py                # self-contained continuation cursors
 │  │  ├─ files.py                  # attachment and .eml downloads (MCP and UI)
 │  │  ├─ localfiles.py             # exports/ and downloads/ folders: 7-day cleanup, exclusive file names
@@ -112,7 +111,7 @@ lrh-outlook-connector/
 │        └─ static/                # index.html, app.js (ES module, no build step), app.css
 └─ tests/
    ├─ fakes/                       # fake MSAL; in-memory Graph mailbox over httpx.MockTransport
-   ├─ unit/                        # config, tokens, CLI, Graph reader, store, reconcile
+   ├─ unit/                        # config, tokens, CLI, Graph reader, store
    ├─ service/                     # mailbox, threads, exports (against the fake Graph)
    └─ surfaces/                    # MCP contract, web routes
 ```
@@ -164,7 +163,6 @@ lrh-outlook-connector/
 - `conversation(conversation_id)`, which returns all folders, leaves sorting to the caller (`$orderby` is rejected with this filter) and reports truncation past 1,000 messages.
 - `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
-- `locate(ids)`: current folder or gone (404), for reconciliation.
 - `search(query)`: `$search`, field-scoped queries passed through.
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`, for the inline images of every message of an export at once: one `$batch` item per image, 20 per batch across messages).
 - `download_attachment(id, att_id)` and `download_mime(id)` stream to a file.
@@ -197,10 +195,8 @@ lrh-outlook-connector/
 - One SQLite database per account fingerprint under the user data directory. WAL mode, `busy_timeout`, a connection per operation, short transactions.
 - Holds only:
   - the **folder cache** (id, parent, alias, counts, and a TTL timestamp);
-  - **retained messages**: metadata and body for messages the app has read or exported, so content survives a later server-side deletion;
-  - **tombstones** (`is_deleted`, `deleted_at`);
-  - attachment metadata for retained messages.
-- Attachment bytes and a full mailbox mirror are not stored (research §3.2).
+  - a **summary cache**: the summaries of messages the app has listed (no bodies), for the UI's instant preview and `list_messages(refresh=false)`. A listed page replaces the cached rows of the time span it covered, so mail deleted or moved on the server drops out of the cache.
+- Bodies, attachment bytes and a full mailbox mirror are not stored (research §3.2). Mail deleted on the server is gone here too (decided 2026-10-02: no local retention).
 - When the owner fingerprint does not match, the existing database is left untouched and a separate one is used.
 
 ### 5.8 `service/`
@@ -208,26 +204,20 @@ lrh-outlook-connector/
 **`mailbox.py`:**
 - `list_folders` answers from the cache immediately (stale-while-revalidate: older than 10 minutes triggers a background refresh); only an empty cache or `refresh=true` waits for Graph, whose folder levels are fetched in parallel.
 - **Scope rules, shared by list, search, threads, sizes and export:** each folder gets a category from itself and its parents (`folder_categories`): `sync_issues` > `hidden` > `deleted_or_junk` > `outgoing`. Deleted Items, Junk Email and Sync Issues (with their subfolders; a folder deleted in Outlook sits inside Deleted Items) are left out unless `include_deleted_items` (a folder named in the request is always included); `received_only` also leaves out Sent Items, Drafts and Outbox; `coverage.excluded` counts what was left out, per reason.
-- **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in `SkypeSpacesData/TeamsMeetings`), are always dropped (`excluded.hidden`): from lists, search, threads, conversation sizes, totals and exports. `list_folders` omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues is reachable even when Graph marks it hidden. Retained copies of messages deleted on the server keep their place. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a live, received copy; `also_in` names the other folders.
-- `list_messages(selection, refresh=True, received_only, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. Retained messages deleted on the server are merged into **the page whose time span covers them** (the cursor carries the page's lower bound). Folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
-- `get_message(id, offset, max_chars, body)` returns a bounded body with continuation and retains what it fetched.
-- `search(query, since?, until?, folder?, received_only, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`. Coverage reports "server search; retained-deleted mail not included".
+- **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in `SkypeSpacesData/TeamsMeetings`), are always dropped (`excluded.hidden`): from lists, search, threads, conversation sizes, totals and exports. `list_folders` omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues is reachable even when Graph marks it hidden. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a received copy; `also_in` names the other folders.
+- `list_messages(selection, refresh=True, received_only, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. Folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
+- `get_message(id, offset, max_chars, body)` returns a bounded body with continuation; a message deleted on the server is `NotFound`.
+- `search(query, since?, until?, folder?, received_only, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`.
 - `conversation_sizes(conversation_ids)` counts each conversation's messages the way `get_thread` lists them (copies once), for the UI and search hits.
 
 **`threads.py`:**
 - `get_thread(conversation_id, include_deleted_items=False)`:
   1. fetch the conversation from remote;
   2. **sort locally**, oldest first;
-  3. hydrate bodies via `$batch` when requested (a body that cannot be fetched is marked in the text);
-  4. merge retained-deleted messages.
+  3. hydrate bodies via `$batch` when requested (a body that cannot be fetched is marked in the text).
   Its cursor carries the original selection (conversation, body options, `include_deleted_items`, `max_chars`). Coverage is incomplete when the server listing was truncated (over 1,000 messages) or a body was unavailable.
-- `bodies()` returns a body or a reason for every message (still throttled, or deleted before this app read it); one marker text, `(Content unavailable: …)`, is used everywhere. Coverage is incomplete only for reasons a retry could fix.
+- `bodies()` returns a body or a reason for every message (still throttled, or deleted on the server meanwhile); one marker text, `(Content unavailable: …)`, is used everywhere. Coverage is incomplete only for reasons a retry could fix.
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
-
-**`reconcile.py`:**
-- When a message disappears remotely, it is GET-checked by immutable id. Only a **404** marks it deleted. Graph reports `reason: "deleted"` even for soft deletes (research §3.6).
-- Moves update the folder by id.
-- Known bodies are never erased.
 
 **`writes.py`:**
 - `create_draft` saves a draft (optionally a reply) and returns its id; it never sends, so it needs no confirmation.
@@ -305,7 +295,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 - **Locations:**
   - token cache: `%LOCALAPPDATA%/lrh-outlook-connector/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
   - `OUTLOOK_CONNECTOR_HOME` overrides the data directory (tests, portability);
-  - store: `%LOCALAPPDATA%/lrh-outlook-connector/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields; retained bodies and attachment metadata live in a separate content column;
+  - store: `%LOCALAPPDATA%/lrh-outlook-connector/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields;
   - exports and downloaded attachments: `<data directory>/exports/`, removed after 7 days. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
 
 ## 8. Surfaces: tools and endpoints
@@ -317,7 +307,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `search_messages(query, since?, until?, folder?, limit?, cursor?, received_only, include_deleted_items, detail=compact)` | `mailbox.search` | read-only |
 | `get_thread(conversation_id, include_bodies=True, body=unique\|full, include_deleted_items=False, max_chars, cursor?)` | `threads.get_thread` | read-only |
 | `get_message(id, offset=0, max_chars, body=unique\|full\|html)` | `mailbox.get_message` | read-only |
-| `list_attachments(id)` | `mailbox.attachments` (retained list for a deleted message) | read-only |
+| `list_attachments(id)` | `mailbox.attachments` | read-only |
 | `download_attachment(id, attachment_id)` · `save_message_mime(id)` | `files` | read-only (local file) |
 | `auth_status()` | `tokens.status` (offline) | read-only |
 | `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, received_only?, limit<=2000, format=txt\|jsonl, include_attachments, combine, body, include_deleted_items)` | `export.orchestrator` | read-only (local file) |
@@ -350,7 +340,7 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 | Step | Modules | Roadmap |
 |---|---|---|
 | 1. Skeleton | `config`, `auth/tokens`, `remote/transport`, `ports`, `graph`, `domain/models`, `errors`, `__main__ auth/status` | A1, A2 |
-| 2. Reads | `graph_mail`, `graph_mapping`, `store/*`, `service/mailbox`, `threads`, `reconcile` | B1, S1, S2, L1, T1, L2 |
+| 2. Reads | `graph_mail`, `graph_mapping`, `store/*`, `service/mailbox`, `threads` | B1, S1, S2, L1, T1, L2 |
 | 3. MCP | `surfaces/mcp_main` | M1 |
 | 4. Export | `service/export/*` | E1 |
 | 5. UI | `surfaces/web/*` | U1 |

@@ -89,8 +89,8 @@ folder and date range. Deleted Items, Junk and Sync Issues are left out unless y
 "Deleted / Junk" (they are always shown inside those folders). Hidden folders are not listed.
 
 Exports and downloaded attachments go to the data directory (`%LOCALAPPDATA%\lrh-outlook-connector`)
-and are removed after a week. The local store there keeps only the folder cache and copies of messages
-this app has read, so mail deleted on the server stays readable and is labelled as deleted.
+and are removed after a week. The local store there keeps only the folder cache and the summaries of
+listed messages (for the instant preview). Mail deleted on the server is gone here too.
 
 ## Tests
 

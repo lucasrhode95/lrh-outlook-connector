@@ -54,8 +54,6 @@ class Files:
             size = await self.mailbox.reader.download_mime(message_id, target)
         except NotFound:
             target.unlink(missing_ok=True)
-            if known:
-                self.mailbox.store.mark_deleted([message_id])
             raise NotFound(
                 "The message was deleted on the server; its MIME source is no longer available."
             ) from None

@@ -55,7 +55,7 @@ names the folders of the other copies.
 without quoted history by default. get_message reads one message with offset/max_chars continuation.
 - Always read `coverage` before treating results as complete; follow `cursor` for more. \
 list_messages(include_total=true) gives the server's count for the window, to plan large reads.
-- Messages with is_deleted=true were deleted on the server and come from local retention.
+- Mail deleted on the server is gone: nothing is kept locally.
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
@@ -145,7 +145,7 @@ def build_server(context: AppContext) -> FastMCP:
         ] = False,
         detail: DetailLevel = "compact",
     ) -> MessagePage:
-        """Messages newest first, from the server, merged with retained messages deleted on the server.
+        """Messages newest first, from the server.
 
         With folder exclusions a page can hold fewer than limit messages; follow cursor."""
         return await (await services()).mailbox.list_messages(

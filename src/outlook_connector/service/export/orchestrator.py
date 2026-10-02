@@ -1,7 +1,7 @@
 """The single export path (requirements v4 §10), used by both the local UI and MCP.
 
-selection (conversations + messages + a range) → copies merged → bodies (Graph $batch, retained
-copies for server-deleted mail) → attachments (policy) → grouping (per thread / all / none) →
+selection (conversations + messages + a range) → copies merged → bodies (Graph $batch) →
+attachments (policy) → grouping (per thread / all / none) →
 TXT or JSONL rendering → packaging.
 """
 
@@ -71,7 +71,7 @@ class Exports:
             )
         bodies, missing = await self.threads.bodies(summaries, known=selection.known)
         found, attachment_failures = await self._attachments(
-            summaries, bodies, inline=request.include_attachments, skip=set(missing)
+            summaries, inline=request.include_attachments, skip=set(missing)
         )
         fetched = Fetched(bodies, missing, found, attachment_failures)
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
@@ -122,9 +122,9 @@ class Exports:
         if request.by_range:
             await self._select_range(request, selected, excluded)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
-        cached = self.mailbox.store.summaries(explicit)
+        cached = self.mailbox.store.summaries(explicit)  # listed before: bodies are fetched later
         selected.update(cached)
-        known = await self._fetch_unknown([mid for mid in explicit if mid not in cached])
+        known = await self._fetch([mid for mid in explicit if mid not in cached])
         selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
         merged, _ = await self.mailbox.finish(selected.values())  # copies across conversations and pages
         _check_limit({m.id: m for m in merged}, request.limit)
@@ -157,8 +157,8 @@ class Exports:
             if cursor is None:
                 return
 
-    async def _fetch_unknown(self, message_ids: list[str]) -> dict[str, Message]:
-        """Messages this app has never seen, in batches; their bodies are reused for the export."""
+    async def _fetch(self, message_ids: list[str]) -> dict[str, Message]:
+        """Messages selected by id that this app has not listed, in batches; their bodies are reused."""
         if not message_ids:
             return {}
         fetched = await self.reader.get_messages(message_ids)
@@ -167,38 +167,22 @@ class Exports:
             raise Upstream(f"{len(fetched.failed)} selected message(s) could not be read. First: {first}")
         gone = [mid for mid, m in fetched.messages.items() if m is None]
         if gone:
-            raise NotFound(
-                f"{len(gone)} selected message(s) exist neither on the server nor locally: {gone[0]}"
-            )
-        messages = {mid: m for mid, m in fetched.messages.items() if m is not None}
-        self.mailbox.store.save_messages(messages.values())
-        return messages
+            raise NotFound(f"{len(gone)} selected message(s) are not on the server (deleted): {gone[0]}")
+        return {mid: m for mid, m in fetched.messages.items() if m is not None}
 
     async def _attachments(
         self,
         summaries: list[MessageSummary],
-        bodies: dict[str, Message],
         *,
         inline: bool,
         skip: set[str],
     ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
-        # Graph reports hasAttachments=false when a message has only inline attachments, so when
-        # files are exported (inline images included) every live message is asked, in batches.
-        # ``bodies`` has already marked messages that disappeared from the server as deleted.
-        live = [
-            m.id for m in summaries if not m.is_deleted and m.id not in skip and (inline or m.has_attachments)
-        ]
-        found, failed = await self.reader.list_attachments_many(live) if live else ({}, {})
-        retain = []
-        for summary in summaries:
-            body = bodies.get(summary.id)
-            if summary.id in found and body is not None:
-                body.attachments = found[summary.id]
-                retain.append(body)
-            elif body is not None and body.attachments and summary.id not in failed:
-                found[summary.id] = body.attachments  # retained metadata of a server-deleted message
-        self.mailbox.store.save_messages(retain)
-        return found, failed
+        """Attachments per message, and why listing failed for others. ``skip``: messages without
+        a body (deleted on the server, or not fetched). Graph reports hasAttachments=false when a
+        message has only inline attachments, so when files are exported (inline images included)
+        every message is asked, in batches."""
+        wanted = [m.id for m in summaries if m.id not in skip and (inline or m.has_attachments)]
+        return await self.reader.list_attachments_many(wanted) if wanted else ({}, {})
 
     # ---------------------------------------------------------------- attachments
 
@@ -213,7 +197,7 @@ class Exports:
         inline_ids = {
             mid: [a.id for a in items if a.is_inline and a.kind == "file"] for mid, items in found.items()
         }
-        needs_html = [m.id for m in summaries if inline_ids.get(m.id) and not m.is_deleted]
+        needs_html = [m.id for m in summaries if inline_ids.get(m.id)]
         html = (await self.reader.get_messages(needs_html, body_format="html")).messages if needs_html else {}
         content_ids = (
             await self.reader.attachment_content_ids({mid: inline_ids[mid] for mid in needs_html})
@@ -221,7 +205,7 @@ class Exports:
             else {}
         )
 
-        jobs: list[tuple[str, Attachment, Path | None]] = []
+        jobs: list[tuple[str, Attachment, Path]] = []
         for index, summary in enumerate(summaries):
             page = html.get(summary.id) or bodies.get(summary.id)
             page_html = None
@@ -230,12 +214,9 @@ class Exports:
             for position, attachment in enumerate(found.get(summary.id, [])):
                 cid = content_ids.get(summary.id, {}).get(attachment.id)
                 if policy.wanted(attachment, content_id=cid, body_html=page_html):
-                    target = None if summary.is_deleted else workdir / f"{index}-{position}"
-                    jobs.append((summary.id, attachment, target))
+                    jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
 
-        async def fetch(message_id: str, attachment: Attachment, target: Path | None) -> Path | None:
-            if target is None:
-                return None
+        async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | None:
             try:
                 await self.reader.download_attachment(message_id, attachment.id, target)
             except ConnectorError:

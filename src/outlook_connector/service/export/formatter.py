@@ -54,9 +54,6 @@ def render_message(item: RenderedMessage, *, position: str) -> str:
         lines.append(f"Internet id:     {m.internet_message_id}")
     if m.also_in:
         lines.append(f"Also in: {'; '.join(m.also_in)} (same message, exported once)")
-    if m.is_deleted:
-        deleted = f" on {stamp(m.deleted_at)}" if m.deleted_at else ""
-        lines.append(f"!! DELETED on the server{deleted}. This is the copy retained by outlook-connector.")
     for line in item.attachment_lines:
         lines.append(f"Attachment: {line}")
     lines.append(THIN)
@@ -118,8 +115,6 @@ def jsonl_record(item: RenderedMessage, *, body_kind: str) -> str:
         "from": person(m.sender),
         "to": [person(r) for r in m.to],
         "cc": [person(r) for r in m.cc],
-        "is_deleted": m.is_deleted,
-        "deleted_at": m.deleted_at.isoformat() if m.deleted_at else None,
         "body_kind": body_kind,
         "body": None if item.unavailable else item.text,
         "body_unavailable": item.unavailable,

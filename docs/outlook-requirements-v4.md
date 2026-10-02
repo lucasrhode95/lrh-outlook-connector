@@ -16,7 +16,7 @@ A local application for **one user's own Exchange Online mailbox**. It has two s
 - **Local UI:** you find mail and extract it as AI-friendly text bundles.
 - **MCP server:** agents search, read, export and eventually organize the same mail.
 
-**Guiding principle: remote first.** Delegate as much as possible to Outlook's server APIs (listing, filtering, search, conversation grouping). Keep locally only what is genuinely required: account binding, folder cache, retained content of mail deleted remotely, export assembly.
+**Guiding principle: remote first.** Delegate as much as possible to Outlook's server APIs (listing, filtering, search, conversation grouping). Keep locally only what is genuinely required: account binding, folder cache, a summary cache for instant display, export assembly.
 
 Both surfaces are thin adapters over one shared service, and neither may limit the other. The project is standalone: no shared package with the Teams exporter. How it is built is in [architecture.md](architecture.md).
 
@@ -85,25 +85,24 @@ Authentication requirements:
 - **Rule: documented Graph for every capability it can serve; OWS only for gaps.** For this tenant that means Graph for all reads and OWS for all writes (research §2). The split is tenant-specific; [architecture §6](architecture.md) describes how to re-route.
 - One backend per capability. A failed or ambiguous write is never retried, and never retried through a different backend.
 
-## 7. Data model and local retention
+## 7. Data model and local cache
 
 Lazy population:
 
 - **Folders** are cached and served from the cache immediately; a cache older than 10 minutes is refreshed in the background. A full refresh is cheap: about 23 folders in under a second.
-- **Message metadata is not mirrored.** It is fetched by list/search/thread calls and upserted only as needed for retention and export. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2).
+- **Message metadata is not mirrored.** It is fetched by list/search/thread calls; listed summaries are cached for instant display only. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2).
 - **Bodies and attachments** are fetched only on read or export. Attachment bytes are never cached automatically.
-- **Retention:** remote deletes and moves never erase known local content. When a message disappears remotely, mark it `is_deleted` with `deleted_at` when known, and keep any body already retained. Moves update `parentFolderId`, which is safe because immutable IDs survive moves within a mailbox. A Graph delta `@removed` is ambiguous between a move and a delete. Resolve it with a direct GET on the immutable ID before marking the message deleted.
-- Deleted rows are always explicitly labeled in lists, threads and exports.
+- **No local retention** (decided 2026-10-02): mail deleted on the server is gone here too. Reading it gives "not found"; a message deleted between selection and export is marked unavailable in the export. A listed page replaces the cached summaries of the time span it covered, so deleted or moved mail drops out of the cache.
 - Development DBs can be reset freely. No migrations (see AGENTS.md).
 
 ## 8. Listing, threads and search
 
 **Scope, shared by list, search, thread and export:** Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies) are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. `received_only` also leaves out Sent Items, Drafts and Outbox. Results count what was left out. **Hidden folders and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
-**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total helps plan large reads.
+**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
 
-- `refresh=True` (the default) fetches fresh remote data, upserts it, and merges in retained rows that are now deleted remotely, labeled as such.
-- `refresh=False` reads only from the local cache.
+- `refresh=True` (the default) fetches fresh remote data and refreshes the summary cache.
+- `refresh=False` reads only from the local summary cache (not a mirror of the mailbox).
 
 **Thread** (`get_thread`): every message with one `conversationId` **across all folders**, deduplicated (copies shown once) and chronological.
 

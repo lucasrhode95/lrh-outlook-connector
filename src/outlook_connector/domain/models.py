@@ -85,13 +85,11 @@ class MessageSummary(Compact):
     flagged: bool = False
     preview: str | None = None
     internet_message_id: str | None = None
-    is_deleted: bool = False  # retained locally after the server copy disappeared
-    deleted_at: datetime | None = None
     also_in: list[str] = Field(default_factory=list)  # folders holding another copy (same Internet id)
 
 
 # Filled by the service per result, never stored with the message.
-DERIVED_FIELDS = frozenset({"folder", "is_deleted", "deleted_at", "also_in"})
+DERIVED_FIELDS = frozenset({"folder", "also_in"})
 
 
 class Attachment(Compact):
@@ -128,7 +126,6 @@ class Coverage(Compact):
     ``notes``). ``excluded``: messages left out by folder, per reason.
     """
 
-    source: Literal["remote", "local", "remote+local"]
     complete: bool
     server_total: int | None = None
     excluded: dict[str, int] = Field(default_factory=dict)

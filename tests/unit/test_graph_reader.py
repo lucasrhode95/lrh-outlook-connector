@@ -174,10 +174,6 @@ async def test_errors_name_the_operation_code_message_and_request_id(fake: FakeG
     assert "UnsupportedByFake" in text and "request-id req-" in text
 
 
-async def test_locate_reports_folder_or_none(fake: FakeGraph) -> None:
-    assert await reader_for(fake).locate(["m1", "gone"]) == {"m1": "f-inbox", "gone": None}
-
-
 async def test_search(fake: FakeGraph) -> None:
     reader = reader_for(fake)
     hits, link = await reader.search(query="relatório", folder_id=None, page_size=25, page=None)

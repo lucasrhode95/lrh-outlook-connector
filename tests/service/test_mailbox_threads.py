@@ -69,13 +69,26 @@ async def test_list_messages_folder_and_window(mailbox: Mailbox) -> None:
     assert [m.id for m in page.items] == ["m5"] and page.coverage.complete
 
 
-async def test_server_deleted_messages_are_retained_and_labelled(mailbox: Mailbox, fake: FakeGraph) -> None:
+async def test_cache_forgets_messages_deleted_on_the_server(mailbox: Mailbox, fake: FakeGraph) -> None:
     await mailbox.list_messages(folder="inbox")
     del fake.messages["m1"]
     page = await mailbox.list_messages(folder="inbox")
-    deleted = [m for m in page.items if m.is_deleted]
-    assert [m.id for m in deleted] == ["m1"]
-    assert page.coverage.source == "remote+local" and "deleted on the server" in page.coverage.notes[0]
+    assert "m1" not in [m.id for m in page.items]
+    cached = await mailbox.list_messages(folder="inbox", refresh=False)
+    assert "m1" not in [m.id for m in cached.items]  # the listing covered m1's time and lacked it
+
+
+async def test_paging_forgets_only_what_each_page_covered(mailbox: Mailbox, fake: FakeGraph) -> None:
+    async def cached() -> list[str]:
+        return [m.id for m in (await mailbox.list_messages(refresh=False, include_deleted_items=True)).items]
+
+    await mailbox.list_messages(include_deleted_items=True)  # caches all five
+    del fake.messages["m1"]  # the oldest
+    page = await mailbox.list_messages(limit=2, include_deleted_items=True)
+    assert await cached() == ["m5", "m4", "m3", "m2", "m1"]  # the first page did not cover m1
+    while page.cursor:
+        page = await mailbox.list_messages(limit=2, cursor=page.cursor)
+    assert await cached() == ["m5", "m4", "m3", "m2"]  # the last page reaches the window's start
 
 
 async def test_received_only_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
@@ -89,20 +102,6 @@ async def test_deleted_items_and_junk_are_left_out_unless_asked_or_named(mailbox
     assert "m4" in [m.id for m in (await mailbox.list_messages(include_deleted_items=True)).items]
     named = await mailbox.list_messages(folder="junkemail")  # a folder asked for by name is listed
     assert [m.id for m in named.items] == ["m4"] and not named.coverage.excluded
-
-
-async def test_retained_deleted_messages_appear_on_the_page_that_covers_them(
-    mailbox: Mailbox, fake: FakeGraph
-) -> None:
-    await Threads(mailbox).get_thread("c-rel")  # the app reads m1 (Sep 28 09:00), retaining it
-    del fake.messages["m1"]
-    seen, cursor = [], None
-    while True:
-        page = await mailbox.list_messages(limit=1, cursor=cursor, include_deleted_items=True)
-        seen += [m.id for m in page.items]
-        if not (cursor := page.cursor):
-            break
-    assert seen == ["m5", "m4", "m3", "m2", "m1"]  # m1 comes from retention on the last page, once
 
 
 async def test_list_total_counts_the_server_scope(mailbox: Mailbox) -> None:
@@ -139,7 +138,7 @@ async def test_received_only_scans_past_filtered_pages_and_keeps_it_in_the_curso
 async def test_local_only_listing_says_so(mailbox: Mailbox) -> None:
     await mailbox.list_messages()
     page = await mailbox.list_messages(refresh=False)
-    assert page.coverage.source == "local" and not page.coverage.complete and len(page.items) == 4
+    assert not page.coverage.complete and len(page.items) == 4
     assert page.coverage.excluded == {"deleted_or_junk": 1}
 
 
@@ -168,17 +167,13 @@ async def test_unique_body_is_the_default(mailbox: Mailbox) -> None:
     assert (await mailbox.get_message("m2")).text == "Thanks!"
 
 
-async def test_deleted_message_falls_back_to_retained_copy(mailbox: Mailbox, fake: FakeGraph) -> None:
+async def test_message_deleted_on_the_server_is_not_found(mailbox: Mailbox, fake: FakeGraph) -> None:
     await mailbox.get_message("m2")
     del fake.messages["m2"]
-    content = await mailbox.get_message("m2")
-    assert content.message.is_deleted and content.text == "Thanks!"
-    del fake.messages["m5"]
+    with pytest.raises(NotFound, match="deleted on the server"):
+        await mailbox.get_message("m2")
     with pytest.raises(NotFound):
-        await mailbox.get_message("m5")
-
-
-# ---------------------------------------------------------------- search
+        await mailbox.attachments("m2")
 
 
 async def test_search_groups_by_conversation_with_coverage(mailbox: Mailbox) -> None:
@@ -186,7 +181,6 @@ async def test_search_groups_by_conversation_with_coverage(mailbox: Mailbox) -> 
     assert [h.conversation_id for h in result.conversations] == ["c-rel"]
     assert {m.id for m in result.conversations[0].matching_messages} == {"m1", "m2", "m3"}
     assert result.coverage.server_total is None and result.coverage.complete
-    assert any("not searched" in n for n in result.coverage.notes)
 
 
 async def test_search_requires_a_query(mailbox: Mailbox) -> None:
@@ -256,10 +250,9 @@ async def test_thread_sizes_count_like_get_thread(mailbox: Mailbox, fake: FakeGr
     assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_thread
     with_junk = await mailbox.conversation_sizes(["c-rel"], include_deleted_items=True)
     assert with_junk[0].messages == 4 and not with_junk[0].at_least
-    await threads.get_thread("c-rel")
     del fake.messages["m2"]
-    await threads.get_thread("c-rel")  # m2 is now retained as deleted on the server
-    assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 3
+    assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 2
+    assert len((await threads.get_thread("c-rel")).messages) == 2
 
 
 async def test_single_oversized_message_is_truncated_not_skipped(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -268,15 +261,6 @@ async def test_single_oversized_message_is_truncated_not_skipped(mailbox: Mailbo
     )
     thread = await Threads(mailbox).get_thread("c-big", max_chars=100)
     assert thread.messages[0].truncated and len(thread.messages[0].text or "") == 100
-
-
-async def test_thread_includes_server_deleted_retained_messages(mailbox: Mailbox, fake: FakeGraph) -> None:
-    threads = Threads(mailbox)
-    await threads.get_thread("c-rel")
-    del fake.messages["m2"]
-    thread = await threads.get_thread("c-rel")
-    m2 = next(t for t in thread.messages if t.message.id == "m2")
-    assert m2.message.is_deleted and m2.text == "Thanks!"
 
 
 async def test_unknown_conversation(mailbox: Mailbox) -> None:
@@ -353,16 +337,6 @@ async def test_unknown_folder_name_refreshes_the_folder_list(mailbox: Mailbox, f
     await mailbox.folders()
     fake.add_folder("f-new", "Brand new", parent="f-inbox")
     assert (await mailbox.resolve_folder("Inbox/Brand new")).id == "f-new"
-
-
-async def test_attachments_of_a_deleted_message_come_from_retention(
-    mailbox: Mailbox, fake: FakeGraph
-) -> None:
-    await mailbox.get_message("m3")  # retains the attachment list
-    del fake.messages["m3"]
-    attachments = await mailbox.attachments("m3")
-    assert [a.name for a in attachments][0] == "numbers.xlsx"
-    assert mailbox.store.summaries(["m3"])["m3"].is_deleted
 
 
 async def test_copies_split_across_pages_are_returned_once(mailbox: Mailbox, fake: FakeGraph) -> None:
