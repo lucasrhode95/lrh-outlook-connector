@@ -301,8 +301,10 @@ function renderSingle(thread) {
 
 function renderThread(thread) {
   if (isSingle(thread)) return renderSingle(thread);
-  const messages = [...thread.messages.values()].sort((a, b) => Date.parse(a.received_at || 0) - Date.parse(b.received_at || 0));
-  const newest = messages[messages.length - 1];
+  // newest on top, like the list and Outlook's conversation view (exports and get_thread stay oldest first)
+  const when = (m) => Date.parse(m.received_at || m.sent_at || 0);
+  const messages = [...thread.messages.values()].sort((a, b) => when(b) - when(a));
+  const newest = messages[0];
   const senders = [...new Set(messages.map((m) => who(m.sender)))].join(", ");
   const unread = messages.some((m) => m.is_read === false);
   const selectable = Boolean(thread.conversationId);
