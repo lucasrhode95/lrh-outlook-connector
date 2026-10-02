@@ -80,6 +80,10 @@ input[type=search], input[type=date] { font: inherit; color: inherit; background
 .badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 10px; margin-left: 6px;
   background: var(--accent-soft); color: var(--accent); }
 .badge.deleted { background: var(--danger-soft); color: var(--danger); }
+.badge.copy { background: none; border: 1px solid var(--line); color: var(--muted); }
+.msg-row.matched { box-shadow: inset 3px 0 0 var(--accent); }
+.attachment { margin: 0 6px 2px 0; padding: 0 6px; font: inherit; font-size: 12px; cursor: pointer; }
+.list-head #coverage { margin-left: auto; }
 .more { margin: 10px 12px; }
 
 .reader { border-left: 1px solid var(--line); background: var(--panel); padding: 10px 0; }
