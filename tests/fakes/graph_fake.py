@@ -28,6 +28,7 @@ class FakeAttachment:
     inline: bool = False
     kind: str = "fileAttachment"
     content_id: str | None = None
+    broken: bool = False  # the $value download fails
 
 
 @dataclass
@@ -180,6 +181,8 @@ class FakeGraph:
             if not att:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
             if m[3]:
+                if att.broken:
+                    return 503, {"error": {"code": "ServiceUnavailable"}}, None
                 return 200, None, att.data
             return 200, {"contentId": att.content_id, "id": att.id}, None
         if m := re.fullmatch(r"/me/messages/([^/]+)/\$value", path):
