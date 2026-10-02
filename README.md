@@ -38,7 +38,7 @@ For development only, `--unsecure` uses a separate **plaintext** cache file in t
 **Agents (MCP).** Register the stdio server with your MCP client, for example Claude Code:
 
 ```bash
-claude mcp add outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scripts/outlook-connector.exe mcp
+claude mcp add lrh-outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scripts/outlook-connector.exe mcp
 ```
 
 The client starts one `outlook-connector mcp` process per session. Tools: `list_folders`, `list_messages`,
