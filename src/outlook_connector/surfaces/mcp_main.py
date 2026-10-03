@@ -59,7 +59,8 @@ covers mail only.
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
 - Reading: get_thread returns a whole conversation across folders, oldest first, with bodies \
-without quoted history by default. get_message reads one message with offset/max_chars continuation.
+without quoted history by default; a body that could not be fetched sets export_error on its \
+message, and body_errors counts them. get_message reads one message with offset/max_chars continuation.
 - Always read `coverage` before treating results as complete; follow `cursor` for more. \
 list_messages(include_total=true) gives the server's count for the window, to plan large reads.
 - Mail deleted on the server is gone: nothing is kept locally.
