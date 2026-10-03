@@ -84,14 +84,17 @@ status, likely_cause, retry, fix).
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
 many small ones. On a throttling error, wait at least a minute before retrying.
-- Drafts: create_draft saves a plain-text message or reply into Drafts and never sends it; the user \
+- Drafts: create_draft saves a plain-text message or reply into Drafts and never sends it (a reply \
+reports history_intact: whether Outlook quoted the original exactly as received); the user \
 reviews and sends it from Outlook. Prefer it whenever the user has not explicitly asked you to send.
 - Sending, only when the user explicitly asks to send: (1) propose_email with the message; (2) show \
 the user the whole proposal (from, to, cc, bcc, subject, full body; a reply also carries the quoted \
-original, added by Outlook) and ask them to confirm it; (3) only after they confirm, send_email with \
-the same message and the proposal's confirmation code as user_confirmation. Never confirm on the \
-user's behalf. A message changed after confirmation is refused: propose and confirm again. If \
-send_email returns status "unknown", do not send again; ask the user to check Sent Items and Outbox.
+original, added by Outlook; a reply is sent only if its draft keeps the original exactly as \
+received, otherwise nothing is sent) and ask them to confirm it; (3) only after they confirm, \
+send_email with the same message and the proposal's confirmation code as user_confirmation. \
+Never confirm on the user's behalf. A message changed after confirmation is refused: propose and \
+confirm again. If send_email returns status "unknown", do not send again; ask the user to check \
+Sent Items and Outbox.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_thread), at most 100 per call, never a query; \
 set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \

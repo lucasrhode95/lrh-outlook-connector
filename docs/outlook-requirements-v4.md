@@ -188,7 +188,7 @@ Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` h
 
 ### 11.1 Send (first write phase)
 
-The transport is OWS `CreateItem` with `SendAndSaveCopy` via the write (One Outlook Web) token. It starts as plain text only, with no attachments and no Send As.
+The transport is OWS `CreateItem` with `SendAndSaveCopy` via the write (One Outlook Web) token. It starts as plain text only, with no attachments and no Send As. A reply's text goes as HTML, and a reply is sent only after its draft was checked against the original (text, inline images with the same bytes): the quoted history must arrive exactly as received (W6).
 
 **Draft first:** `create_draft` saves a message or reply into Drafts and never sends it, so it needs no confirmation; the user sends it from Outlook. Agents prefer it unless the user explicitly asks them to send.
 

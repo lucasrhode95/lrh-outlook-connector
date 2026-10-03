@@ -138,6 +138,11 @@ class MailWriter(Protocol):
         """Send and keep a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell."""
         ...
 
+    async def send_draft(self, draft_id: str, subject: str) -> None:
+        """Send an existing draft as it is, keeping a copy in Sent Items. Raises
+        WriteOutcomeUnknown when it cannot tell."""
+        ...
+
     # Mutations: {message id: None when done, else the backend's response code}.
 
     async def set_read(self, message_ids: list[str], is_read: bool) -> dict[str, str | None]: ...

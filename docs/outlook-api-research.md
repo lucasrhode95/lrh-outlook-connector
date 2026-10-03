@@ -144,6 +144,9 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
 |---|---|---|
 | Id mapping | Graph immutable id with `-`→`/`, `_`→`+` is accepted as the OWS `ItemId`. The same applies to `conversationId`. | Accepted on all four, and ids survive moves |
 | Send | `CreateItem`, `MessageDisposition:"SendAndSaveCopy"`, `ComposeOperation:"newMail"` (full body in `research/probes/common.py` `ows_message`) | `NoError`. One copy in Sent Items, as requested |
+| Reply with history (2026-10-04) | `CreateItem` `ReplyToItem` with `NewBodyContent` `BodyType:"HTML"`, `SaveOnly` | The draft quotes the original's HTML (lists, tables, bold kept) and carries its inline images with the same bytes; no `[cid:…]` text. A `Text` body makes Exchange flatten the quoted original instead. |
+| Send an existing draft (2026-10-04) | `SendItem` | **Not supported over OWS:** HTTP 500 `OwaOperationNotSupportedException`; nothing sent. |
+| Send an existing draft (2026-10-04) | `UpdateItem` on the draft, one `SetItemField` (its subject), `MessageDisposition:"SendAndSaveCopy"`, `SavedItemFolderId` Sent Items | `NoError`. That exact draft is sent; the copy lands in Sent Items and the draft leaves Drafts. |
 | Read state | `UpdateItem`, `SetItemField`, `FieldURI:"message:IsRead"`, `ConflictResolution:"AlwaysOverwrite"`, `MessageDisposition:"SaveOnly"`, `SuppressReadReceipts:true` | `NoError` |
 | Flag | `UpdateItem`, `FieldURI:"item:Flag"`, `Flag:{__type:"FlagType:#Exchange",FlagStatus:"Flagged"\|"NotFlagged"}` | `NoError` |
 | Categories | `UpdateItem`, `FieldURI:"item:Categories"`, `Categories:[…]` | `NoError` |
