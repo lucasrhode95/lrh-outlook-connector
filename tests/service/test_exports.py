@@ -316,7 +316,6 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
         "they are marked [EXPORT ERROR] below."
     )
     assert summary in text and artifact.error_summary == summary
-    assert "Content unavailable" not in text
 
 
 async def test_denied_body_is_not_retryable_and_jsonl_carries_the_error(
@@ -328,7 +327,7 @@ async def test_denied_body_is_not_retryable_and_jsonl_carries_the_error(
         r["id"]: r for r in map(json.loads, Path(artifact.path).read_text(encoding="utf-8").splitlines())
     }
     error = records["m2"]["export_error"]
-    assert records["m2"]["body"] is None and "body_unavailable" not in records["m2"]
+    assert records["m2"]["body"] is None
     assert error == {
         "step": "fetching message bodies",
         "status": 403,

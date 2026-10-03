@@ -16,7 +16,7 @@ A local application for **one user's own Exchange Online mailbox**. It has two s
 - **Local UI:** you find mail and extract it as AI-friendly text bundles.
 - **MCP server:** agents search, read, export and eventually organize the same mail.
 
-**Guiding principle: remote first.** Delegate as much as possible to Outlook's server APIs (listing, filtering, search, conversation grouping). Keep locally only what is genuinely required: account binding, folder cache, a summary cache for instant display, export assembly.
+**Guiding principle: remote first.** Delegate as much as possible to Outlook's server APIs (listing, filtering, search, conversation grouping). Keep locally only what is genuinely required: account binding, folder cache, export assembly.
 
 Both surfaces are thin adapters over one shared service, and neither may limit the other. The project is standalone: no shared package with the Teams exporter. How it is built is in [architecture.md](architecture.md).
 
@@ -90,9 +90,9 @@ Authentication requirements:
 Lazy population:
 
 - **Folders** are cached and served from the cache immediately; a cache older than 10 minutes is refreshed in the background. A full refresh is cheap: about 23 folders in under a second.
-- **Message metadata is not mirrored.** It is fetched by list/search/thread calls; listed summaries are cached for instant display only. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2).
+- **Message metadata is not mirrored or cached.** It is fetched by every list/search/thread call. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2). The summary cache for instant display was removed on 2026-10-04: listing is fast enough without it.
 - **Bodies and attachments** are fetched only on read or export. Attachment bytes are never cached automatically.
-- **No local retention** (decided 2026-10-02): mail deleted on the server is gone here too. Reading it gives "not found"; a message deleted between selection and export is marked unavailable in the export. A listed page replaces the cached summaries of the time span it covered, so deleted or moved mail drops out of the cache.
+- **No local retention** (decided 2026-10-02): mail deleted on the server is gone here too. Reading it gives "not found". A message selected by id that is gone when the export starts fails the export with a clear message; one deleted while the export runs is marked `[EXPORT ERROR]` in the file (§10.1).
 - Development DBs can be reset freely. No migrations (see AGENTS.md).
 
 ## 8. Listing, threads and search
@@ -101,8 +101,7 @@ Lazy population:
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
 
-- `refresh=True` (the default) fetches fresh remote data and refreshes the summary cache.
-- `refresh=False` reads only from the local summary cache (not a mirror of the mailbox).
+- Always from the server; there is no local-only listing (`refresh=false` was removed with the summary cache on 2026-10-04).
 
 **Thread** (`get_thread`): every message with one `conversationId` **across all folders**, deduplicated (copies shown once) and chronological.
 
@@ -137,7 +136,7 @@ The selection is any mix of **whole threads**, **individual messages** and a **r
 
 | Option | Default | Effect |
 |---|---|---|
-| `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[Attachment unavailable: name]` line and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
+| `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
 | `combine` | `per_thread` | `per_thread`: one TXT per thread, chronological; a selected individual message goes into its thread's TXT. `all`: one TXT for the whole selection, chronological, with per-thread section headers. `none`: one TXT per message. |
 | `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, dates, folder, people, body, attachments), always one file. |
 | `include_deleted_items` | off | Include Deleted Items and Junk Email (see §8). |
@@ -146,8 +145,30 @@ The selection is any mix of **whole threads**, **individual messages** and a **r
 TXT content:
 
 - Headers per message: From, To, CC, date, subject and folder, the message, conversation and Internet ids, the other folders of merged copies.
-- The file header says what was left out by folder or unavailable; a merged copy is named on its message (`Also in:`) (a body that could not be fetched is marked in place; the export does not fail).
+- The file header says what was left out by folder, and one "Export errors: …" line counts what could not be exported, by kind and likely cause; a merged copy is named on its message (`Also in:`).
 - Then the body.
+
+**Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Threads and ranges are listed from the server at export time.
+
+Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes. Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_thread`):
+
+```text
+[EXPORT ERROR] The body of this message could not be fetched.
+  Step:   fetching message bodies
+  Error:  HTTP 429 TooManyRequests, request-id <id>
+  Likely: Microsoft throttled the mailbox (about 4 parallel requests or 10,000 per 10 minutes); the message itself is fine
+  Fix:    export it again in a few minutes
+```
+
+| Answer | Likely cause | Retry helps | Fix |
+|---|---|---|---|
+| 429 or 503 | Microsoft throttled the mailbox | yes | export it again in a few minutes |
+| other 5xx, no response | Microsoft service or network problem | yes | retry later |
+| 403 | access denied for this item (e.g. encrypted or protected) | no | retrying will not help |
+| 404 | deleted or moved in Outlook during the export | no | refresh and select it again |
+| anything else | unexpected error | no | report it with the request id |
+
+JSONL carries the same error as an `export_error` object (on the message when its body is missing, on a failed attachment record, or as `attachments_export_error` when the attachments could not be listed). The export result has `export_errors` (per step) and `error_summary` (the header line), and the UI shows that line after the download.
 - The output must never contain tokens, signed URLs or authorization headers.
 
 ### 10.2 Output packaging rule
@@ -197,7 +218,6 @@ Requirements:
 - **Per-item results:** each tool returns a result per item: `done`, `unchanged` (already so; nothing sent), `not_found`, `failed` (with Outlook's code) or `unknown`. Partial failure is reported, never hidden. Nothing is retried. On an ambiguous result, the items are read back: `done` where the change is visible, `unknown` elsewhere.
 - **Delete** moves to Deleted Items; messages already in Deleted Items are left alone, so nothing is ever deleted permanently. **Read state** also works per conversation (every message in scope).
 - **Folder targets** are resolved through `list_folders`. Creating folders is out of scope until requested.
-- **Local consistency:** changed messages are dropped from the summary cache, so the next listing caches their new state.
 
 ## 12. Phases
 
