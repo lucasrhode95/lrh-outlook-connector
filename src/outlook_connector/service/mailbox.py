@@ -6,7 +6,8 @@ message data is kept locally, so a message deleted on the server is gone here to
 Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
 - Deleted Items, Junk Email and Sync Issues (Outlook's own conflict and failure copies) are left out
   unless ``include_deleted_items`` (a folder asked for by name is always included).
-  ``received_only`` also leaves out Sent Items, Drafts and Outbox.
+  Sent Items, Drafts and Outbox are included unless ``include_sent_items`` is false. Both flags
+  point the same way: true shows more mail, false filters more.
 - Hidden folders, and items outside the mail folders (e.g. Teams meeting records), are out of reach:
   never listed, searched, counted, threaded or exported, and list_folders does not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
@@ -47,7 +48,7 @@ FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
 SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
-RECEIVED_ONLY_PAGES = 10  # server pages scanned at most for one filtered page
+FILTERED_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
 GONE = "deleted on the server"
@@ -127,13 +128,15 @@ class Mailbox:
         folder = folders.get(folder_id or "")
         return folder is not None and any(f.well_known == alias for f in _ancestry(folder, folders))
 
-    async def exclusions(self, *, include_deleted_items: bool, received_only: bool = False) -> dict[str, str]:
+    async def exclusions(
+        self, *, include_deleted_items: bool, include_sent_items: bool = True
+    ) -> dict[str, str]:
         """Folder id -> reason (an ExclusionReason) for every folder this scope leaves out.
 
         Hidden folders are not listed here: ``finish`` always leaves them out.
         """
         left_out = set() if include_deleted_items else {"deleted_or_junk", "sync_issues"}
-        if received_only:
+        if not include_sent_items:
             left_out.add("outgoing")
         categories = folder_categories(await self.folder_map())
         return {folder_id: category for folder_id, category in categories.items() if category in left_out}
@@ -195,7 +198,7 @@ class Mailbox:
         until: datetime | None = None,
         limit: int = 25,
         cursor: str | None = None,
-        received_only: bool = False,
+        include_sent_items: bool = True,
         include_deleted_items: bool = False,
         include_total: bool = False,
         detail: Detail = "full",
@@ -214,7 +217,7 @@ class Mailbox:
         if state:
             folder_id = state["folder_id"]
             since, until = _dt(state["since"]), _dt(state["until"])
-            received_only = bool(state["received_only"])
+            include_sent_items = bool(state["include_sent_items"])
             include_deleted_items = bool(state["include_deleted_items"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
@@ -222,14 +225,14 @@ class Mailbox:
             {}
             if folder_id
             else await self.exclusions(
-                include_deleted_items=include_deleted_items, received_only=received_only
+                include_deleted_items=include_deleted_items, include_sent_items=include_sent_items
             )
         )
 
         link = state["link"] if state else None
         fetched: list[MessageSummary] = []
         drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
-        for _ in range(RECEIVED_ONLY_PAGES if drop else 1):
+        for _ in range(FILTERED_PAGES if drop else 1):
             page, link = await self.reader.list_messages(
                 folder_id=folder_id, since=since, until=until, page_size=limit, page=link
             )
@@ -259,7 +262,7 @@ class Mailbox:
                 since=_iso(since),
                 until=_iso(until),
                 seen=seen,
-                received_only=received_only,
+                include_sent_items=include_sent_items,
                 include_deleted_items=include_deleted_items,
             )
         return MessagePage(
@@ -365,7 +368,7 @@ class Mailbox:
         folder: str | None = None,
         limit: int = 25,
         cursor: str | None = None,
-        received_only: bool = False,
+        include_sent_items: bool = True,
         include_deleted_items: bool = False,
         detail: Detail = "full",
     ) -> SearchResult:
@@ -377,7 +380,7 @@ class Mailbox:
         if state:
             folder_id, kql = state["folder_id"], state["query"]
             since, until = _dt(state["since"]), _dt(state["until"])
-            received_only = bool(state["received_only"])
+            include_sent_items = bool(state["include_sent_items"])
             include_deleted_items = bool(state["include_deleted_items"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
@@ -392,7 +395,7 @@ class Mailbox:
             {}
             if folder_id
             else await self.exclusions(
-                include_deleted_items=include_deleted_items, received_only=received_only
+                include_deleted_items=include_deleted_items, include_sent_items=include_sent_items
             )
         )
         found, link = await self.reader.search(
@@ -446,7 +449,7 @@ class Mailbox:
                 seen=seen,
                 since=_iso(since),
                 until=_iso(until),
-                received_only=received_only,
+                include_sent_items=include_sent_items,
                 include_deleted_items=include_deleted_items,
             )
             if link
