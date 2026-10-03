@@ -280,6 +280,8 @@ class FakeGraph:
             if re.fullmatch(pattern, path):
                 code = "ErrorAccessDenied" if status == 403 else f"Failure{status}"
                 return status, {"error": {"code": code, "message": "Injected failure."}}, None
+        if method == "POST" and path == "/me/translateExchangeIds":
+            return self.translate_ids(json.loads(request.content))
         text_body = 'outlook.body-content-type="text"' in prefer
 
         if path == "/me":
@@ -315,7 +317,8 @@ class FakeGraph:
             msg = self.messages.get(m[1].removeprefix(REST_PREFIX))  # either id form is readable
             if not msg:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
-            return 200, msg.json(text_body=text_body), None
+            # like Graph (live 2026-10-03): the id comes back in the form it was asked with
+            return 200, msg.json(text_body=text_body) | {"id": m[1]}, None
         if m := re.fullmatch(r"/me/messages/([^/]+)/attachments", path):
             msg = self.messages.get(m[1])
             if not msg:
@@ -395,6 +398,16 @@ class FakeGraph:
         if skip + top < len(items):
             body["@odata.nextLink"] = f"{ROOT}{path}?{urlencode({**params, '$skip': skip + top})}"
         return body
+
+    def translate_ids(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any], None]:
+        """Like Graph (live 2026-10-04): regular ids -> immutable ids; an input that is already
+        immutable fails the whole call."""
+        ids = payload["inputIds"]
+        assert payload["sourceIdType"] == "restId" and payload["targetIdType"] == "restImmutableEntryId"
+        if any(not i.startswith(REST_PREFIX) for i in ids):
+            error = {"code": "InvalidArgument", "message": "Invalid value for arg: storeObjectId.IdType"}
+            return 400, {"error": error}, None
+        return 200, {"value": [{"sourceId": i, "targetId": i.removeprefix(REST_PREFIX)} for i in ids]}, None
 
     def batch(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any], None]:
         """Like Graph: a batch over 20 requests, or with ids equal ignoring case, is rejected whole."""
