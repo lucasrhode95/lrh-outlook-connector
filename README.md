@@ -91,7 +91,8 @@ errors" line) says how many and why. In TXT the mark is a block:
 
 In JSONL it is an `export_error` object (step, status, code, message, request id, likely cause,
 `retry`, fix) on the message record or on the failed attachment record (`attachments_export_error`
-when the attachments could not be listed). `get_thread` marks a body it cannot fetch the same way.
+when the attachments could not be listed). `get_thread` marks a body it cannot fetch the same way, sets `export_error` on that message and
+counts them in `body_errors`, so a caller never has to read the text to find out.
 
 **Throttling.** Microsoft Graph allows about 4 concurrent requests and 10,000 requests per 10 minutes
 per mailbox; each item of a `$batch` (at most 20) counts. The connector keeps at most 4 requests and

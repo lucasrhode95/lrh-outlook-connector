@@ -160,28 +160,6 @@ class MessageContent(Compact):
     attachments: list[Attachment] = Field(default_factory=list)
 
 
-class ThreadMessage(Compact):
-    message: MessageSummary
-    text: str | None = None  # bounded body when requested
-    truncated: bool = False
-
-
-class Thread(Compact):
-    conversation_id: str
-    subject: str | None
-    messages: list[ThreadMessage]
-    cursor: str | None = None
-    coverage: Coverage
-
-
-class ThreadSize(Compact):
-    conversation_id: str
-    messages: int  # what get_thread would list with the same include_deleted_items
-    at_least: bool = False  # the conversation is larger than the server listed in one request
-
-
-EXPORT_MAX_MESSAGES = 2000  # hard cap per export
-
 ExportStep = Literal["fetching message bodies", "listing attachments", "downloading an attachment"]
 
 
@@ -197,6 +175,31 @@ class ExportError(Compact):
     likely_cause: str
     retry: bool  # retrying later can succeed
     fix: str
+
+
+class ThreadMessage(Compact):
+    message: MessageSummary
+    text: str | None = None  # bounded body when requested
+    truncated: bool = False
+    export_error: ExportError | None = None  # the body could not be fetched (``text`` holds its block)
+
+
+class Thread(Compact):
+    conversation_id: str
+    subject: str | None
+    messages: list[ThreadMessage]
+    cursor: str | None = None
+    coverage: Coverage
+    body_errors: int = 0  # messages on this page whose body could not be fetched (see export_error)
+
+
+class ThreadSize(Compact):
+    conversation_id: str
+    messages: int  # what get_thread would list with the same include_deleted_items
+    at_least: bool = False  # the conversation is larger than the server listed in one request
+
+
+EXPORT_MAX_MESSAGES = 2000  # hard cap per export
 
 
 class ExportRequest(BaseModel):

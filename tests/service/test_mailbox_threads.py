@@ -280,6 +280,7 @@ async def test_thread_marks_missing_bodies_with_the_export_error_block(
     assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
     assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
     assert not thread.coverage.complete  # throttling is retryable
+    assert thread.body_errors == 3 and all(t.export_error and t.export_error.retry for t in thread.messages)
 
 
 async def test_thread_body_denied_does_not_make_coverage_incomplete(
@@ -290,6 +291,12 @@ async def test_thread_body_denied_does_not_make_coverage_incomplete(
     texts = {t.message.id: t.text or "" for t in thread.messages}
     assert "  Likely: access denied for this item" in texts["m2"] and texts["m1"] == "First report"
     assert thread.coverage.complete  # retrying will not help
+    # ...but the caller still learns about it without reading the text
+    assert thread.body_errors == 1 and any(
+        "1 message body(ies) could not be fetched" in n for n in thread.coverage.notes
+    )
+    errors = {t.message.id: t.export_error for t in thread.messages}
+    assert errors["m1"] is None and errors["m2"] is not None and errors["m2"].status == 403
 
 
 async def test_thread_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox, fake: FakeGraph) -> None:
