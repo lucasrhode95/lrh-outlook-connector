@@ -18,6 +18,7 @@ from outlook_connector.remote.transport import Transport
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
+from outlook_connector.service.mutations import Mutations
 from outlook_connector.service.threads import Threads
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store, store_path
@@ -31,6 +32,7 @@ class Services:
     exports: Exports
     files: Files
     writes: Writes  # uses the write sign-in, only when a write is made
+    mutations: Mutations  # likewise
 
 
 class AppContext:
@@ -59,8 +61,12 @@ class AppContext:
             store = Store(store_path(account.fingerprint), account.fingerprint)
             mailbox = Mailbox(reader, store)
             threads = Threads(mailbox)
-            writes = Writes(mailbox, OwsMailWriter(Ows(self._transport, self.tokens)), account)
-            self._services = Services(account, mailbox, threads, Exports(threads), Files(mailbox), writes)
+            writer = OwsMailWriter(Ows(self._transport, self.tokens))
+            writes = Writes(mailbox, writer, account)
+            mutations = Mutations(mailbox, writer, writes.check_account)
+            self._services = Services(
+                account, mailbox, threads, Exports(threads), Files(mailbox), writes, mutations
+            )
         return self._services
 
     async def aclose(self) -> None:

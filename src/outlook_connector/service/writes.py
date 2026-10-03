@@ -108,7 +108,7 @@ class Writes:
     async def create_draft(self, message: OutgoingMessage) -> DraftResult:
         """Save the message (or reply) into Drafts. Nothing is sent."""
         proposal = await self.propose(message)
-        self._check_account()
+        self.check_account()
         draft_id = await self.writer.create_draft(proposal)
         if not draft_id:
             raise WriteOutcomeUnknown(
@@ -131,7 +131,7 @@ class Writes:
                 "recipients, subject or body changes the code). Call propose_email, show the proposal "
                 "to the user, and send only the message they confirmed, with its code."
             )
-        self._check_account()
+        self.check_account()
         started = datetime.now(UTC)
         try:
             await self.writer.send(proposal)
@@ -152,7 +152,7 @@ class Writes:
             )
         return SendResult(status="sent", detail="Sent; a copy is kept in Sent Items.")
 
-    def _check_account(self) -> None:
+    def check_account(self) -> None:
         claims = self.writer.account()
         if (claims.get("tid"), claims.get("oid")) != (self.account.tenant_id, self.account.object_id):
             raise AccountMismatch(

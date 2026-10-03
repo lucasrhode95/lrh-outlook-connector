@@ -20,6 +20,8 @@ READ_TOOLS = {
     "propose_email",
 }  # fmt: skip
 WRITE_TOOLS = {"create_draft", "send_email"}
+CHANGE_TOOLS = {"set_read_state", "set_flag"}
+RELOCATE_TOOLS = {"move_messages", "delete_messages"}
 
 
 class FakeTokens:
@@ -66,7 +68,11 @@ async def call(server: FastMCP, name: str, **arguments: Any) -> Any:
 
 async def test_tools_and_annotations(server: FastMCP) -> None:
     tools = {t.name: t for t in await server.list_tools()}
-    assert set(tools) == READ_TOOLS | WRITE_TOOLS
+    assert set(tools) == READ_TOOLS | WRITE_TOOLS | CHANGE_TOOLS | RELOCATE_TOOLS
+    for name in CHANGE_TOOLS | RELOCATE_TOOLS:
+        annotations = tools[name].annotations
+        assert annotations and not annotations.readOnlyHint and not annotations.openWorldHint
+        assert annotations.destructiveHint is (name in RELOCATE_TOOLS)
     for name in READ_TOOLS:
         annotations = tools[name].annotations
         assert annotations and annotations.readOnlyHint and not annotations.destructiveHint
@@ -147,3 +153,14 @@ async def test_auth_status_is_offline(server: FastMCP, fake: FakeGraph) -> None:
 
 def test_server_name_is_not_mistakable_for_an_official_connector(server: FastMCP) -> None:
     assert server.name == "lrh-outlook"
+
+
+async def test_mutation_tools_report_per_message(server: FastMCP, fake: FakeGraph) -> None:
+    read = await call(server, "set_read_state", read=True, message_ids=["m5", "gone"])
+    assert {r["id"]: r["status"] for r in read["results"]} == {"m5": "done", "gone": "not_found"}
+    moved = await call(server, "move_messages", message_ids=["m5"], folder="archive")
+    assert moved["counts"] == {"done": 1} and fake.messages["m5"].folder == "f-archive"
+    deleted = await call(server, "delete_messages", message_ids=["m5"])
+    assert deleted["counts"] == {"done": 1} and fake.messages["m5"].folder == "f-deleted"
+    flagged = await call(server, "set_flag", message_ids=["m1"], flagged=True)
+    assert flagged["counts"] == {"done": 1}
