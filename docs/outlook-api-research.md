@@ -72,6 +72,17 @@ Not tested: shared mailboxes (no target supplied). Online Archive: the account r
 
 **Conclusion:** cache folders only, and fetch message metadata on demand.
 
+**Mailbox-wide paging (H7, 2026-10-04, read-only).** Listing without a folder means `/me/messages`, newest first, Junk and Deleted Items included (86% of the mailbox); the connector drops them after paging. One page of 100, compared with counting first (one `$count` `$batch` for the window) and then listing only the in-scope folders with mail in parallel, merged newest first:
+
+| Window | `/me/messages`, filter after paging | Count first, then per folder |
+|---|---|---|
+| Last 7 days | 13 of 100 kept (83 Junk/Deleted dropped), 1.3 s | 87 of 87, 2.7 s, 5 of 16 folders |
+| Last 30 days | 13 of 100, 1.3 s | 100 of 100, 4.1 s, 9 folders |
+| No window | 13 of 100, 1.0 s | 100 of 100, 10.7 s, 13 folders |
+| No window, 25 per page | 2 of 25, 0.4 s | 25 of 25, 2.6 s, 13 folders |
+
+**Conclusion:** counting first fills every page, and per message delivered it is faster (filtering after paging needs about 8 pages for 100 messages), but each page is slower, most of all without a window. The cursor design across folders is still open (roadmap H7).
+
 ### 3.3 Search (`search.py`)
 
 Three pages of 25 per backend.
