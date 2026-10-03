@@ -73,7 +73,8 @@ class Exports:
     async def export(self, request: ExportRequest) -> ExportArtifact:
         if not request.conversation_ids and not request.message_ids and not request.by_range:
             raise InvalidRequest(
-                "Select at least one conversation or message, or a range (since/until/folder/received_only)."
+                "Select at least one conversation or message, or a range "
+                "(since/until/folder/include_sent_items=false)."
             )
         selection = await self._select(request)
         summaries = selection.summaries
@@ -156,7 +157,7 @@ class Exports:
                 until=request.until,
                 limit=RANGE_PAGE,
                 cursor=cursor,
-                received_only=request.received_only,
+                include_sent_items=request.include_sent_items,
                 include_deleted_items=request.include_deleted_items,
                 skip_returned_copies=False,
             )

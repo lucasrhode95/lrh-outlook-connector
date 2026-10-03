@@ -107,10 +107,11 @@ async def test_list_search_thread_message_flow(server: FastMCP) -> None:
     assert message["text"] == "Thanks!"
 
 
-async def test_list_messages_received_only(server: FastMCP) -> None:
-    page = await call(server, "list_messages", received_only=True)
+async def test_list_messages_without_sent_items(server: FastMCP) -> None:
+    page = await call(server, "list_messages", include_sent_items=False)
     assert [m["id"] for m in page["items"]] == ["m5", "m3", "m1"]
-    assert "received_only=true" in (server.instructions or "")
+    assert "include_sent_items=false" in (server.instructions or "")
+    assert "m2" in [m["id"] for m in (await call(server, "list_messages"))["items"]]  # included by default
 
 
 async def test_export_by_range_and_throttling_guidance(server: FastMCP) -> None:
