@@ -14,10 +14,10 @@ short-lived, so nothing is remembered in between):
    once. With no clear answer it looks in Sent Items instead of retrying.
 
 A reply is sent through a draft (W6): the reply is saved into Drafts, read back and compared with
-the original (its whole text quoted, its inline images kept with the same bytes, no image turned into
-"[cid:...]" text), and only that checked draft is sent. ``create_draft`` runs the same check on a
-reply draft and reports it. If the check fails, nothing is sent and the draft
-stays in Drafts for the user to look at.
+the original (its whole text quoted, its formatting kept, its inline images kept with the same
+bytes, no image turned into "[cid:...]" text), and only that checked draft is sent.
+``create_draft`` runs the same check on a reply draft and reports it. If the check fails, nothing
+is sent and the draft stays in Drafts for the user to look at.
 """
 
 from __future__ import annotations
@@ -194,13 +194,18 @@ class Writes:
         """Why the reply draft does not carry the original as received, or None when it does."""
         reader = self.mailbox.reader
         texts = await reader.get_messages([original_id, draft_id])
-        pages = await reader.get_messages([draft_id], body_format="html")
+        pages = await reader.get_messages([original_id, draft_id], body_format="html")
         original, draft = texts.messages.get(original_id), texts.messages.get(draft_id)
-        page = pages.messages.get(draft_id)
-        if original is None or draft is None or page is None:
+        original_page, page = pages.messages.get(original_id), pages.messages.get(draft_id)
+        if original is None or draft is None or original_page is None or page is None:
             return "the draft or the original could not be read back"
         if _flat(original.body_text) not in _flat(draft.body_text):
             return "the quoted original is not the original's full text"
+        # Exchange re-wraps the original's HTML when it quotes it, so the HTML is not compared as
+        # text; its structure is: every list, table, emphasis, link and image reference must survive.
+        lost = _structure(original_page.body_html) - _structure(page.body_html)
+        if lost:
+            return "the quoted original lost formatting (" + ", ".join(sorted(lost.elements())) + ")"
         found, failed = await reader.list_attachments_many([original_id, draft_id])
         if failed:
             return "its attachments could not be listed"
@@ -269,6 +274,33 @@ def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[l
         to = [sender]
     to = _unique(_addresses(to, "to"))
     return to, [a for a in _unique(_addresses(cc, "cc")) if a.lower() not in {t.lower() for t in to}]
+
+
+FORMATTING = (
+    "ul",
+    "ol",
+    "li",
+    "table",
+    "tr",
+    "td",
+    "th",
+    "b",
+    "strong",
+    "i",
+    "em",
+    "u",
+    "a",
+    "img",
+    "blockquote",
+    "pre",
+)
+
+
+def _structure(page: str | None) -> Counter[str]:
+    """How many of each formatting element, and of each cid: image reference, a page holds."""
+    tags = Counter(t.lower() for t in re.findall(r"<([a-zA-Z0-9]+)\b", page or "") if t.lower() in FORMATTING)
+    tags["image reference"] = len(re.findall(r"cid:", page or "", re.IGNORECASE))
+    return tags
 
 
 def _flat(text: str | None) -> str:

@@ -317,3 +317,18 @@ async def test_reply_draft_reports_the_history_check(writes: Writes, fake: FakeG
     plain = await writes.create_draft(message())
     assert plain.history_intact is None  # not a reply
     assert not fake.sent_drafts
+
+
+async def test_reply_draft_that_lost_formatting_is_not_sent(writes: Writes, fake: FakeGraph) -> None:
+    fake.messages["m3"].html = '<p>Follow-up <b>with</b></p><ul><li>numbers</li></ul><img src="cid:img1">'
+    fake.reply_flattens_html = True  # same words and images; the list, bold and image reference are gone
+    proposal = await writes.propose(reply())
+    with pytest.raises(ConnectorError, match=r"lost formatting \(image reference, img, li, ul\)"):
+        await writes.send(reply(), proposal.confirmation)
+    assert not fake.sent_drafts
+
+
+async def test_reply_html_body_shows_the_confirmed_text_exactly(writes: Writes, fake: FakeGraph) -> None:
+    await writes.create_draft(OutgoingMessage(reply_to_message_id="m1", body="  indented\na  b\tc"))
+    value = fake.ows_calls[0][1]["Items"][0]["NewBodyContent"]["Value"]
+    assert value == "<div>&nbsp; indented<br>a&nbsp; b&nbsp;&nbsp;&nbsp;&nbsp;c</div>"

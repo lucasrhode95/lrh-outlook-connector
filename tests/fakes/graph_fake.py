@@ -110,6 +110,7 @@ class FakeGraph:
     # an int (that HTTP status), or a dict (that item result)
     me: str = "me@example.com"
     reply_drops_history: bool = False  # simulate a reply draft that lost the quoted original
+    reply_flattens_html: bool = False  # simulate a reply whose quoted original lost its formatting
     display_name: str = "Doe, Jane"
     photo: bytes | None = None  # the user's 48x48 profile photo; None: no photo set
 
@@ -207,6 +208,7 @@ class FakeGraph:
         addresses = lambda key: tuple(r["EmailAddress"] for r in item.get(key, []))  # noqa: E731
         content = item.get("Body") or item.get("NewBodyContent")
         text = content["Value"]
+        page = content["Value"] if content["BodyType"] == "HTML" else f"<p>{content['Value']}</p>"
         if content["BodyType"] == "HTML":  # what the HTML shows, as Graph's text view would
             text = unescape(re.sub(r"<[^>]+>", "", text.replace("<br>", "\n")))
         conversation = f"conv-new-{len(self.messages)}"
@@ -222,6 +224,8 @@ class FakeGraph:
             if not self.reply_drops_history:
                 text += "\n\nFrom: " + original.sender + "\n" + original.text
                 inline = [a for a in original.attachments if a.inline]
+                quoted = f"<p>{original.text}</p>" if self.reply_flattens_html else original.html
+                page += f"<div><b>From:</b> {original.sender}</div>{quoted}"  # Exchange re-wraps it
         else:
             assert item["__type"] == "Message:#Exchange" and item["MessageDisposition"] == disposition
         new_id = f"w{len(self.messages)}-x_y"  # has "-" and "_", so the id mapping is exercised
@@ -231,7 +235,7 @@ class FakeGraph:
             FakeMessage(new_id, item.get("Subject") or "", folder, now, conversation=conversation,
                         sender=self.me, to=addresses("ToRecipients"), cc=addresses("CcRecipients"),
                         bcc=addresses("BccRecipients"), is_draft=disposition == "SaveOnly", text=text,
-                        attachments=list(inline))
+                        attachments=list(inline), html=page)
         )  # fmt: skip
         created = [{"ItemId": {"Id": _ows_id(new_id)}}] if disposition == "SaveOnly" else []
         return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
