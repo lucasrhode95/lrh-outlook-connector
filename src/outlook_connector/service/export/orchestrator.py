@@ -159,6 +159,7 @@ class Exports:
                 cursor=cursor,
                 include_sent_items=request.include_sent_items,
                 include_deleted_items=request.include_deleted_items,
+                include_meeting_mail=request.include_meeting_mail,
                 skip_returned_copies=False,
             )
             _add(excluded, page.coverage.excluded)

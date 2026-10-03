@@ -10,7 +10,7 @@ from starlette.testclient import TestClient
 
 from outlook_connector.bootstrap import AppContext
 from outlook_connector.surfaces.web.routes import Activity, create_app
-from tests.fakes.graph_fake import FakeGraph, sample_mailbox
+from tests.fakes.graph_fake import FakeGraph, FakeMessage, sample_mailbox
 from tests.surfaces.test_mcp import FakeTokens
 
 TOKEN = "session-token-for-tests"
@@ -33,6 +33,45 @@ def test_index_embeds_the_session_token(client: TestClient) -> None:
     page = client.get("/")
     assert page.status_code == 200 and f'content="{TOKEN}"' in page.text
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_profile_name_and_photo(client: TestClient, fake: FakeGraph) -> None:
+    assert client.get("/api/me").json() == {"display_name": "Doe, Jane", "email": "me@example.com"}
+    assert client.get("/api/me/photo").status_code == 404  # no photo set
+    fake.photo = b"jpeg-bytes"
+    assert client.get("/api/me/photo").status_code == 404  # looked up once per process
+
+
+def test_profile_photo_is_served(fake: FakeGraph) -> None:
+    fake.photo = b"jpeg-bytes"
+    context = AppContext(tokens=FakeTokens(), http_client=httpx.AsyncClient(transport=fake.transport()))  # type: ignore[arg-type]
+    app = create_app(context, session_token=TOKEN, port=PORT, activity=Activity())
+    client = TestClient(app, base_url=f"http://127.0.0.1:{PORT}", headers={"X-Session-Token": TOKEN})
+    response = client.get("/api/me/photo")
+    assert response.status_code == 200 and response.content == b"jpeg-bytes"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert client.get("/api/me/photo", headers={"X-Session-Token": "wrong"}).status_code == 403
+
+
+def test_attachment_names_for_the_list(client: TestClient) -> None:
+    names = client.post("/api/attachments", json={"message_ids": ["m3", "m1"]}).json()
+    assert [a["name"] for a in names["m3"]] == ["numbers.xlsx"]  # inline images left out
+    assert names["m1"] == []
+    assert (
+        client.post("/api/attachments", json={"message_ids": [f"x{i}" for i in range(201)]}).status_code
+        == 400
+    )
+
+
+def test_meeting_mail_switch_reaches_the_list(client: TestClient, fake: FakeGraph) -> None:
+    fake.add(FakeMessage("inv", "Sync", "f-inbox", "2026-10-02T09:00:00Z", conversation="c-inv",
+                         meeting={"meetingMessageType": "meetingRequest"}))  # fmt: skip
+    shown = client.get("/api/messages", params={"folder": "inbox"}).json()
+    assert "inv" in [m["id"] for m in shown["items"]]
+    hidden = client.get("/api/messages", params={"folder": "inbox", "include_meeting_mail": "false"}).json()
+    assert "inv" not in [m["id"] for m in hidden["items"]] and hidden["coverage"]["excluded"] == {
+        "meeting_mail": 1
+    }
 
 
 def test_api_requires_the_session_token(client: TestClient) -> None:

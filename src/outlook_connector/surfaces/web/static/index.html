@@ -18,7 +18,8 @@
     <div class="range-picker" id="range-picker">
       <button id="range-toggle" class="range-toggle" type="button" aria-haspopup="dialog" aria-expanded="false"
               title="Message date range">
-        <span id="range-label">Any date</span><span aria-hidden="true">⌄</span>
+        <span id="range-label">Any date</span>
+        <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
       </button>
       <div id="calendar" class="calendar" role="dialog" aria-label="Choose an inclusive message date range" hidden>
         <div class="calendar-header">
@@ -37,7 +38,10 @@
       <input id="since" type="hidden">
       <input id="until" type="hidden">
     </div>
-    <span id="account" class="muted"></span>
+    <span id="account" class="account">
+      <span id="avatar" class="avatar" aria-hidden="true"></span>
+      <span id="account-name" class="muted"></span>
+    </span>
   </header>
 
   <div id="banner" class="banner" hidden></div>
@@ -55,8 +59,10 @@
       <div class="list-head">
         <span id="list-title">Inbox</span>
         <span id="coverage" class="muted"></span>
-        <label class="muted" title="Also list, count and export messages in Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies); always on inside those folders">
+        <label class="switch" title="Also list, count and export messages in Deleted Items and Junk Email; always on inside those folders">
           <input id="opt-deleted" type="checkbox"> Deleted / Junk</label>
+        <label class="switch" title="Show meeting mail: invitations, RSVPs and cancellations. Off: conversations that are only meeting traffic are hidden; those with real replies still show">
+          <input id="opt-meetings" type="checkbox" autocomplete="off"> Invites / RSVPs</label>
         <button id="export-view" class="link" title="Export every message of this folder and date range">export this view</button>
       </div>
       <div id="threads"></div>
@@ -66,7 +72,6 @@
     <aside class="reader">
       <div class="reader-head">
         <span id="reader-title" class="muted">Select a message to read it</span>
-        <label class="muted"><input id="reader-full" type="checkbox"> include quoted history</label>
       </div>
       <dl id="reader-meta" class="meta"></dl>
       <pre id="reader-body" class="body"></pre>
@@ -75,13 +80,15 @@
 
   <footer class="exportbar">
     <span id="selection" class="muted">Nothing selected</span>
-    <label><input id="opt-attachments" type="checkbox"> include attachments</label>
-    <label>files: <select id="opt-files">
-      <option value="per_thread" selected>one per thread</option>
-      <option value="all">one for everything</option>
-      <option value="none">one per message</option>
-    </select></label>
-    <label><input id="opt-full" type="checkbox"> include quoted history</label>
+    <label class="switch"><input id="opt-attachments" type="checkbox"> Include attachments</label>
+    <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a thread reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox"> Include quoted history</label>
+    <span class="files">Files
+      <span class="segmented" role="radiogroup" aria-label="Files">
+        <label title="One file per thread"><input type="radio" name="files" value="per_thread" checked><span>Per thread</span></label>
+        <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
+        <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
+      </span>
+    </span>
     <button id="clear">Clear</button>
     <button id="export" class="primary" disabled>Export</button>
   </footer>

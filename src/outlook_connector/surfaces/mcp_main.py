@@ -47,9 +47,9 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
-- Scope, the same for every tool: Deleted Items, Junk Email and Sync Issues (Outlook's own \
-conflict copies) are left out unless include_deleted_items=true (a folder you name is always \
-included; subfolders count with their parent). include_sent_items=false also leaves out Sent \
+- Scope, the same for every tool: Deleted Items and Junk Email are left out unless \
+include_deleted_items=true (a folder you name is always included; subfolders count with their \
+parent). include_sent_items=false also leaves out Sent \
 Items, Drafts and Outbox: use it for "the latest mail I received", which includes mail that rules \
 filed into other folders. Both flags point the same way: true shows more mail, false filters more. \
 coverage.excluded counts what was left out.
@@ -57,6 +57,12 @@ coverage.excluded counts what was left out.
 and other non-mail items), are never listed, searched, counted, threaded or exported, and \
 list_folders does not show them; coverage.excluded.hidden counts any that were dropped. Search \
 covers mail only.
+- Meeting mail (invitations and their updates, cancellations, replies to invitations) carries \
+meeting: kind (invite, update, cancelled, accepted, tentative, declined), start, end, location, \
+out_of_date; ordinary mail has none. A reply written to an invitation stays in its conversation. \
+include_meeting_mail=false (list, search, range export) leaves meeting mail out: a conversation \
+that is only invitations, RSVPs and cancellations disappears; one with real replies shows \
+through them (get_thread still returns the whole conversation).
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
 - Reading: get_thread returns a whole conversation across folders, oldest first, with bodies \
@@ -117,9 +123,13 @@ MessageIds = Annotated[
 
 IncludeDeleted = Annotated[
     bool,
+    Field(description="Include Deleted Items and Junk Email (a folder you name is always included)."),
+]
+IncludeMeetings = Annotated[
+    bool,
     Field(
-        description="Include Deleted Items, Junk Email and Sync Issues "
-        "(a folder you name is always included)."
+        description="Include meeting mail: invitations, RSVPs and cancellations "
+        "(false: leave them out; threads with real replies still show those)."
     ),
 ]
 IncludeSent = Annotated[
@@ -175,6 +185,7 @@ def build_server(context: AppContext) -> FastMCP:
         limit: Annotated[int, Field(ge=1, le=200)] = 25,
         cursor: str | None = None,
         include_sent_items: IncludeSent = True,
+        include_meeting_mail: IncludeMeetings = True,
         include_deleted_items: IncludeDeleted = False,
         include_total: Annotated[
             bool, Field(description="Also count the server's messages in scope (first page only).")
@@ -191,6 +202,7 @@ def build_server(context: AppContext) -> FastMCP:
             limit=limit,
             cursor=cursor,
             include_sent_items=include_sent_items,
+            include_meeting_mail=include_meeting_mail,
             include_deleted_items=include_deleted_items,
             include_total=include_total,
             detail=detail,
@@ -208,6 +220,7 @@ def build_server(context: AppContext) -> FastMCP:
         limit: Annotated[int, Field(ge=1, le=100)] = 25,
         cursor: str | None = None,
         include_sent_items: IncludeSent = True,
+        include_meeting_mail: IncludeMeetings = True,
         include_deleted_items: IncludeDeleted = False,
         detail: DetailLevel = "compact",
     ) -> SearchResult:
@@ -221,6 +234,7 @@ def build_server(context: AppContext) -> FastMCP:
             limit=limit,
             cursor=cursor,
             include_sent_items=include_sent_items,
+            include_meeting_mail=include_meeting_mail,
             include_deleted_items=include_deleted_items,
             detail=detail,
         )
@@ -302,6 +316,7 @@ def build_server(context: AppContext) -> FastMCP:
             Field(description="Range selection: folder path, alias or id (default: whole mailbox)."),
         ] = None,
         include_sent_items: IncludeSent = True,
+        include_meeting_mail: IncludeMeetings = True,
         limit: Annotated[
             int,
             Field(
@@ -323,6 +338,7 @@ def build_server(context: AppContext) -> FastMCP:
             until=_utc(until),
             folder=folder,
             include_sent_items=include_sent_items,
+            include_meeting_mail=include_meeting_mail,
             limit=limit,
             format=format,
             include_attachments=include_attachments,

@@ -123,6 +123,15 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             }
         )
 
+    async def me(_: Request) -> Response:
+        return _json(await (await context.services()).mailbox.profile())
+
+    async def photo(_: Request) -> Response:
+        data = await (await context.services()).mailbox.photo()
+        if data is None:
+            return JSONResponse({"error": "No profile photo.", "kind": "NotFound"}, status_code=404)
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
     async def folders(request: Request) -> Response:
         return _json(await (await context.services()).mailbox.folders(refresh=_flag(request, "refresh")))
 
@@ -134,6 +143,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             limit=_int(request, "limit", 100),
             cursor=request.query_params.get("cursor") or None,
             include_deleted_items=_flag(request, "include_deleted_items"),
+            include_meeting_mail=_flag(request, "include_meeting_mail", True),
         )
         return _json(page)
 
@@ -146,6 +156,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             limit=_int(request, "limit", 50),
             cursor=request.query_params.get("cursor") or None,
             include_deleted_items=_flag(request, "include_deleted_items"),
+            include_meeting_mail=_flag(request, "include_meeting_mail", True),
         )
         return _json(result)
 
@@ -193,18 +204,32 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             artifact.path, media_type=artifact.content_type, filename=artifact.filename, headers=headers
         )
 
+    async def attachment_names(request: Request) -> Response:
+        payload = await request.json()
+        ids = [str(i) for i in payload.get("message_ids") or []]
+        found = await (await context.services()).mailbox.attachments_many(ids)
+        return JSONResponse(
+            {
+                mid: [a.model_dump(mode="json") for a in items if not a.is_inline]
+                for mid, items in found.items()
+            }
+        )
+
     async def heartbeat(_: Request) -> Response:
         return JSONResponse({"ok": True})
 
     routes = [
         Route("/", index),
         Route("/api/status", api(status)),
+        Route("/api/me", api(me)),
+        Route("/api/me/photo", api(photo)),
         Route("/api/folders", api(folders)),
         Route("/api/messages", api(messages)),
         Route("/api/messages/{message_id}", api(message)),
         Route("/api/messages/{message_id}/attachments/{attachment_id}", api(attachment)),
         Route("/api/search", api(search)),
         Route("/api/thread-sizes", api(thread_sizes), methods=["POST"]),
+        Route("/api/attachments", api(attachment_names), methods=["POST"]),
         Route("/api/threads/{conversation_id}", api(thread)),
         Route("/api/export", api(export), methods=["POST"]),
         Route("/api/heartbeat", heartbeat, methods=["POST"]),
