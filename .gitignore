@@ -96,3 +96,6 @@ exports/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local scratch (e.g. the owner's signature files); never committed
+tmp/
