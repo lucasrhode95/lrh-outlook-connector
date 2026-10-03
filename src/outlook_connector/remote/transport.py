@@ -172,14 +172,19 @@ class Transport:
 
     async def json(self, method: str, url: str, **kwargs: Any) -> Any:
         response = await self.request(method, url, **kwargs)
+        problem = None
         if len(response.content) > MAX_JSON_BYTES:
-            raise Upstream("Response too large.")
-        if not response.content:
+            problem = "Response too large."
+        elif response.content:
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                problem = "Expected a JSON response."
+        else:
             return None
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            raise Upstream("Expected a JSON response.") from None
+        if kwargs.get("write"):  # a write was accepted, but its answer is unreadable
+            raise _unknown(url, problem)
+        raise Upstream(problem)
 
     async def download(
         self, url: str, dest: BinaryIO, *, profile: str, headers: dict[str, str] | None = None, max_bytes: int

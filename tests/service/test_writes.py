@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -7,7 +8,7 @@ import httpx
 import pytest
 
 from outlook_connector.auth.tokens import Account
-from outlook_connector.domain.errors import AccountMismatch, InvalidRequest, NotFound
+from outlook_connector.domain.errors import AccountMismatch, InvalidRequest, NotFound, Throttled
 from outlook_connector.domain.models import OutgoingMessage
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
@@ -16,7 +17,7 @@ from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store
-from tests.fakes.graph_fake import FakeGraph, StaticTokens, sample_mailbox
+from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 ME = Account(tenant_id="tenant-x", object_id="user-x", username="me@example.com")
 
@@ -182,3 +183,31 @@ async def test_unclear_send_without_a_sent_copy_is_unknown_and_not_retried(
     result = await writes.send(message(), proposal.confirmation)
     assert result.status == "unknown" and "Do not send again" in result.detail
     assert len(fake.ows_calls) == 1
+
+
+async def test_failed_sent_items_check_keeps_the_unknown_status(
+    writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proposal = await writes.propose(message())
+    fake.ows_next = ["done-no-answer"]
+
+    async def unavailable(**_: Any) -> Any:
+        raise Throttled("Graph is throttling")
+
+    monkeypatch.setattr(writes.mailbox.reader, "list_messages", unavailable)
+    result = await writes.send(message(), proposal.confirmation)
+    assert result.status == "unknown" and "Do not send again" in result.detail
+
+
+async def test_sent_items_check_matches_every_recipient_including_bcc(
+    writes: Writes, fake: FakeGraph
+) -> None:
+    bcc_only = message(to=[], bcc=["boss@example.com"])
+    proposal = await writes.propose(bcc_only)
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fake.add(FakeMessage("other", "Hi", "f-sent", now, sender="me@example.com", to=("x@example.com",)))
+    fake.ows_next = ["no-answer"]  # not sent; an unrelated mail with the same subject is in Sent Items
+    assert (await writes.send(bcc_only, proposal.confirmation)).status == "unknown"
+    fake.ows_next = ["done-no-answer"]  # sent this time
+    result = await writes.send(bcc_only, proposal.confirmation)
+    assert result.status == "sent" and fake.messages[result.sent_item_id or ""].bcc == ("boss@example.com",)

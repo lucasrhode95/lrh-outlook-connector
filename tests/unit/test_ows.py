@@ -101,6 +101,13 @@ async def test_no_answer_or_server_error_is_an_unknown_outcome_never_retried(fak
         assert len(fake.ows_calls) == 1
 
 
+async def test_a_success_without_readable_results_is_an_unknown_outcome(fake: FakeGraph) -> None:
+    for script in ("no-items", "not-json"):
+        fake.ows_next = [script]
+        with pytest.raises(WriteOutcomeUnknown):
+            await writer_for(fake).send(proposal())
+
+
 async def test_throttled_write_is_not_retried(fake: FakeGraph) -> None:
     fake.ows_next = [429]
     with pytest.raises(Throttled):
