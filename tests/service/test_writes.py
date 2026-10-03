@@ -8,7 +8,13 @@ import httpx
 import pytest
 
 from outlook_connector.auth.tokens import Account
-from outlook_connector.domain.errors import AccountMismatch, InvalidRequest, NotFound, Throttled
+from outlook_connector.domain.errors import (
+    AccountMismatch,
+    ConnectorError,
+    InvalidRequest,
+    NotFound,
+    Throttled,
+)
 from outlook_connector.domain.models import OutgoingMessage
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
@@ -17,7 +23,7 @@ from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store
-from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
+from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 ME = Account(tenant_id="tenant-x", object_id="user-x", username="me@example.com")
 
@@ -137,6 +143,18 @@ async def test_reply_draft_joins_the_conversation(writes: Writes, fake: FakeGrap
     assert fake.ows_calls[0][1]["Items"][0]["__type"] == "ReplyToItem:#Exchange"
 
 
+async def test_reply_body_is_html_so_the_history_keeps_its_formatting(
+    writes: Writes, fake: FakeGraph
+) -> None:
+    await writes.create_draft(OutgoingMessage(reply_to_message_id="m1", body="a < b & c\nsecond line"))
+    content = fake.ows_calls[0][1]["Items"][0]["NewBodyContent"]
+    assert content == {
+        "__type": "BodyContentType:#Exchange",
+        "BodyType": "HTML",
+        "Value": "<div>a &lt; b &amp; c<br>second line</div>",
+    }
+
+
 # ---------------------------------------------------------------- send
 
 
@@ -211,3 +229,91 @@ async def test_sent_items_check_matches_every_recipient_including_bcc(
     fake.ows_next = ["done-no-answer"]  # sent this time
     result = await writes.send(bcc_only, proposal.confirmation)
     assert result.status == "sent" and fake.messages[result.sent_item_id or ""].bcc == ("boss@example.com",)
+
+
+# ---------------------------------------------------------------- send a reply (W6)
+
+
+def reply(**changes: Any) -> OutgoingMessage:
+    return OutgoingMessage.model_validate({"reply_to_message_id": "m3", "body": "Thanks"} | changes)
+
+
+async def test_reply_is_sent_as_the_checked_draft(writes: Writes, fake: FakeGraph) -> None:
+    proposal = await writes.propose(reply())
+    result = await writes.send(reply(), proposal.confirmation)
+    assert result.status == "sent"
+    actions = [(action, body["MessageDisposition"]) for action, body in fake.ows_calls]
+    assert actions == [("CreateItem", "SaveOnly"), ("UpdateItem", "SendAndSaveCopy")]
+    (sent_id,) = fake.sent_drafts
+    sent = fake.messages[sent_id]
+    assert sent.folder == "f-sent" and not sent.is_draft and sent.conversation == "c-rel"
+    assert "Follow-up with numbers" in sent.text  # the original is quoted
+    assert [a.name for a in sent.attachments] == ["image001.png", "logo.png"]  # inline images kept
+
+
+async def test_reply_draft_without_the_original_is_not_sent(writes: Writes, fake: FakeGraph) -> None:
+    fake.reply_drops_history = True
+    proposal = await writes.propose(reply())
+    with pytest.raises(ConnectorError, match="Not sent: the reply draft did not keep the original") as caught:
+        await writes.send(reply(), proposal.confirmation)
+    assert not fake.sent_drafts and [action for action, _ in fake.ows_calls] == ["CreateItem"]
+    drafts = [m for m in fake.messages.values() if m.is_draft]
+    assert len(drafts) == 1 and drafts[0].folder == "f-drafts" and drafts[0].id in str(caught.value)
+
+
+async def test_reply_missing_an_inline_image_is_not_sent(
+    writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proposal = await writes.propose(reply())
+    created = fake.ows_CreateItem
+
+    def drop_images(body: dict[str, Any]) -> list[dict[str, Any]]:
+        items = created(body)
+        for m in fake.messages.values():
+            if m.is_draft:
+                m.attachments = []
+        return items
+
+    monkeypatch.setattr(fake, "ows_CreateItem", drop_images)
+    with pytest.raises(ConnectorError, match="2 inline image\\(s\\) of the original are missing"):
+        await writes.send(reply(), proposal.confirmation)
+    assert not fake.sent_drafts
+
+
+async def test_unclear_reply_send_that_went_through_is_found_in_sent_items(
+    writes: Writes, fake: FakeGraph
+) -> None:
+    proposal = await writes.propose(reply())
+    fake.ows_next = [None, "done-no-answer"]  # the draft is saved; the send goes through, unanswered
+    result = await writes.send(reply(), proposal.confirmation)
+    assert result.status == "sent" and result.sent_item_id == fake.sent_drafts[0]
+    assert [action for action, _ in fake.ows_calls] == ["CreateItem", "UpdateItem"]  # not retried
+
+
+async def test_changed_inline_image_bytes_are_not_sent(writes: Writes, fake: FakeGraph) -> None:
+    proposal = await writes.propose(reply())
+    created = fake.ows_CreateItem
+
+    def change_image(body: dict[str, Any]) -> list[dict[str, Any]]:
+        items = created(body)
+        draft = next(m for m in fake.messages.values() if m.is_draft)
+        first = draft.attachments[0]
+        draft.attachments[0] = FakeAttachment(first.id, first.name, b"other bytes", first.content_type,
+                                              inline=True, content_id=first.content_id)  # fmt: skip
+        return items
+
+    fake.ows_CreateItem = change_image  # type: ignore[method-assign]
+    with pytest.raises(ConnectorError, match="missing or changed"):
+        await writes.send(reply(), proposal.confirmation)
+    assert not fake.sent_drafts
+
+
+async def test_reply_draft_reports_the_history_check(writes: Writes, fake: FakeGraph) -> None:
+    intact = await writes.create_draft(reply())
+    assert intact.history_intact is True and intact.history_problem is None
+    fake.reply_drops_history = True
+    broken = await writes.create_draft(reply())
+    assert broken.history_intact is False and "quoted original" in (broken.history_problem or "")
+    plain = await writes.create_draft(message())
+    assert plain.history_intact is None  # not a reply
+    assert not fake.sent_drafts

@@ -12,6 +12,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from html import unescape
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
@@ -101,12 +102,14 @@ class FakeGraph:
     claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
     fail: dict[str, int] = field(default_factory=dict)  # path regex -> HTTP status to answer instead
     batch_sizes: list[int] = field(default_factory=list)
+    sent_drafts: list[str] = field(default_factory=list)  # drafts sent with UpdateItem
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
     # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
     # "no-items" / "not-json" (HTTP 200 without readable item results),
     # an int (that HTTP status), or a dict (that item result)
     me: str = "me@example.com"
+    reply_drops_history: bool = False  # simulate a reply draft that lost the quoted original
     display_name: str = "Doe, Jane"
     photo: bytes | None = None  # the user's 48x48 profile photo; None: no photo set
 
@@ -202,14 +205,23 @@ class FakeGraph:
         disposition = body["MessageDisposition"]
         (item,) = body["Items"]
         addresses = lambda key: tuple(r["EmailAddress"] for r in item.get(key, []))  # noqa: E731
-        text = (item.get("Body") or item.get("NewBodyContent"))["Value"]
+        content = item.get("Body") or item.get("NewBodyContent")
+        text = content["Value"]
+        if content["BodyType"] == "HTML":  # what the HTML shows, as Graph's text view would
+            text = unescape(re.sub(r"<[^>]+>", "", text.replace("<br>", "\n")))
         conversation = f"conv-new-{len(self.messages)}"
+        inline: list[FakeAttachment] = []
         if item["__type"] in ("ReplyToItem:#Exchange", "ReplyAllToItem:#Exchange"):
+            assert content["BodyType"] == "HTML", (
+                "a reply body must be HTML, or Exchange flattens the history"
+            )
             original = self.messages.get(_graph_id(item["ReferenceItemId"]["Id"]))
             if original is None:
                 return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
             conversation = original.conversation
-            text += "\n\n> " + original.text
+            if not self.reply_drops_history:
+                text += "\n\nFrom: " + original.sender + "\n" + original.text
+                inline = [a for a in original.attachments if a.inline]
         else:
             assert item["__type"] == "Message:#Exchange" and item["MessageDisposition"] == disposition
         new_id = f"w{len(self.messages)}-x_y"  # has "-" and "_", so the id mapping is exercised
@@ -218,7 +230,8 @@ class FakeGraph:
         self.add(
             FakeMessage(new_id, item.get("Subject") or "", folder, now, conversation=conversation,
                         sender=self.me, to=addresses("ToRecipients"), cc=addresses("CcRecipients"),
-                        bcc=addresses("BccRecipients"), is_draft=disposition == "SaveOnly", text=text)
+                        bcc=addresses("BccRecipients"), is_draft=disposition == "SaveOnly", text=text,
+                        attachments=list(inline))
         )  # fmt: skip
         created = [{"ItemId": {"Id": _ows_id(new_id)}}] if disposition == "SaveOnly" else []
         return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
@@ -227,7 +240,16 @@ class FakeGraph:
         return self.messages.get(_graph_id(item_id["Id"]))
 
     def ows_UpdateItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
-        assert body["SuppressReadReceipts"] is True and body["MessageDisposition"] == "SaveOnly"
+        assert body["SuppressReadReceipts"] is True
+        if body["MessageDisposition"] == "SendAndSaveCopy":  # Outlook Web sends a draft this way
+            (change,) = body["ItemChanges"]
+            draft = self._ows_target(change["ItemId"])
+            if draft is None or not draft.is_draft:
+                return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
+            draft.folder, draft.is_draft = self.aliases["sentitems"], False
+            self.sent_drafts.append(draft.id)
+            return [{"ResponseClass": "Success", "ResponseCode": "NoError"}]
+        assert body["MessageDisposition"] == "SaveOnly"
         out = []
         for change in body["ItemChanges"]:
             message = self._ows_target(change["ItemId"])

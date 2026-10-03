@@ -13,6 +13,7 @@ proven in research §4.1–4.2; anything else is marked where it is used.
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import uuid
@@ -130,6 +131,13 @@ def _body(text: str) -> dict[str, str]:
     return {"__type": "BodyContentType:#Exchange", "BodyType": "Text", "Value": text}
 
 
+def _html_body(text: str) -> dict[str, str]:
+    """Plain text as HTML (escaped, line breaks kept). A reply needs an HTML body: Exchange then
+    quotes the original's HTML untouched, with its inline images (a Text body flattens it)."""
+    value = "<div>" + html.escape(text).replace("\r\n", "\n").replace("\n", "<br>") + "</div>"
+    return {"__type": "BodyContentType:#Exchange", "BodyType": "HTML", "Value": value}
+
+
 def _created_id(items: list[dict[str, Any]]) -> str | None:
     inner = items[0].get("Items")
     first = inner[0] if isinstance(inner, list) and inner and isinstance(inner[0], dict) else {}
@@ -156,6 +164,36 @@ class OwsMailWriter:
         """Send once and keep a copy in Sent Items. Never retried."""
         with operation("sending a message"):
             await self._ows.call("CreateItem", _create(message, "SendAndSaveCopy"))
+
+    async def send_draft(self, draft_id: str, subject: str) -> None:
+        """Send an existing draft as it is, the way Outlook Web does: ``UpdateItem`` with
+        ``SendAndSaveCopy`` (``SendItem`` is not supported over OWS; live 2026-10-04). The update
+        sets the subject the draft already has. Sent once, never retried."""
+        body = {
+            "ItemChanges": [
+                {
+                    "__type": "ItemChange:#Exchange",
+                    "ItemId": _item_id(draft_id),
+                    "Updates": [
+                        {
+                            "__type": "SetItemField:#Exchange",
+                            "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": "item:Subject"},
+                            "Item": {"__type": "Message:#Exchange", "Subject": subject},
+                        }
+                    ],
+                }
+            ],
+            "ConflictResolution": "AlwaysOverwrite",
+            "MessageDisposition": "SendAndSaveCopy",
+            "SavedItemFolderId": {
+                "__type": "TargetFolderId:#Exchange",
+                "BaseFolderId": {"__type": "DistinguishedFolderId:#Exchange", "Id": "sentitems"},
+            },
+            "SuppressReadReceipts": True,
+            "SendCalendarInvitationsOrCancellations": "SendToNone",
+        }
+        with operation("sending a reply"):
+            await self._ows.call("UpdateItem", body)
 
     # ---------------------------------------------------------------- mutations (research §4.2)
     # Each returns {message id: None when done, else Outlook's response code}, one request per call
@@ -242,7 +280,8 @@ def _create(message: EmailProposal, disposition: str) -> dict[str, Any]:
 
     Replies use EWS's ``ReplyToItem`` / ``ReplyAllToItem`` response objects, which append the
     quoted original; recipients and subject are passed explicitly, so the result matches the
-    proposal. (The reply variant is pending its first live check, V2.)
+    proposal. A reply's own text goes in an HTML body, so the quoted original keeps its formatting
+    and inline images (live 2026-10-04). New messages stay plain text (W7).
     """
     recipients = {
         "ToRecipients": [_address(a) for a in message.to],
@@ -254,7 +293,7 @@ def _create(message: EmailProposal, disposition: str) -> dict[str, Any]:
         item: dict[str, Any] = {
             "__type": f"{kind}:#Exchange",
             "ReferenceItemId": {"__type": "ItemId:#Exchange", "Id": ids.to_ows(message.reply_to_message_id)},
-            "NewBodyContent": _body(message.body),
+            "NewBodyContent": _html_body(message.body),
             "Subject": message.subject,
             **recipients,
         }
