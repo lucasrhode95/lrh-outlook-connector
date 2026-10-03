@@ -101,6 +101,7 @@ class FakeGraph:
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
     # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
+    # "no-items" / "not-json" (HTTP 200 without readable item results),
     # an int (that HTTP status), or a dict (that item result)
     me: str = "me@example.com"
     master_categories: list[str] | None = field(default_factory=lambda: ["Red", "Project X"])  # None: 403
@@ -180,6 +181,10 @@ class FakeGraph:
         script = self.ows_next.pop(0) if self.ows_next else None
         if script == "no-answer":
             raise httpx.ReadTimeout("no answer", request=request)
+        if script == "no-items":
+            return httpx.Response(200, json={"Body": {}})
+        if script == "not-json":
+            return httpx.Response(200, content=b"<html>", headers={"content-type": "text/html"})
         if isinstance(script, int):
             return httpx.Response(script, headers={"x-owa-error": "FakeError"}, json={})
         if isinstance(script, dict):

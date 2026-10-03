@@ -22,7 +22,13 @@ import re
 from datetime import UTC, datetime, timedelta
 
 from outlook_connector.auth.tokens import Account
-from outlook_connector.domain.errors import AccountMismatch, InvalidRequest, NotFound, WriteOutcomeUnknown
+from outlook_connector.domain.errors import (
+    AccountMismatch,
+    ConnectorError,
+    InvalidRequest,
+    NotFound,
+    WriteOutcomeUnknown,
+)
 from outlook_connector.domain.models import (
     ADDRESS_PATTERN,
     MAX_RECIPIENTS,
@@ -130,7 +136,10 @@ class Writes:
         try:
             await self.writer.send(proposal)
         except WriteOutcomeUnknown as exc:
-            found = await self._find_sent(proposal, since=started - SENT_LOOKBACK)
+            try:
+                found = await self._find_sent(proposal, since=started - SENT_LOOKBACK)
+            except ConnectorError:  # the check failed: stay with "unknown", never a plain error
+                found = None
             if found:
                 return SendResult(
                     status="sent", sent_item_id=found.id,
@@ -152,15 +161,23 @@ class Writes:
             )
 
     async def _find_sent(self, proposal: EmailProposal, *, since: datetime) -> MessageSummary | None:
+        """The proposal's copy in Sent Items: same subject and exactly the same To, Cc and Bcc."""
         sent = await self.mailbox.resolve_folder("sentitems")
         items, _ = await self.mailbox.reader.list_messages(
             folder_id=sent.id, since=since, until=None, page_size=50, page=None
         )
-        wanted = {a.lower() for a in proposal.to + proposal.cc}
-        for item in items:
-            got = {r.address.lower() for r in item.to + item.cc if r.address}
-            if item.subject == proposal.subject and wanted <= got:
-                return item
+        candidates = [m.id for m in items if m.subject == proposal.subject]
+        if not candidates:
+            return None
+        fetched = await self.mailbox.reader.get_messages(candidates)  # with Bcc, which summaries lack
+
+        def addresses(recipients: list[Recipient]) -> set[str]:
+            return {r.address.lower() for r in recipients if r.address}
+
+        wanted = [{a.lower() for a in field} for field in (proposal.to, proposal.cc, proposal.bcc)]
+        for message in fetched.messages.values():
+            if message and [addresses(message.to), addresses(message.cc), addresses(message.bcc)] == wanted:
+                return message
         return None
 
 
