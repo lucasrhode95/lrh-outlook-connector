@@ -429,6 +429,7 @@ async function download(path, options) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return response;
 }
 
 // ------------------------------------------------------------------ selection and export
@@ -493,7 +494,10 @@ async function runExport(button, request, label) {
   button.disabled = true;
   button.textContent = "Exporting…";
   try {
-    await download("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+    const response = await download("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
+    // Parts that could not be exported: the file's header line, shown until the next request.
+    const errors = response.headers.get("X-Export-Errors");
+    if (errors) showBanner(decodeURIComponent(errors).replace("below", "in the file"));
   } catch { /* the banner shows the error */ } finally {
     button.textContent = label;
     renderSelection();
