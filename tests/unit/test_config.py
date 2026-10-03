@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from outlook_connector import config
 
 
@@ -24,3 +26,12 @@ def test_cache_paths_live_in_the_data_dir_and_differ_by_mode(isolated_home: Path
     assert secure.parent == plain.parent == isolated_home.resolve()
     assert secure != plain
     assert "plaintext" in plain.name
+
+
+def test_windows_data_dir_is_outside_appdata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Packaged apps (the Claude desktop app and the MCP servers it starts) get AppData redirected.
+    monkeypatch.delenv("OUTLOOK_CONNECTOR_HOME")
+    monkeypatch.setattr(config, "_windows", lambda: True)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "rhode"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "rhode" / "AppData" / "Local"))
+    assert config.data_dir() == tmp_path / "rhode" / ".lrh-outlook-connector"
