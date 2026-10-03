@@ -10,7 +10,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from outlook_connector.domain.errors import InvalidRequest
+from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
@@ -183,15 +183,13 @@ async def test_inline_image_ids_of_many_messages_are_read_in_shared_batches(
     assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
 
 
-async def test_listed_message_deleted_before_export_is_marked_unavailable(
+async def test_listed_message_deleted_before_export_fails_the_export(
     exports: Exports, fake: FakeGraph
 ) -> None:
-    await exports.mailbox.list_messages()  # caches m3's summary
+    await exports.mailbox.list_messages()
     del fake.messages["m3"]
-    artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
-    text = Path(artifact.path).read_text(encoding="utf-8")  # nothing downloadable: a flat .txt
-    assert artifact.unavailable_message_ids == ["m3"]
-    assert "(Content unavailable: deleted on the server)" in text
+    with pytest.raises(NotFound):
+        await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
 
 
 async def test_truncated_conversation_is_not_exported_silently(
@@ -250,13 +248,13 @@ def test_export_limit_cannot_exceed_the_hard_cap() -> None:
 
 
 async def test_unfetchable_bodies_are_marked_and_counted_not_fatal(exports: Exports, fake: FakeGraph) -> None:
-    await exports.mailbox.list_messages()  # ids come from a listing, so their summaries are known
+    await exports.mailbox.folders()
     fake.throttle_items = 10_000  # every body sub-request stays throttled
-    artifact = await exports.export(ExportRequest(message_ids=["m5"], combine="all"))
-    assert artifact.unavailable_message_ids == ["m5"]
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], combine="all"))
+    assert len(artifact.unavailable_message_ids) == 3
     text = Path(artifact.path).read_text(encoding="utf-8")
     assert "(Content unavailable: While fetching message bodies" in text
-    assert "Unavailable: 1 message body(ies); they are marked below." in text
+    assert "Unavailable: 3 message body(ies); they are marked below." in text
 
 
 async def test_bulk_export_stays_within_batch_limits_under_throttling(

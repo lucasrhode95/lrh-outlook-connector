@@ -49,7 +49,6 @@ class Threads:
         remote, truncated = await self.mailbox.reader.conversation(conversation_id)
         if not remote:
             raise NotFound(f"No conversation {conversation_id} on the server.")
-        self.mailbox.store.upsert_summaries(remote)
         skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
         items, excluded = await self.mailbox.finish(sorted(remote, key=oldest_first), skip)
         return items, excluded, truncated

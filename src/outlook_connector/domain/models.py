@@ -88,10 +88,6 @@ class MessageSummary(Compact):
     also_in: list[str] = Field(default_factory=list)  # folders holding another copy (same Internet id)
 
 
-# Filled by the service per result, never stored with the message.
-DERIVED_FIELDS = frozenset({"folder", "also_in"})
-
-
 class Attachment(Compact):
     id: str
     message_id: str

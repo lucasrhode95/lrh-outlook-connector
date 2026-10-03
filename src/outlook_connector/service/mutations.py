@@ -158,9 +158,6 @@ class Mutations:
                     results[mid] = ItemResult(id=mid, status="not_found", detail=code)
                 else:
                     results[mid] = ItemResult(id=mid, status="failed", detail=code)
-        changed = [mid for mid, r in results.items() if r.status in ("done", "unknown", "not_found")]
-        if changed:
-            self.mailbox.store.drop(changed)  # relisted with their new state; gone ones stay gone
         ordered = [results[mid] for mid in ids]
         return MutationResult(action=action, results=ordered, counts=dict(Counter(r.status for r in ordered)))
 
