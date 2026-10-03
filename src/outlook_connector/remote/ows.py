@@ -132,10 +132,22 @@ def _body(text: str) -> dict[str, str]:
 
 
 def _html_body(text: str) -> dict[str, str]:
-    """Plain text as HTML (escaped, line breaks kept). A reply needs an HTML body: Exchange then
-    quotes the original's HTML untouched, with its inline images (a Text body flattens it)."""
-    value = "<div>" + html.escape(text).replace("\r\n", "\n").replace("\n", "<br>") + "</div>"
-    return {"__type": "BodyContentType:#Exchange", "BodyType": "HTML", "Value": value}
+    """Plain text as HTML that shows exactly the same text: escaped, line breaks kept, and repeated
+    spaces, tabs and leading spaces kept as non-breaking spaces (HTML would collapse them; Outlook's
+    desktop renderer ignores CSS ``white-space``). A reply needs an HTML body: Exchange then quotes
+    the original's HTML untouched, with its inline images (a Text body flattens it)."""
+    lines = html.escape(text).replace("\r\n", "\n").split("\n")
+    return {
+        "__type": "BodyContentType:#Exchange",
+        "BodyType": "HTML",
+        "Value": "<div>" + "<br>".join(map(_keep_spaces, lines)) + "</div>",
+    }
+
+
+def _keep_spaces(line: str) -> str:
+    line = line.replace("\t", "&nbsp;" * 4)
+    line = re.sub(r" {2,}", lambda run: "&nbsp;" * (len(run.group()) - 1) + " ", line)
+    return "&nbsp;" + line[1:] if line.startswith(" ") else line
 
 
 def _created_id(items: list[dict[str, Any]]) -> str | None:
