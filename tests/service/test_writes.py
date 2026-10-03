@@ -104,6 +104,14 @@ async def test_reply_to_your_own_message_goes_to_its_recipients(writes: Writes) 
     assert reply.to == ["alice@example.com"] and reply.subject == "RE: Relatório BE semanal"
 
 
+async def test_reply_to_mail_you_sent_yourself_goes_back_to_you(writes: Writes, fake: FakeGraph) -> None:
+    fake.messages["m5"].sender = "Me@Example.com"  # live: from you, to you (V2 step 2)
+    fake.messages["m5"].to = ("me@example.com",)
+    for reply_all in (False, True):
+        reply = await writes.propose(OutgoingMessage(reply_to_message_id="m5", reply_all=reply_all, body="x"))
+        assert reply.to == ["Me@Example.com"] and not reply.cc and reply.subject == "RE: Lunch?"
+
+
 async def test_reply_to_a_missing_message_is_not_found(writes: Writes) -> None:
     with pytest.raises(NotFound):
         await writes.propose(OutgoingMessage(reply_to_message_id="gone", body="x"))

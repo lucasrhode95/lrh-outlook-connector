@@ -166,7 +166,8 @@ class Writes:
 
 def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[list[str], list[str]]:
     """Outlook's reply recipients: the sender (the original recipients when you sent it); with
-    reply-all also the original To (in To) and Cc (in Cc). You are never among them."""
+    reply-all also the original To (in To) and Cc (in Cc). You are left out, except when nobody
+    else is left: a reply to mail you sent only to yourself goes back to you."""
 
     def plain(recipients: list[Recipient]) -> list[str]:
         return [r.address for r in recipients if r.address and r.address.lower() != me]
@@ -177,6 +178,8 @@ def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[l
     if reply_all:
         to += plain(original.to)
         cc = plain(original.cc)
+    if not to and not cc and sender:
+        to = [sender]
     to = _unique(_addresses(to, "to"))
     return to, [a for a in _unique(_addresses(cc, "cc")) if a.lower() not in {t.lower() for t in to}]
 
