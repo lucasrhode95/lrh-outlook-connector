@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Upstream
+from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Throttled, Upstream
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
@@ -33,6 +33,12 @@ from outlook_connector.service.mailbox import unavailable
 from outlook_connector.service.threads import Threads, base_subject, oldest_first
 
 RANGE_PAGE = 200
+THROTTLING = (429, 503)
+SHOWN_FAILURES = 3
+UNREADABLE_HINT = (
+    "They may have been deleted or moved in Outlook, or Microsoft is throttling requests. "
+    "Refresh the list (or list/search again) and retry the export. Nothing was exported."
+)
 
 Downloaded = list[tuple[Attachment, Path | None]]  # None: unavailable
 
@@ -160,12 +166,20 @@ class Exports:
         if not message_ids:
             return {}
         fetched = await self.reader.get_messages(message_ids)
-        if fetched.failed:
-            first = next(iter(fetched.failed.values()))
-            raise Upstream(f"{len(fetched.failed)} selected message(s) could not be read. First: {first}")
         gone = [mid for mid, m in fetched.messages.items() if m is None]
-        if gone:
-            raise NotFound(f"{len(gone)} selected message(s) are not on the server (deleted): {gone[0]}")
+        if fetched.failed or gone:
+            cases = [f"{mid} (failed: {f.describe()})" for mid, f in fetched.failed.items()]
+            cases += [f"{mid} (gone: not on the server)" for mid in gone]
+            shown = "; ".join(cases[:SHOWN_FAILURES]) + ("; ..." if len(cases) > SHOWN_FAILURES else "")
+            text = (
+                f"{len(cases)} of the {len(message_ids)} message(s) selected by id could not be read: "
+                f"{shown}. {UNREADABLE_HINT}"
+            )
+            if not fetched.failed:
+                raise NotFound(text)
+            if any(f.status in THROTTLING for f in fetched.failed.values()):
+                raise Throttled(text)
+            raise Upstream(text)
         return {mid: m for mid, m in fetched.messages.items() if m is not None}
 
     async def _attachments(

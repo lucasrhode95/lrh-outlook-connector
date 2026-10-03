@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
+from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import (
     Attachment,
     EmailProposal,
@@ -28,7 +29,7 @@ class FetchedMessages:
     """A batch fetch: every requested id is in exactly one of the two maps."""
 
     messages: dict[str, Message | None] = field(default_factory=dict)  # None: no longer on the server
-    failed: dict[str, str] = field(default_factory=dict)  # not fetched (throttled, error): the reason
+    failed: dict[str, Failure] = field(default_factory=dict)  # not fetched (throttled, error): why
 
 
 class MailReader(Protocol):
