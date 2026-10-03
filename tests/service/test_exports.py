@@ -273,8 +273,8 @@ async def test_range_export_selects_the_window_and_counts_what_it_leaves_out(exp
     assert f"Left out: 1 message(s) {EXCLUSION_TEXT['deleted_or_junk']}." in text and "buy now" not in text
 
 
-async def test_range_export_received_only_and_deleted_items(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(received_only=True, include_deleted_items=True))
+async def test_range_export_without_sent_items_but_with_deleted_items(exports: Exports) -> None:
+    artifact = await exports.export(ExportRequest(include_sent_items=False, include_deleted_items=True))
     assert artifact.message_count == 4 and artifact.messages_excluded == {"outgoing": 1}  # m2 is sent
 
 
@@ -285,7 +285,7 @@ async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None
 
 async def test_export_limit_is_enforced_with_counts(exports: Exports) -> None:
     with pytest.raises(InvalidRequest, match="holds 3 messages, above the limit of 2"):
-        await exports.export(ExportRequest(received_only=True, limit=2))
+        await exports.export(ExportRequest(include_sent_items=False, limit=2))
     with pytest.raises(InvalidRequest, match="above the limit of 1"):
         await exports.export(ExportRequest(message_ids=["m1", "m5"], limit=1))
 

@@ -49,9 +49,10 @@ carry the conversation's message_count. Results are compact by default (detail="
 recipients, categories and Internet ids).
 - Scope, the same for every tool: Deleted Items, Junk Email and Sync Issues (Outlook's own \
 conflict copies) are left out unless include_deleted_items=true (a folder you name is always \
-included; subfolders count with their parent). received_only=true also leaves out Sent Items, \
-Drafts and Outbox: use it for "the latest mail I received", which includes mail that rules filed \
-into other folders. coverage.excluded counts what was left out.
+included; subfolders count with their parent). include_sent_items=false also leaves out Sent \
+Items, Drafts and Outbox: use it for "the latest mail I received", which includes mail that rules \
+filed into other folders. Both flags point the same way: true shows more mail, false filters more. \
+coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, threaded or exported, and \
 list_folders does not show them; coverage.excluded.hidden counts any that were dropped. Search \
@@ -67,7 +68,7 @@ list_messages(include_total=true) gives the server's count for the window, to pl
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
-and/or a range (since/until/folder/received_only) in one call; at most 2,000 messages (`limit` \
+and/or a range (since/until/folder/include_sent_items) in one call; at most 2,000 messages (`limit` \
 lowers that). For a large period, export the range rather than enumerating ids. format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
@@ -121,7 +122,9 @@ IncludeDeleted = Annotated[
         "(a folder you name is always included)."
     ),
 ]
-ReceivedOnly = Annotated[bool, Field(description="Leave out Sent Items, Drafts and Outbox.")]
+IncludeSent = Annotated[
+    bool, Field(description="Include Sent Items, Drafts and Outbox (false: only mail you received).")
+]
 DetailLevel = Annotated[
     Detail, Field(description="compact (default) or full: adds recipients, categories and Internet ids.")
 ]
@@ -171,7 +174,7 @@ def build_server(context: AppContext) -> FastMCP:
         until: Annotated[datetime | None, Field(description="Inclusive upper bound (ISO 8601).")] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 25,
         cursor: str | None = None,
-        received_only: ReceivedOnly = False,
+        include_sent_items: IncludeSent = True,
         include_deleted_items: IncludeDeleted = False,
         include_total: Annotated[
             bool, Field(description="Also count the server's messages in scope (first page only).")
@@ -187,7 +190,7 @@ def build_server(context: AppContext) -> FastMCP:
             until=_utc(until),
             limit=limit,
             cursor=cursor,
-            received_only=received_only,
+            include_sent_items=include_sent_items,
             include_deleted_items=include_deleted_items,
             include_total=include_total,
             detail=detail,
@@ -204,7 +207,7 @@ def build_server(context: AppContext) -> FastMCP:
         folder: Annotated[str | None, Field(description="Folder path, alias or id.")] = None,
         limit: Annotated[int, Field(ge=1, le=100)] = 25,
         cursor: str | None = None,
-        received_only: ReceivedOnly = False,
+        include_sent_items: IncludeSent = True,
         include_deleted_items: IncludeDeleted = False,
         detail: DetailLevel = "compact",
     ) -> SearchResult:
@@ -217,7 +220,7 @@ def build_server(context: AppContext) -> FastMCP:
             folder=folder,
             limit=limit,
             cursor=cursor,
-            received_only=received_only,
+            include_sent_items=include_sent_items,
             include_deleted_items=include_deleted_items,
             detail=detail,
         )
@@ -298,7 +301,7 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Range selection: folder path, alias or id (default: whole mailbox)."),
         ] = None,
-        received_only: ReceivedOnly = False,
+        include_sent_items: IncludeSent = True,
         limit: Annotated[
             int,
             Field(
@@ -319,7 +322,7 @@ def build_server(context: AppContext) -> FastMCP:
             since=_utc(since),
             until=_utc(until),
             folder=folder,
-            received_only=received_only,
+            include_sent_items=include_sent_items,
             limit=limit,
             format=format,
             include_attachments=include_attachments,
