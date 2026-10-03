@@ -55,7 +55,7 @@ Every call sent `Prefer: IdType="ImmutableId"`.
 | `POST /search/query` (message entity) | 200. Gives a server `total`. |
 | Attachments: list, item (`$select` must not include `@odata.type`), `$value`, `$select=microsoft.graph.fileAttachment/contentId` | 200 |
 | `/me/mailFolders/delta`, `/me/mailFolders/{id}/messages/delta` (`odata.maxpagesize`) | 200, `deltaLink`, no-change replay returns 0 |
-| `/me/translateExchangeIds` | 200. Converts the regular ids `$search` returns into immutable ids (live 2026-10-03, read sign-in); not needed for OWS (§4.2). |
+| `/me/translateExchangeIds` | 200. Converts the regular ids `$search` returns (`AQMk…` and `AAMk…`) into immutable ids (live 2026-10-03, read sign-in); the results equal the ids listings return (3 of 3, live 2026-10-04). An input that is already immutable fails the whole call (HTTP 400 `InvalidArgument`, expected `EntryId`). Not needed for OWS (§4.2). |
 
 **Sign-in (live 2026-10-03):** `auth write` asked for its own device code right after `auth read`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The read token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`); the write token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
 
