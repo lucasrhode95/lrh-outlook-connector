@@ -82,11 +82,11 @@ original, added by Outlook) and ask them to confirm it; (3) only after they conf
 the same message and the proposal's confirmation code as user_confirmation. Never confirm on the \
 user's behalf. A message changed after confirmation is refused: propose and confirm again. If \
 send_email returns status "unknown", do not send again; ask the user to check Sent Items and Outbox.
-- Changing messages: set_read_state, set_flag, categorize, move_messages and delete_messages take \
+- Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_thread), at most 100 per call, never a query; \
 set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
 (already so; nothing sent), not_found, failed (with Outlook's code) or unknown (no clear answer; \
-check before repeating). categorize adds only categories that already exist. delete_messages moves \
+check before repeating). delete_messages moves \
 to Deleted Items; messages already there are left alone (there is no permanent delete). Act only \
 on messages the user asked about, and say which ones before changing many.
 - Writes need the write sign-in (`outlook-connector auth write`).
@@ -378,16 +378,6 @@ def build_server(context: AppContext) -> FastMCP:
     async def set_flag(message_ids: MessageIds, flagged: bool) -> MutationResult:
         """Flag or unflag messages. A result per message."""
         return await (await services()).mutations.set_flag(message_ids, flagged)
-
-    @mcp.tool(annotations=CHANGE)
-    async def categorize(
-        message_ids: MessageIds,
-        add: Annotated[list[str] | None, Field(description="Existing category names to add.")] = None,
-        remove: Annotated[list[str] | None, Field(description="Category names to remove.")] = None,
-    ) -> MutationResult:
-        """Add and/or remove categories on messages; other categories stay. Only categories that
-        already exist in the mailbox can be added. A result per message."""
-        return await (await services()).mutations.categorize(message_ids, add=add, remove=remove)
 
     @mcp.tool(annotations=RELOCATE)
     async def move_messages(

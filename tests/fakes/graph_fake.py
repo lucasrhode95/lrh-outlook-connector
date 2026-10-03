@@ -104,7 +104,6 @@ class FakeGraph:
     # "no-items" / "not-json" (HTTP 200 without readable item results),
     # an int (that HTTP status), or a dict (that item result)
     me: str = "me@example.com"
-    master_categories: list[str] | None = field(default_factory=lambda: ["Red", "Project X"])  # None: 403
 
     # ------------------------------------------------------------------ helpers for tests
     def add_folder(
@@ -236,8 +235,6 @@ class FakeGraph:
                 message.is_read = props["IsRead"]
             elif field_uri == "item:Flag":
                 message.flagged = props["Flag"]["FlagStatus"] == "Flagged"
-            elif field_uri == "item:Categories":
-                message.categories = list(props["Categories"])
             else:
                 raise AssertionError(field_uri)
             out.append({"ResponseClass": "Success", "ResponseCode": "NoError"})
@@ -274,10 +271,6 @@ class FakeGraph:
     ):
         if method == "POST" and path == "/$batch":
             return self.batch(json.loads(request.content))
-        if path == "/me/outlook/masterCategories":
-            if self.master_categories is None:
-                return 403, {"error": {"code": "ErrorAccessDenied", "message": "Access is denied."}}, None
-            return 200, {"value": [{"displayName": n} for n in self.master_categories]}, None
         text_body = 'outlook.body-content-type="text"' in prefer
 
         if m := re.fullmatch(r"/me/mailFolders", path):

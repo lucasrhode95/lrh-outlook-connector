@@ -20,7 +20,7 @@ READ_TOOLS = {
     "propose_email",
 }  # fmt: skip
 WRITE_TOOLS = {"create_draft", "send_email"}
-CHANGE_TOOLS = {"set_read_state", "set_flag", "categorize"}
+CHANGE_TOOLS = {"set_read_state", "set_flag"}
 RELOCATE_TOOLS = {"move_messages", "delete_messages"}
 
 
@@ -163,5 +163,4 @@ async def test_mutation_tools_report_per_message(server: FastMCP, fake: FakeGrap
     deleted = await call(server, "delete_messages", message_ids=["m5"])
     assert deleted["counts"] == {"done": 1} and fake.messages["m5"].folder == "f-deleted"
     flagged = await call(server, "set_flag", message_ids=["m1"], flagged=True)
-    tagged = await call(server, "categorize", message_ids=["m1"], add=["Red"])
-    assert flagged["counts"] == tagged["counts"] == {"done": 1}
+    assert flagged["counts"] == {"done": 1}

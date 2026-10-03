@@ -103,7 +103,7 @@ lrh-outlook-connector/
 │  │     ├─ attachments.py         # attachment selection policy + safe filenames
 │  │     └─ packaging.py           # flat TXT vs single ZIP
 │  │  ├─ writes.py                 # drafts, confirmed send
-│  │  ├─ mutations.py              # read state, flag, categories, move, delete
+│  │  ├─ mutations.py              # read state, flag, move, delete
 │  │
 │  └─ surfaces/
 │     ├─ mcp_main.py               # FastMCP (stdio) tools
@@ -180,7 +180,7 @@ lrh-outlook-connector/
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `send` (`CreateItem` with `SendAndSaveCopy`), both with the body proven by the self-send. Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject (pending a live check, V2);
-  - `set_read` / `set_flag` / `set_categories` (`UpdateItem`, one `SetItemField` per message, read receipts suppressed);
+  - `set_read` / `set_flag` (`UpdateItem`, one `SetItemField` per message, read receipts suppressed);
   - `move` (`MoveItem`; a well-known target by `DistinguishedFolderId` as proven, any other folder by `FolderId`, pending a live check, V3);
   - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**).
   Conversation read state is done per message with `UpdateItem` (all copies in scope), so `ApplyConversationAction` is not used.
@@ -228,9 +228,9 @@ lrh-outlook-connector/
 - `send(message, user_confirmation)` re-derives the proposal and refuses unless the code matches (any change to the account, recipients, subject or body changes it), checks that the write token's `tid`/`oid` are the bound account, and sends once. On `WriteOutcomeUnknown` it looks for the message in Sent Items (subject and recipients, from five minutes before the send): found → `sent`; not found → `unknown`, with "do not send again before checking Outlook".
 
 **`mutations.py`:**
-- `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `categorize(add, remove)`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call. The write sign-in must be the bound account.
+- `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call. The write sign-in must be the bound account.
 - Flow: read every message's state through Graph (`get_summaries`, one `$batch`): unknown ids → `not_found`, hidden or outside the mail folders → `failed`, already as wanted → `unchanged` (nothing sent). Then send in chunks of 20, with a status per message (`done`, `not_found`, `failed` with the code). On `WriteOutcomeUnknown`, read the chunk back: `done` where the change is visible, `unknown` elsewhere. Changed messages are dropped from the summary cache.
-- `categorize` adds only names in the mailbox's category list (Graph `masterCategories`, pending a live check, V3), spelled as there; other categories stay.
+- Categories are not written (parked hard, 2026-10-03: never used). They are still read and returned with each message.
 - `move` resolves the target like `list_folders` (hidden folders refused) and refuses Deleted Items. `delete` moves to Deleted Items and leaves messages already in Deleted Items (or its subfolders) alone, since deleting there again would take them out of the folder view.
 
 **`export/`:**
@@ -278,7 +278,7 @@ The backend split is a **tenant-specific outcome**, not a design preference. The
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (send, set_read, set_flag, set_categories, move, delete, set_conversation_read). The service depends **only on these ports**, never on a concrete backend.
+- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (create_draft, send, set_read, set_flag, move, delete). The service depends **only on these ports**, never on a concrete backend.
 - **Adapters.** `remote/graph_mail.py` implements `MailReader`. `remote/ows.py` implements `MailWriter`. Each adapter maps its protocol to the same `domain` models, so swapping an adapter never changes the service, surfaces, store or tests above it.
 - **Wiring.** `bootstrap.py` picks one adapter per port, and one token profile per adapter, from `config.py`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
@@ -324,7 +324,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `propose_email(message)` | `writes.propose` | read-only |
 | `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
 | `move_messages(message_ids, folder)` · `delete_messages(message_ids)` | `mutations.move` / `mutations.delete` | destructive, idempotent |
-| `set_read_state(read, message_ids?, conversation_ids?, include_deleted_items)` · `set_flag(message_ids, flagged)` · `categorize(message_ids, add?, remove?)` | `mutations` | not read-only, not destructive, idempotent |
+| `set_read_state(read, message_ids?, conversation_ids?, include_deleted_items)` · `set_flag(message_ids, flagged)` | `mutations` | not read-only, not destructive, idempotent |
 
 Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`, all with `include_deleted_items`) and add `GET /api/messages/{id}/attachments/{attachment_id}` (download), `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 

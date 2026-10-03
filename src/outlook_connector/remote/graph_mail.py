@@ -243,13 +243,6 @@ class GraphMailReader:
                 out.failed[mid] = str(sub_failure(response))
         return out
 
-    @_named("reading the category list")
-    async def master_categories(self) -> list[str]:
-        data = await self._graph.get("/me/outlook/masterCategories", {"$select": "displayName"})
-        return [
-            c["displayName"] for c in data.get("value", []) if isinstance(c, dict) and c.get("displayName")
-        ]
-
     @_named("listing attachments")
     async def list_attachments(self, message_id: str) -> list[Attachment]:
         items, _ = await self._graph.collect(

@@ -67,40 +67,6 @@ class Mutations:
             lambda chunk: self.writer.set_flag(chunk, flagged),
         )
 
-    async def categorize(
-        self, message_ids: list[str], *, add: list[str] | None = None, remove: list[str] | None = None
-    ) -> MutationResult:
-        """Add and/or remove categories. Only categories that already exist in the mailbox's
-        category list can be added."""
-        add, remove = list(add or []), list(remove or [])
-        if not add and not remove:
-            raise InvalidRequest("Name categories to add or remove.")
-        if {c.lower() for c in add} & {c.lower() for c in remove}:
-            raise InvalidRequest("A category cannot be both added and removed.")
-        if add:
-            known = {name.lower(): name for name in await self.mailbox.reader.master_categories()}
-            missing = [c for c in add if c.lower() not in known]
-            if missing:
-                raise InvalidRequest(
-                    f"Unknown categor(ies): {', '.join(missing)}. Only existing categories can be added; "
-                    f"the mailbox has: {', '.join(sorted(known.values())) or 'none'}."
-                )
-            add = [known[c.lower()] for c in add]
-        targets: dict[str, list[str]] = {}
-
-        def target(m: MessageSummary) -> list[str]:
-            if m.id not in targets:
-                dropped = {c.lower() for c in remove + add}
-                targets[m.id] = [c for c in m.categories if c.lower() not in dropped] + add
-            return targets[m.id]
-
-        return await self._apply(
-            "categorize",
-            message_ids,
-            lambda m: [c.lower() for c in m.categories] == [c.lower() for c in target(m)],
-            lambda chunk: self.writer.set_categories({mid: targets[mid] for mid in chunk}),
-        )
-
     async def move(self, message_ids: list[str], folder: str) -> MutationResult:
         target = await self.mailbox.resolve_folder(folder)  # hidden folders are refused
         if await self.mailbox.under(target.id, "deleteditems"):

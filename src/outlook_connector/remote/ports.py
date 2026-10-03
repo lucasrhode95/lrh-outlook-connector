@@ -93,11 +93,7 @@ class MailReader(Protocol):
     async def download_mime(self, message_id: str, dest: Path) -> int: ...
 
     async def get_summaries(self, message_ids: list[str]) -> FetchedSummaries:
-        """Batch lookup of message summaries (folder, read state, flag, categories)."""
-        ...
-
-    async def master_categories(self) -> list[str]:
-        """The names of the mailbox's categories (Outlook's master category list)."""
+        """Batch lookup of message summaries (folder, read state, flag)."""
         ...
 
 
@@ -137,10 +133,6 @@ class MailWriter(Protocol):
     async def set_read(self, message_ids: list[str], is_read: bool) -> dict[str, str | None]: ...
 
     async def set_flag(self, message_ids: list[str], flagged: bool) -> dict[str, str | None]: ...
-
-    async def set_categories(self, categories: dict[str, list[str]]) -> dict[str, str | None]:
-        """The full category list per message (replaces what it had)."""
-        ...
 
     async def move(self, message_ids: list[str], folder: FolderTarget) -> dict[str, str | None]: ...
 

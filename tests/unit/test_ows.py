@@ -143,8 +143,6 @@ async def test_update_item_reports_each_message(fake: FakeGraph) -> None:
     assert await writer.set_read(["m5", "gone"], True) == {"m5": None, "gone": "ErrorItemNotFound"}
     assert fake.messages["m5"].is_read
     assert await writer.set_flag(["m1"], True) == {"m1": None} and fake.messages["m1"].flagged
-    assert await writer.set_categories({"m1": ["Red"], "m2": []}) == {"m1": None, "m2": None}
-    assert fake.messages["m1"].categories == ["Red"]
     (change,) = fake.ows_calls[0][1]["ItemChanges"][:1]
     assert change["ItemId"]["Id"] == "m5" and fake.ows_calls[0][1]["ConflictResolution"] == "AlwaysOverwrite"
 

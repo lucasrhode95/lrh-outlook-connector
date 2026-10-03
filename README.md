@@ -52,10 +52,10 @@ confirm; any change to the recipients, subject or body afterwards is refused. A 
 retried; if Outlook gives no clear answer, the connector looks in Sent Items and otherwise tells you
 to check before anything is sent again.
 
-Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `categorize`, `move_messages` and
+Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` and
 `delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)
-and return a result per message: done, unchanged, not found, failed or unknown. Only existing
-categories can be added. Delete moves to Deleted Items and never deletes permanently.
+and return a result per message: done, unchanged, not found, failed or unknown. Delete moves to
+Deleted Items and never deletes permanently.
 
 Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issues (the copies
 Outlook files when two versions of an item collide while syncing) are left out unless
