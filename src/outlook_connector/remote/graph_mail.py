@@ -123,7 +123,24 @@ class GraphMailReader:
                 "$select": mapping.SUMMARY_FIELDS,
             }
             items, link = await self._graph.page(path, params)
-        return [mapping.summary(i) for i in items], link
+        return await self._immutable([mapping.summary(i) for i in items]), link
+
+    async def _immutable(self, found: list[MessageSummary]) -> list[MessageSummary]:
+        """$search ignores ``Prefer: IdType="ImmutableId"`` (live 2026-10-03) and returns regular ids,
+        which change when a message moves. Read each hit's id back (a GET honours the header), so
+        search gives the same ids as every other call. A hit gone meanwhile is dropped; one whose
+        lookup failed keeps its search id."""
+        requests = {str(i): relative(f"/me/messages/{m.id}", {"$select": "id"}) for i, m in enumerate(found)}
+        responses = await self._graph.batch(requests) if requests else {}
+        out = []
+        for index, message in enumerate(found):
+            response = responses[str(index)]
+            if response.status == 404:
+                continue
+            if response.ok and isinstance(response.body.get("id"), str):
+                message.id = response.body["id"]
+            out.append(message)
+        return out
 
     @_named("listing a conversation")
     async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:

@@ -235,7 +235,7 @@ class OutgoingMessage(BaseModel):
 
     As a reply (``reply_to_message_id``), Outlook appends the quoted original below ``body``, and
     omitted recipients and subject default to Outlook's: the sender (and, with ``reply_all``, the
-    other recipients, minus you) and "RE: <subject>".
+    other recipients, minus you unless nobody else is left) and "RE: <subject>".
     """
 
     to: list[str] = Field(default_factory=list, description="Email addresses.")

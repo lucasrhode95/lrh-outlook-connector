@@ -223,7 +223,7 @@ lrh-outlook-connector/
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`writes.py`:**
-- `propose(message)` resolves the message exactly as it would be sent: the sender is the signed-in account (no Send As), recipients are validated and de-duplicated, and a reply gets Outlook's defaults when recipients or subject are omitted (the sender, or the original recipients for your own message; with reply-all also the original To and Cc; never yourself; "RE: <subject>"). It returns an `EmailProposal` with a **confirmation code**: a hash of the account fingerprint and every material field. Stateless: nothing is stored between calls.
+- `propose(message)` resolves the message exactly as it would be sent: the sender is the signed-in account (no Send As), recipients are validated and de-duplicated, and a reply gets Outlook's defaults when recipients or subject are omitted (the sender, or the original recipients for your own message; with reply-all also the original To and Cc; never yourself, unless nobody else is left, as for mail you sent only to yourself; "RE: <subject>"). It returns an `EmailProposal` with a **confirmation code**: a hash of the account fingerprint and every material field. Stateless: nothing is stored between calls.
 - `create_draft` saves the proposal into Drafts and reads it back through Graph; it never sends, so it needs no confirmation.
 - `send(message, user_confirmation)` re-derives the proposal and refuses unless the code matches (any change to the account, recipients, subject or body changes it), checks that the write token's `tid`/`oid` are the bound account, and sends once. On `WriteOutcomeUnknown` it looks for the message in Sent Items (subject and recipients, from five minutes before the send): found → `sent`; not found → `unknown`, with "do not send again before checking Outlook".
 
@@ -301,9 +301,10 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 - **Item key:** the Graph immutable id, within the account's own store. Immutable ids survive moves within the mailbox (verified).
 - **Conversation key:** Graph `conversationId`.
 - **Locations:**
-  - token cache: `%LOCALAPPDATA%/lrh-outlook-connector/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
+  - data directory: `%USERPROFILE%/.lrh-outlook-connector` on Windows, `$XDG_DATA_HOME/lrh-outlook-connector` (or `~/.local/share/...`) elsewhere. Not under AppData: Windows redirects files that packaged apps (the Claude desktop app and the MCP servers it starts) create there into a private per-app copy that terminals and Explorer never see, which split tokens, store and exports in two (found 2026-10-03);
+  - token cache: `<data directory>/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
   - `OUTLOOK_CONNECTOR_HOME` overrides the data directory (tests, portability);
-  - store: `%LOCALAPPDATA%/lrh-outlook-connector/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields;
+  - store: `<data directory>/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields;
   - exports and downloaded attachments: `<data directory>/exports/`, removed after 7 days. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
 
 ## 8. Surfaces: tools and endpoints
