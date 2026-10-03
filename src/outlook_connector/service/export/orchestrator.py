@@ -11,17 +11,18 @@ import asyncio
 import hashlib
 import shutil
 import tempfile
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Upstream
+from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Throttled, Upstream
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
     Attachment,
     ExportArtifact,
+    ExportError,
     ExportRequest,
     Message,
     MessageSummary,
@@ -29,12 +30,23 @@ from outlook_connector.domain.models import (
 from outlook_connector.service.export import attachments as policy
 from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
 from outlook_connector.service.export.packaging import TextFile, package
-from outlook_connector.service.mailbox import unavailable
-from outlook_connector.service.threads import Threads, base_subject, oldest_first
+from outlook_connector.service.failures import (
+    THROTTLING,
+    error_block,
+    error_from,
+    error_summary,
+    export_error,
+)
+from outlook_connector.service.threads import BODY_MISSING, Threads, base_subject, oldest_first
 
 RANGE_PAGE = 200
+SHOWN_FAILURES = 3
+UNREADABLE_HINT = (
+    "They may have been deleted or moved in Outlook, or Microsoft is throttling requests. "
+    "Refresh the list (or list/search again) and retry the export. Nothing was exported."
+)
 
-Downloaded = list[tuple[Attachment, Path | None]]  # None: unavailable
+Downloaded = list[tuple[Attachment, Path | ExportError]]  # the file, or why it could not be downloaded
 
 
 @dataclass
@@ -47,9 +59,9 @@ class Selection:
 @dataclass
 class Fetched:
     bodies: dict[str, Message]
-    missing: dict[str, str]  # message id -> why it has no body
+    missing: dict[str, ExportError]  # message id -> why it has no body
     attachments: dict[str, list[Attachment]]
-    attachment_failures: dict[str, str]  # message id -> why its attachments could not be listed
+    attachment_failures: dict[str, ExportError]  # message id -> why its attachments could not be listed
 
 
 class Exports:
@@ -81,12 +93,14 @@ class Exports:
                 if request.include_attachments
                 else {}
             )
-            files = self._render(summaries, fetched, downloads, request, selection)
+            failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, ExportError)]
+            summary = error_summary(list(missing.values()), failed_files, list(attachment_failures.values()))
+            files = self._render(summaries, fetched, downloads, request, selection, summary)
             base = files[0].folder if len(files) == 1 else _range_name(summaries)
             result = package(files, base_name=base)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
-        unavailable_files = sum(1 for items in downloads.values() for _, path in items if path is None)
+        counts = Counter(e.step for e in [*missing.values(), *failed_files, *attachment_failures.values()])
         return ExportArtifact(
             path=str(result.path),
             filename=result.filename,
@@ -95,10 +109,10 @@ class Exports:
             message_count=len(summaries),
             text_files=len(files),
             attachment_files=sum(len(f.attachments) for f in files),
-            attachments_unavailable=unavailable_files,
-            attachment_listing_failures=len(attachment_failures),
             messages_excluded=selection.excluded,
             unavailable_message_ids=list(missing),
+            export_errors=dict(counts),
+            error_summary=summary,
         )
 
     # ---------------------------------------------------------------- selection
@@ -122,9 +136,7 @@ class Exports:
         if request.by_range:
             await self._select_range(request, selected, excluded)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
-        cached = self.mailbox.store.summaries(explicit)  # listed before: bodies are fetched later
-        selected.update(cached)
-        known = await self._fetch([mid for mid in explicit if mid not in cached])
+        known = await self._fetch(explicit)
         selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
         merged, _ = await self.mailbox.finish(selected.values())  # copies across conversations and pages
         _check_limit({m.id: m for m in merged}, request.limit)
@@ -158,16 +170,24 @@ class Exports:
                 return
 
     async def _fetch(self, message_ids: list[str]) -> dict[str, Message]:
-        """Messages selected by id that this app has not listed, in batches; their bodies are reused."""
+        """Messages selected by id, read from the server in batches; their bodies are reused."""
         if not message_ids:
             return {}
         fetched = await self.reader.get_messages(message_ids)
-        if fetched.failed:
-            first = next(iter(fetched.failed.values()))
-            raise Upstream(f"{len(fetched.failed)} selected message(s) could not be read. First: {first}")
         gone = [mid for mid, m in fetched.messages.items() if m is None]
-        if gone:
-            raise NotFound(f"{len(gone)} selected message(s) are not on the server (deleted): {gone[0]}")
+        if fetched.failed or gone:
+            cases = [f"{mid} (failed: {f.describe()})" for mid, f in fetched.failed.items()]
+            cases += [f"{mid} (gone: not on the server)" for mid in gone]
+            shown = "; ".join(cases[:SHOWN_FAILURES]) + ("; ..." if len(cases) > SHOWN_FAILURES else "")
+            text = (
+                f"{len(cases)} of the {len(message_ids)} message(s) selected by id could not be read: "
+                f"{shown}. {UNREADABLE_HINT}"
+            )
+            if not fetched.failed:
+                raise NotFound(text)
+            if any(f.status in THROTTLING for f in fetched.failed.values()):
+                raise Throttled(text)
+            raise Upstream(text)
         return {mid: m for mid, m in fetched.messages.items() if m is not None}
 
     async def _attachments(
@@ -176,13 +196,16 @@ class Exports:
         *,
         inline: bool,
         skip: set[str],
-    ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
+    ) -> tuple[dict[str, list[Attachment]], dict[str, ExportError]]:
         """Attachments per message, and why listing failed for others. ``skip``: messages without
         a body (deleted on the server, or not fetched). Graph reports hasAttachments=false when a
         message has only inline attachments, so when files are exported (inline images included)
         every message is asked, in batches."""
         wanted = [m.id for m in summaries if m.id not in skip and (inline or m.has_attachments)]
-        return await self.reader.list_attachments_many(wanted) if wanted else ({}, {})
+        if not wanted:
+            return {}, {}
+        found, failed = await self.reader.list_attachments_many(wanted)
+        return found, {mid: export_error("listing attachments", f) for mid, f in failed.items()}
 
     # ---------------------------------------------------------------- attachments
 
@@ -216,11 +239,11 @@ class Exports:
                 if policy.wanted(attachment, content_id=cid, body_html=page_html):
                     jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
 
-        async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | None:
+        async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | ExportError:
             try:
                 await self.reader.download_attachment(message_id, attachment.id, target)
-            except ConnectorError:
-                return None
+            except ConnectorError as exc:
+                return error_from("downloading an attachment", exc)
             return target
 
         results = await asyncio.gather(*(fetch(*job) for job in jobs))
@@ -238,13 +261,14 @@ class Exports:
         downloads: dict[str, Downloaded],
         request: ExportRequest,
         selection: Selection,
+        summary: str | None,
     ) -> list[TextFile]:
         notes = [
             f"Left out: {count} message(s) {EXCLUSION_TEXT[key]}."
             for key, count in selection.excluded.items()
         ]
-        if fetched.missing:
-            notes.append(f"Unavailable: {len(fetched.missing)} message body(ies); they are marked below.")
+        if summary:
+            notes.append(summary)
         combine = "all" if request.format == "jsonl" else request.combine
         suffix = ".jsonl" if request.format == "jsonl" else ".txt"
         files: list[TextFile] = []
@@ -276,16 +300,18 @@ class Exports:
     ) -> RenderedMessage:
         """One message's text, attachment lines (TXT) and attachment records (JSONL)."""
         lines: list[str] = []
+        blocks: list[str] = []
         records: list[dict[str, Any]] = []
-        if message.id in fetched.attachment_failures:
-            lines.append(f"[Attachments could not be listed: {fetched.attachment_failures[message.id]}]")
+        listing_error = fetched.attachment_failures.get(message.id)
+        if listing_error:
+            blocks.append(error_block("The attachments of this message could not be listed.", listing_error))
         listed = fetched.attachments.get(message.id, [])
         if request.include_attachments:
             for attachment, path in downloads.get(message.id, []):
-                label = attachment.name or "attachment"
-                if path is None:
-                    lines.append(f"[Attachment unavailable: {label}]")
-                    records.append(_attachment_record(attachment, unavailable=True))
+                if isinstance(path, ExportError):
+                    name = attachment.name or "(unnamed)"
+                    blocks.append(error_block(f"The attachment {name} could not be downloaded.", path))
+                    records.append(_attachment_record(attachment, error=path))
                     continue
                 # The same bytes (a signature logo on every message) are stored once; every
                 # message that carries them points to that file.
@@ -313,19 +339,29 @@ class Exports:
                 if policy.listed(a):
                     lines.append(f"{a.name} ({policy.size_label(a.size)})")
                     records.append(_attachment_record(a))
-        reason = fetched.missing.get(message.id)
-        text = unavailable(reason) if reason else body_text(fetched.bodies[message.id], request.body)
-        return RenderedMessage(message, text, lines, unavailable=reason, attachments=records)
+        error = fetched.missing.get(message.id)
+        text = (
+            error_block(BODY_MISSING, error) if error else body_text(fetched.bodies[message.id], request.body)
+        )
+        return RenderedMessage(
+            message,
+            text,
+            lines,
+            export_error=error,
+            error_blocks=blocks,
+            attachments=records,
+            attachments_export_error=listing_error,
+        )
 
 
 def _attachment_record(
-    a: Attachment, *, file: str | None = None, unavailable: bool = False
+    a: Attachment, *, file: str | None = None, error: ExportError | None = None
 ) -> dict[str, Any]:
     record: dict[str, Any] = {"name": a.name, "size": a.size, "kind": a.kind, "inline": a.is_inline}
     if file:
         record["file"] = file
-    if unavailable:
-        record["unavailable"] = True
+    if error:
+        record["export_error"] = error.model_dump(mode="json")
     return record
 
 

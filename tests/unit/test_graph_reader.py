@@ -10,6 +10,7 @@ import pytest
 
 from outlook_connector.domain.errors import (
     AuthenticationRequired,
+    Failure,
     InvalidRequest,
     NotFound,
     Throttled,
@@ -168,9 +169,9 @@ async def test_persistently_throttled_items_are_reported_not_raised(fake: FakeGr
     fake.throttle_items = 10_000
     result = await reader_for(fake).get_messages(["m1", "m2"])
     assert set(result.failed) == {"m1", "m2"} and not result.messages
-    reason = result.failed["m1"]
-    assert "While fetching message bodies" in reason and "HTTP 429, ApplicationThrottled" in reason
-    assert "4 concurrent requests" in reason
+    assert result.failed["m1"] == Failure(
+        status=429, code="ApplicationThrottled", message="Too many requests."
+    )
 
 
 async def test_errors_name_the_operation_code_message_and_request_id(fake: FakeGraph) -> None:

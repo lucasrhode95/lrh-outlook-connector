@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from importlib import resources
 from typing import Any
+from urllib.parse import quote
 
 from pydantic import ValidationError
 from starlette.applications import Starlette
@@ -131,7 +132,6 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             since=_when(request, "since"),
             until=_when(request, "until"),
             limit=_int(request, "limit", 100),
-            refresh=_flag(request, "refresh", True),
             cursor=request.query_params.get("cursor") or None,
             include_deleted_items=_flag(request, "include_deleted_items"),
         )
@@ -187,7 +187,11 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
     async def export(request: Request) -> Response:
         export_request = ExportRequest.model_validate(await request.json())
         artifact = await (await context.services()).exports.export(export_request)
-        return FileResponse(artifact.path, media_type=artifact.content_type, filename=artifact.filename)
+        # The file's "Export errors: ..." line, for the UI to show after the download.
+        headers = {"X-Export-Errors": quote(artifact.error_summary)} if artifact.error_summary else None
+        return FileResponse(
+            artifact.path, media_type=artifact.content_type, filename=artifact.filename, headers=headers
+        )
 
     async def heartbeat(_: Request) -> Response:
         return JSONResponse({"ok": True})

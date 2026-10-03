@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Failure:
+    """What Microsoft answered to one failed request: the HTTP status (None: no response), the
+    service error code, its message (shortened, one line) and the request id."""
+
+    status: int | None
+    code: str | None = None
+    message: str | None = None
+    request_id: str | None = None
+
+    def describe(self) -> str:
+        """ "HTTP 429 TooManyRequests, request-id <id>" or "no response from Microsoft"."""
+        text = (
+            f"HTTP {self.status} {self.code or 'no error code'}"
+            if self.status
+            else "no response from Microsoft"
+        )
+        return f"{text}, request-id {self.request_id}" if self.request_id else text
+
 
 class ConnectorError(Exception):
-    """Base class for errors the surfaces know how to present."""
+    """Base class for errors the surfaces know how to present.
+
+    ``failure``: the Microsoft answer behind it, when a request failed (set by remote/transport.py).
+    """
+
+    failure: Failure | None = None
 
 
 class ConfigurationError(ConnectorError):

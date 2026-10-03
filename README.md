@@ -73,9 +73,25 @@ server's count for the window.
 
 `export_messages` takes conversations, message ids and/or a range (`since`, `until`, `folder`,
 `received_only`), up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one JSON record
-per message for agents; `txt` is for people. It reports what it left out or could not fetch; every
-exported message carries its message, conversation and Internet ids, and a message that exists in
-several folders is exported once, with `also_in` naming the other folders.
+per message for agents; `txt` is for people. Every exported message carries its message,
+conversation and Internet ids, and a message that exists in several folders is exported once, with
+`also_in` naming the other folders. Messages selected by id are read from the server: if any of them
+cannot be read (deleted or moved meanwhile, or still throttled), the export fails, writes nothing and
+says which ones and what to do. Anything else that cannot be exported (a body, an attachment, an
+attachment listing) is marked in place, and the result's `error_summary` (the file header's "Export
+errors" line) says how many and why. In TXT the mark is a block:
+
+```text
+[EXPORT ERROR] The body of this message could not be fetched.
+  Step:   fetching message bodies
+  Error:  HTTP 429 TooManyRequests, request-id <id>
+  Likely: Microsoft throttled the mailbox (about 4 parallel requests or 10,000 per 10 minutes); the message itself is fine
+  Fix:    export it again in a few minutes
+```
+
+In JSONL it is an `export_error` object (step, status, code, message, request id, likely cause,
+`retry`, fix) on the message record or on the failed attachment record (`attachments_export_error`
+when the attachments could not be listed). `get_thread` marks a body it cannot fetch the same way.
 
 **Throttling.** Microsoft Graph allows about 4 concurrent requests and 10,000 requests per 10 minutes
 per mailbox; each item of a `$batch` (at most 20) counts. The connector keeps at most 4 requests and
@@ -101,8 +117,9 @@ folder and date range. Deleted Items, Junk and Sync Issues are left out unless y
 "Deleted / Junk" (they are always shown inside those folders). Hidden folders are not listed.
 
 Exports and downloaded attachments go to the data directory (`%USERPROFILE%\.lrh-outlook-connector`)
-and are removed after a week. The local store there keeps only the folder cache and the summaries of
-listed messages (for the instant preview). Mail deleted on the server is gone here too.
+and are removed after a week. The local store there keeps only the account binding and the folder
+cache: no message data, so mail deleted on the server is gone here too. After an export with errors,
+the UI shows the file's "Export errors" line.
 
 ## Tests
 

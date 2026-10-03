@@ -69,7 +69,9 @@ path for you to read with your own file tools. save_message_mime saves the origi
 and/or a range (since/until/folder/received_only) in one call; at most 2,000 messages (`limit` \
 lowers that). For a large period, export the range rather than enumerating ids. format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
-"txt" is for people. Read messages_excluded and unavailable_message_ids in the result.
+"txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
+be exported are marked [EXPORT ERROR] in TXT and carry an export_error object in JSONL (step, \
+status, likely_cause, retry, fix).
 - Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
@@ -167,7 +169,6 @@ def build_server(context: AppContext) -> FastMCP:
         since: Annotated[datetime | None, Field(description="Inclusive lower bound (ISO 8601).")] = None,
         until: Annotated[datetime | None, Field(description="Inclusive upper bound (ISO 8601).")] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 25,
-        refresh: Annotated[bool, Field(description="false = local cache only (no network).")] = True,
         cursor: str | None = None,
         received_only: ReceivedOnly = False,
         include_deleted_items: IncludeDeleted = False,
@@ -184,7 +185,6 @@ def build_server(context: AppContext) -> FastMCP:
             since=_utc(since),
             until=_utc(until),
             limit=limit,
-            refresh=refresh,
             cursor=cursor,
             received_only=received_only,
             include_deleted_items=include_deleted_items,
