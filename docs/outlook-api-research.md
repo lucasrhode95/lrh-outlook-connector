@@ -159,6 +159,7 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
   - `CreateAttachmentFromLocalFile` uploads draft attachments (BROWSER). It is relevant only if send-with-attachments is added.
   - The B2 route `/messageservice/ows/…` returned 500 and is not usable.
   - `/outlookgatewayb2/graphql` is Outlook's internal GraphQL, not Microsoft Graph.
+- **Inbox rules (2026-10-04, read attempts only, nothing changed):** the read sign-in (Graph) has no `MailboxSettings.*` scope, so Graph's `messageRules` is out of reach. The write sign-in's Outlook token carries `MailboxSettings.ReadWrite`. Over OWS, `GetInboxRules` (the EWS name) returned `OwaOperationNotSupportedException`; `GetInboxRule` (the name Outlook Web's settings use) exists but returned `NullReferenceException` with an empty request body, so its request format is unknown. Next step: capture what Outlook Web sends when its rules page loads (BROWSER), then probe reads before any write.
 
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
