@@ -35,6 +35,24 @@ def test_index_embeds_the_session_token(client: TestClient) -> None:
     assert client.get("/static/app.js").status_code == 200
 
 
+def test_profile_name_and_photo(client: TestClient, fake: FakeGraph) -> None:
+    assert client.get("/api/me").json() == {"display_name": "Doe, Jane", "email": "me@example.com"}
+    assert client.get("/api/me/photo").status_code == 404  # no photo set
+    fake.photo = b"jpeg-bytes"
+    assert client.get("/api/me/photo").status_code == 404  # looked up once per process
+
+
+def test_profile_photo_is_served(fake: FakeGraph) -> None:
+    fake.photo = b"jpeg-bytes"
+    context = AppContext(tokens=FakeTokens(), http_client=httpx.AsyncClient(transport=fake.transport()))  # type: ignore[arg-type]
+    app = create_app(context, session_token=TOKEN, port=PORT, activity=Activity())
+    client = TestClient(app, base_url=f"http://127.0.0.1:{PORT}", headers={"X-Session-Token": TOKEN})
+    response = client.get("/api/me/photo")
+    assert response.status_code == 200 and response.content == b"jpeg-bytes"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert client.get("/api/me/photo", headers={"X-Session-Token": "wrong"}).status_code == 403
+
+
 def test_api_requires_the_session_token(client: TestClient) -> None:
     assert client.get("/api/folders", headers={"X-Session-Token": "wrong"}).status_code == 403
 

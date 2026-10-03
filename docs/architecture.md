@@ -263,6 +263,7 @@ lrh-outlook-connector/
   - a thread-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, threads show an accurate count. An expanded thread spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
   - a "Deleted / Junk" switch in the list header (it also covers Sync Issues), applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date range). The folder list shows only reachable folders;
   - attachment download buttons in the reader;
+  - your display name and profile photo in the header (Graph `/me` and `/me/photos/48x48/$value`, read once per process and kept in memory; initials when no photo is set);
   - a folder picker and a "recent, all mail" view;
   - an online search box;
   - an in-memory filter;
@@ -330,7 +331,7 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `move_messages(message_ids, folder)` · `delete_messages(message_ids)` | `mutations.move` / `mutations.delete` | destructive, idempotent |
 | `set_read_state(read, message_ids?, conversation_ids?, include_deleted_items)` · `set_flag(message_ids, flagged)` | `mutations` | not read-only, not destructive, idempotent |
 
-Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`, all with `include_deleted_items`) and add `GET /api/messages/{id}/attachments/{attachment_id}` (download), `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
+Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`, all with `include_deleted_items`) and add `GET /api/messages/{id}/attachments/{attachment_id}` (download), `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status`, `GET /api/me` and `/api/me/photo` (the header's name and photo), and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 
 ## 9. Cross-cutting concerns
 

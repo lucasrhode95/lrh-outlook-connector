@@ -19,6 +19,7 @@ from outlook_connector.domain.models import (
     Folder,
     Message,
     MessageSummary,
+    UserProfile,
 )
 
 BodyFormat = Literal["text", "html"]
@@ -92,6 +93,14 @@ class MailReader(Protocol):
     async def download_attachment(self, message_id: str, attachment_id: str, dest: Path) -> int: ...
 
     async def download_mime(self, message_id: str, dest: Path) -> int: ...
+
+    async def profile(self) -> UserProfile:
+        """The signed-in user's display name and address."""
+        ...
+
+    async def profile_photo(self) -> bytes | None:
+        """The signed-in user's photo (small), or None when none is set."""
+        ...
 
     async def get_summaries(self, message_ids: list[str]) -> FetchedSummaries:
         """Batch lookup of message summaries (folder, read state, flag)."""

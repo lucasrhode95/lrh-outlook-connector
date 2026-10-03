@@ -193,6 +193,13 @@ class Thread(Compact):
     body_errors: int = 0  # messages on this page whose body could not be fetched (see export_error)
 
 
+class UserProfile(Compact):
+    """The signed-in user, for the UI's header."""
+
+    display_name: str | None = None
+    email: str | None = None
+
+
 class ThreadSize(Compact):
     conversation_id: str
     messages: int  # what get_thread would list with the same include_deleted_items

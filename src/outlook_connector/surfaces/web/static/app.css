@@ -71,6 +71,12 @@ input[type=checkbox] { accent-color: var(--accent); }
   padding-top: 8px; border-top: 1px solid var(--line); }
 .calendar-hint { flex: 1; color: var(--muted); font-size: 11px; line-height: 1.3; }
 #account { margin-left: auto; }
+.account { display: inline-flex; align-items: center; gap: 8px; }
+.avatar { width: 26px; height: 26px; border-radius: 50%; overflow: hidden; flex: none; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--accent-soft); color: var(--accent);
+  font-size: 11px; font-weight: 600; }
+.avatar:empty { display: none; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
 .banner { padding: 8px 14px; background: var(--danger-soft); color: var(--danger); border-bottom: 1px solid var(--line); }
 
 .layout { flex: 1; display: grid; grid-template-columns: 240px minmax(360px, 1fr) minmax(320px, 40%); min-height: 0; }

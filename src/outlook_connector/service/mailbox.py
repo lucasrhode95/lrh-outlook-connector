@@ -37,6 +37,7 @@ from outlook_connector.domain.models import (
     MessageSummary,
     SearchResult,
     ThreadSize,
+    UserProfile,
 )
 from outlook_connector.remote.ports import MailReader
 from outlook_connector.service import cursors
@@ -71,6 +72,8 @@ class Mailbox:
         self._folders: dict[str, Folder] | None = None
         self._folder_refresh: asyncio.Task[list[Folder]] | None = None
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
+        self._profile: UserProfile | None = None
+        self._photo: tuple[bytes | None] | None = None  # (photo or None,) once looked up
 
     # ---------------------------------------------------------------- folders
 
@@ -323,6 +326,21 @@ class Mailbox:
         return out
 
     # ---------------------------------------------------------------- content
+
+    # ---------------------------------------------------------------- the signed-in user
+
+    async def profile(self) -> UserProfile:
+        """Display name and address, read once per process."""
+        if self._profile is None:
+            self._profile = await self.reader.profile()
+        return self._profile
+
+    async def photo(self) -> bytes | None:
+        """The user's small profile photo (None when none is set), read once per process; kept in
+        memory only."""
+        if self._photo is None:
+            self._photo = (await self.reader.profile_photo(),)
+        return self._photo[0]
 
     async def message(self, message_id: str, *, body: BodyKind = "unique") -> Message:
         try:

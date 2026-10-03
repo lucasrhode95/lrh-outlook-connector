@@ -123,6 +123,15 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             }
         )
 
+    async def me(_: Request) -> Response:
+        return _json(await (await context.services()).mailbox.profile())
+
+    async def photo(_: Request) -> Response:
+        data = await (await context.services()).mailbox.photo()
+        if data is None:
+            return JSONResponse({"error": "No profile photo.", "kind": "NotFound"}, status_code=404)
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
     async def folders(request: Request) -> Response:
         return _json(await (await context.services()).mailbox.folders(refresh=_flag(request, "refresh")))
 
@@ -199,6 +208,8 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
     routes = [
         Route("/", index),
         Route("/api/status", api(status)),
+        Route("/api/me", api(me)),
+        Route("/api/me/photo", api(photo)),
         Route("/api/folders", api(folders)),
         Route("/api/messages", api(messages)),
         Route("/api/messages/{message_id}", api(message)),

@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
-from outlook_connector.domain.errors import Failure
-from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary
+from outlook_connector.domain.errors import Failure, NotFound
+from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary, UserProfile
 from outlook_connector.remote import graph_mapping as mapping
 from outlook_connector.remote.graph import (
     PREFER_TEXT_BODY,
@@ -29,6 +29,7 @@ WELL_KNOWN = (
     "syncissues", "conflicts", "localfailures", "serverfailures",
 )  # fmt: skip
 MAX_CONVERSATION = 1000
+PHOTO_MAX_BYTES = 1024 * 1024
 
 
 def _iso(value: datetime) -> str:
@@ -306,6 +307,21 @@ class GraphMailReader:
             f"/me/messages/{message_id}/attachments/{attachment_id}/$value", dest
         )
         return size
+
+    @_named("reading your profile")
+    async def profile(self) -> UserProfile:
+        data = await self._graph.get("/me", {"$select": "displayName,mail,userPrincipalName"})
+        return UserProfile(
+            display_name=data.get("displayName"), email=data.get("mail") or data.get("userPrincipalName")
+        )
+
+    @_named("reading your profile photo")
+    async def profile_photo(self) -> bytes | None:
+        """The smallest standard size (48x48); None when no photo is set."""
+        try:
+            return await self._graph.get_bytes("/me/photos/48x48/$value", max_bytes=PHOTO_MAX_BYTES)
+        except NotFound:
+            return None
 
     @_named("downloading a message")
     async def download_mime(self, message_id: str, dest: Path) -> int:
