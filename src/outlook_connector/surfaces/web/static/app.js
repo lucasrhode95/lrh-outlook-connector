@@ -392,6 +392,15 @@ function sideColumn(date, { flagged, attachments }) {
     el("span", { class: "icons" }, flagged ? icon("flag", "flagged") : null, attachments ? icon("paperclip") : null));
 }
 
+// Ctrl+click (Cmd+click on a Mac) toggles a row's selection instead of opening it.
+function clickRow(event, checkbox, open) {
+  if (event.ctrlKey || event.metaKey) {
+    if (!checkbox.disabled) checkbox.click();
+    return;
+  }
+  open();
+}
+
 function selectBox(title, checked, disabled, onchange) {
   const box = el("input", { type: "checkbox", title, disabled, onclick: (event) => event.stopPropagation(), onchange });
   box.checked = checked;
@@ -417,7 +426,7 @@ function renderSingle(thread) {
   const response = message.meeting && RESPONSES.has(message.meeting.kind);
   return el("div", { class: "thread" },
     el("div", { class: rowClasses("thread-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response }),
-      onclick: () => openMessage(message.id) },
+      onclick: (event) => clickRow(event, checkbox, () => openMessage(message.id)) },
       checkbox,
       el("span", { class: "toggle" }),
       el("div", { class: "lines" },
@@ -441,7 +450,7 @@ function renderThread(thread) {
   const checkbox = selectBox("Export the whole thread", state.selectedThreads.has(thread.conversationId), !selectable,
     (event) => { toggle(state.selectedThreads, thread.conversationId, event.target.checked); render(); });
   const meeting = threadMeeting(messages);
-  const row = el("div", { class: rowClasses("thread-row", { unread }), onclick: () => expand(thread) },
+  const row = el("div", { class: rowClasses("thread-row", { unread }), onclick: (event) => clickRow(event, checkbox, () => expand(thread)) },
     checkbox,
     el("span", { class: "toggle" }, icon(thread.expanded ? "chevronDown" : "chevronRight")),
     el("div", { class: "lines" },
@@ -474,7 +483,8 @@ function renderMessage(message, thread) {
     (event) => { toggle(state.selectedMessages, message.id, event.target.checked); renderSelection(); });
   const response = message.meeting && RESPONSES.has(message.meeting.kind);
   return el("div", { class: rowClasses("msg-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response, matched: message.matched }),
-    title: message.matched ? "Matches the search" : undefined, onclick: () => openMessage(message.id) },
+    title: message.matched ? "Matches the search" : undefined,
+    onclick: (event) => clickRow(event, checkbox, () => openMessage(message.id)) },
     checkbox,
     el("div", { class: "lines" },
       el("div", { class: "who" }, kindBadge(message.meeting), who(message.sender), ...badges(message, true)),
