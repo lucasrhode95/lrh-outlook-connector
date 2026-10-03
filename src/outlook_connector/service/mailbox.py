@@ -4,11 +4,14 @@ Remote first: every call asks Outlook (Graph). The local store caches the folder
 message data is kept locally, so a message deleted on the server is gone here too.
 
 Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
-- Deleted Items, Junk Email and Sync Issues (Outlook's own conflict and failure copies) are left out
-  unless ``include_deleted_items`` (a folder asked for by name is always included).
-  Sent Items, Drafts and Outbox are included unless ``include_sent_items`` is false. Both flags
-  point the same way: true shows more mail, false filters more.
-- Hidden folders, and items outside the mail folders (e.g. Teams meeting records), are out of reach:
+- Deleted Items and Junk Email are left out unless ``include_deleted_items`` (a folder asked for by
+  name is always included).
+  Sent Items, Drafts and Outbox are included unless ``include_sent_items`` is false. List and
+  search also leave out meeting mail (invitations, replies to them, cancellations) when
+  ``include_meeting_mail`` is false: a conversation that is only meeting traffic disappears, one
+  with real replies shows through them. Every flag points the same way: true shows more mail.
+- Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
+  and items outside the mail folders (e.g. Teams meeting records) are out of reach:
   never listed, searched, counted, threaded or exported, and list_folders does not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.
@@ -37,6 +40,7 @@ from outlook_connector.domain.models import (
     MessageSummary,
     SearchResult,
     ThreadSize,
+    UserProfile,
 )
 from outlook_connector.remote.ports import MailReader
 from outlook_connector.service import cursors
@@ -46,7 +50,7 @@ log = logging.getLogger(__name__)
 
 FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
-SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")
+SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")  # out of reach
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
 FILTERED_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
@@ -71,6 +75,8 @@ class Mailbox:
         self._folders: dict[str, Folder] | None = None
         self._folder_refresh: asyncio.Task[list[Folder]] | None = None
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
+        self._profile: UserProfile | None = None
+        self._photo: tuple[bytes | None] | None = None  # (photo or None,) once looked up
 
     # ---------------------------------------------------------------- folders
 
@@ -135,7 +141,7 @@ class Mailbox:
 
         Hidden folders are not listed here: ``finish`` always leaves them out.
         """
-        left_out = set() if include_deleted_items else {"deleted_or_junk", "sync_issues"}
+        left_out = set() if include_deleted_items else {"deleted_or_junk"}
         if not include_sent_items:
             left_out.add("outgoing")
         categories = folder_categories(await self.folder_map())
@@ -200,6 +206,7 @@ class Mailbox:
         cursor: str | None = None,
         include_sent_items: bool = True,
         include_deleted_items: bool = False,
+        include_meeting_mail: bool = True,
         include_total: bool = False,
         detail: Detail = "full",
         skip_returned_copies: bool = True,
@@ -219,6 +226,7 @@ class Mailbox:
             since, until = _dt(state["since"]), _dt(state["until"])
             include_sent_items = bool(state["include_sent_items"])
             include_deleted_items = bool(state["include_deleted_items"])
+            include_meeting_mail = bool(state["include_meeting_mail"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
         skip = (
@@ -232,20 +240,26 @@ class Mailbox:
         link = state["link"] if state else None
         fetched: list[MessageSummary] = []
         drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
-        for _ in range(FILTERED_PAGES if drop else 1):
+
+        def kept(m: MessageSummary) -> bool:
+            return m.folder_id not in drop and (include_meeting_mail or m.meeting is None)
+
+        filtered = bool(drop) or not include_meeting_mail
+        for _ in range(FILTERED_PAGES if filtered else 1):
             page, link = await self.reader.list_messages(
                 folder_id=folder_id, since=since, until=until, page_size=limit, page=link
             )
             fetched += page
-            if not link or any(m.folder_id not in drop for m in page):
+            if not link or any(kept(m) for m in page):
                 break  # a page that exclusions empty entirely is skipped, within bounds
         complete = link is None
         items, excluded = await self.finish(fetched, skip)
+        items = _without_meetings(items, excluded) if not include_meeting_mail else items
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
         notes: list[str] = []
-        if skip and not complete:
-            notes.append("Folders are filtered after paging, so a page can hold fewer than limit messages.")
+        if filtered and not complete:
+            notes.append("Filters apply after paging, so a page can hold fewer than limit messages.")
         total = None
         if include_total and state is None:
             total = await self._count(folder_id, since, until, skip)
@@ -264,6 +278,7 @@ class Mailbox:
                 seen=seen,
                 include_sent_items=include_sent_items,
                 include_deleted_items=include_deleted_items,
+                include_meeting_mail=include_meeting_mail,
             )
         return MessagePage(
             items=_detail(items, detail),
@@ -324,6 +339,21 @@ class Mailbox:
 
     # ---------------------------------------------------------------- content
 
+    # ---------------------------------------------------------------- the signed-in user
+
+    async def profile(self) -> UserProfile:
+        """Display name and address, read once per process."""
+        if self._profile is None:
+            self._profile = await self.reader.profile()
+        return self._profile
+
+    async def photo(self) -> bytes | None:
+        """The user's small profile photo (None when none is set), read once per process; kept in
+        memory only."""
+        if self._photo is None:
+            self._photo = (await self.reader.profile_photo(),)
+        return self._photo[0]
+
     async def message(self, message_id: str, *, body: BodyKind = "unique") -> Message:
         try:
             message = await self.reader.get_message(
@@ -338,6 +368,15 @@ class Mailbox:
             return await self.reader.list_attachments(message_id)
         except NotFound:
             raise NotFound(f"Message {message_id} is not on the server ({GONE}).") from None
+
+    async def attachments_many(self, message_ids: list[str]) -> dict[str, list[Attachment]]:
+        """Attachments of many messages at once (batched), for the list's file chips. Messages whose
+        listing failed are left out: the chips are a convenience."""
+        ids = list(dict.fromkeys(message_ids))
+        if len(ids) > MAX_SIZE_LOOKUPS:
+            raise InvalidRequest(f"At most {MAX_SIZE_LOOKUPS} messages per request.")
+        found, _ = await self.reader.list_attachments_many(ids) if ids else ({}, {})
+        return found
 
     async def get_message(
         self, message_id: str, *, body: BodyKind = "unique", offset: int = 0, max_chars: int = 20000
@@ -370,6 +409,7 @@ class Mailbox:
         cursor: str | None = None,
         include_sent_items: bool = True,
         include_deleted_items: bool = False,
+        include_meeting_mail: bool = True,
         detail: Detail = "full",
     ) -> SearchResult:
         if not query.strip():
@@ -382,6 +422,7 @@ class Mailbox:
             since, until = _dt(state["since"]), _dt(state["until"])
             include_sent_items = bool(state["include_sent_items"])
             include_deleted_items = bool(state["include_deleted_items"])
+            include_meeting_mail = bool(state["include_meeting_mail"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
             # KQL only takes dates (and their time zone is the server's): ask for a day more on each
@@ -403,6 +444,7 @@ class Mailbox:
         )
         in_window = [m for m in found if _within(m, since, until)]
         items, excluded = await self.finish(in_window, skip)
+        items = _without_meetings(items, excluded) if not include_meeting_mail else items
         items, seen = _skip_seen(items, state)
 
         groups: dict[str, ConversationHit] = {}
@@ -436,8 +478,8 @@ class Mailbox:
         for hit in groups.values():
             hit.matching_messages = _detail(hit.matching_messages, detail)
         notes = ["Server-side search (Microsoft Graph); hits grouped by conversation, in rank order."]
-        if skip and link:
-            notes.append("Folders are filtered after paging, so a page can hold fewer than limit hits.")
+        if (skip or not include_meeting_mail) and link:
+            notes.append("Filters apply after paging, so a page can hold fewer than limit hits.")
         return SearchResult(
             query=query,
             conversations=list(groups.values()),
@@ -451,6 +493,7 @@ class Mailbox:
                 until=_iso(until),
                 include_sent_items=include_sent_items,
                 include_deleted_items=include_deleted_items,
+                include_meeting_mail=include_meeting_mail,
             )
             if link
             else None,
@@ -490,6 +533,14 @@ def merge_copies(items: list[MessageSummary], outgoing: set[str]) -> list[Messag
     return out
 
 
+def _without_meetings(items: list[MessageSummary], excluded: dict[str, int]) -> list[MessageSummary]:
+    """Leave out meeting mail, counting it in ``excluded``."""
+    kept = [m for m in items if m.meeting is None]
+    if len(kept) < len(items):
+        excluded["meeting_mail"] = excluded.get("meeting_mail", 0) + len(items) - len(kept)
+    return kept
+
+
 def _skip_seen(
     items: list[MessageSummary], state: dict[str, Any] | None
 ) -> tuple[list[MessageSummary], list[str]]:
@@ -517,14 +568,13 @@ def _detail(items: list[MessageSummary], detail: Detail) -> list[MessageSummary]
 def folder_categories(folders: dict[str, Folder]) -> dict[str, str]:
     """Folder id -> category, judged from the folder and its parents (a folder deleted in Outlook
     moves into Deleted Items with its mail; Sync Issues has subfolders):
-    "sync_issues" > "hidden" > "deleted_or_junk" > "outgoing". Folders without one are absent."""
+    "hidden" (also Sync Issues, which Graph does not mark hidden) > "deleted_or_junk" > "outgoing".
+    Folders without one are absent."""
     out: dict[str, str] = {}
     for folder in folders.values():
         chain = _ancestry(folder, folders)
         aliases = {f.well_known for f in chain if f.well_known}
-        if aliases & set(SYNC_ISSUES_FOLDERS):
-            out[folder.id] = "sync_issues"
-        elif any(f.hidden for f in chain):
+        if aliases & set(SYNC_ISSUES_FOLDERS) or any(f.hidden for f in chain):
             out[folder.id] = "hidden"
         elif aliases & set(DELETED_OR_JUNK_FOLDERS):
             out[folder.id] = "deleted_or_junk"

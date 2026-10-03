@@ -62,6 +62,65 @@ async def test_list_messages_pages_with_self_contained_cursor(mailbox: Mailbox) 
     assert [m.id for m in second.items] == ["m3", "m2"]
 
 
+async def test_meeting_mail_is_marked(mailbox: Mailbox, fake: FakeGraph) -> None:
+    when = {"dateTime": "2026-10-07T18:00:00.0000000", "timeZone": "UTC"}
+    fake.add(
+        FakeMessage("inv", "CCB", "f-inbox", "2026-10-02T09:00:00Z", conversation="c-ccb",
+                    meeting={"meetingMessageType": "meetingRequest", "meetingRequestType": "fullUpdate",
+                             "startDateTime": when, "endDateTime": when, "location": {"displayName": "Teams"},
+                             "isAllDay": False, "isOutOfDate": True})
+    )  # fmt: skip
+    fake.add(
+        FakeMessage("acc", "Accepted: CCB", "f-inbox", "2026-10-02T10:00:00Z", conversation="c-ccb",
+                    meeting={"meetingMessageType": "meetingTenativelyAccepted"})
+    )  # fmt: skip
+    items = {m.id: m for m in (await mailbox.list_messages(folder="inbox")).items}
+    invite = items["inv"].meeting
+    assert invite and invite.kind == "update" and invite.location == "Teams" and invite.out_of_date
+    assert invite.start == datetime(2026, 10, 7, 18, tzinfo=UTC)
+    assert items["acc"].meeting and items["acc"].meeting.kind == "tentative"
+    assert items["m5"].meeting is None  # ordinary mail
+
+
+def add_meeting_threads(fake: FakeGraph) -> None:
+    """c-only: an invitation, an RSVP and a cancellation. c-talk: an invitation with a real reply."""
+    for mid, kind, conv in (
+        ("inv1", "meetingRequest", "c-only"),
+        ("rsvp1", "meetingAccepted", "c-only"),
+        ("cxl1", "meetingCancelled", "c-only"),
+        ("inv2", "meetingRequest", "c-talk"),
+    ):
+        fake.add(FakeMessage(mid, "Sync", "f-inbox", "2026-10-02T09:00:00Z", conversation=conv,
+                             meeting={"meetingMessageType": kind}))  # fmt: skip
+    fake.add(FakeMessage("reply2", "RE: Sync", "f-inbox", "2026-10-02T10:00:00Z", conversation="c-talk"))
+
+
+async def test_meeting_mail_can_be_left_out(mailbox: Mailbox, fake: FakeGraph) -> None:
+    add_meeting_threads(fake)
+    everything = await mailbox.list_messages(folder="inbox")
+    assert {"inv1", "rsvp1", "cxl1", "inv2", "reply2"} <= {m.id for m in everything.items}  # default: shown
+    page = await mailbox.list_messages(folder="inbox", include_meeting_mail=False)
+    ids = {m.id for m in page.items}
+    assert "reply2" in ids  # the conversation with a real reply still shows, through the reply
+    assert not ids & {"inv1", "rsvp1", "cxl1", "inv2"}  # the meeting-only conversation is gone
+    assert page.coverage.excluded == {"meeting_mail": 4}
+    thread = await Threads(mailbox).get_thread("c-talk", include_bodies=False)
+    assert [t.message.id for t in thread.messages] == ["inv2", "reply2"]  # threads stay whole
+
+
+async def test_meeting_filter_survives_paging_and_search(mailbox: Mailbox, fake: FakeGraph) -> None:
+    add_meeting_threads(fake)
+    first = await mailbox.list_messages(include_meeting_mail=False, limit=2)
+    rest, cursor = list(first.items), first.cursor
+    while cursor:
+        page = await mailbox.list_messages(limit=2, cursor=cursor)
+        rest += page.items
+        cursor = page.cursor
+    assert not any(m.meeting for m in rest) and "reply2" in {m.id for m in rest}
+    result = await mailbox.search("Sync", include_meeting_mail=False)
+    assert [m.id for h in result.conversations for m in h.matching_messages] == ["reply2"]
+
+
 async def test_list_messages_folder_and_window(mailbox: Mailbox) -> None:
     page = await mailbox.list_messages(folder="inbox", since=datetime(2026, 9, 29, tzinfo=UTC))
     assert [m.id for m in page.items] == ["m5"] and page.coverage.complete
@@ -356,7 +415,7 @@ async def test_copies_split_across_pages_are_returned_once(mailbox: Mailbox, fak
     assert seen.count("cp-in") + seen.count("cp-out") == 1
 
 
-# ---------------------------------------------------------------- reach: hidden folders, Sync Issues
+# ---------------------------------------------------------------- reach: hidden folders and Sync Issues
 
 
 def add_out_of_reach_mail(fake: FakeGraph) -> None:
@@ -377,7 +436,7 @@ async def test_hidden_folders_and_items_outside_the_mail_folders_are_out_of_reac
     for include in (False, True):  # include_deleted_items never brings them back
         page = await mailbox.list_messages(include_deleted_items=include)
         assert not {"h1", "o1"} & {m.id for m in page.items}
-        assert page.coverage.excluded["hidden"] == 2
+        assert page.coverage.excluded["hidden"] == 3  # h1, o1 and c1 (Sync Issues)
         found = await mailbox.search("budget", include_deleted_items=include)
         assert not {"h1", "o1"} & {m.id for hit in found.conversations for m in hit.matching_messages}
     assert "f-hidden" not in {f.id for f in await mailbox.folders()}
@@ -386,17 +445,19 @@ async def test_hidden_folders_and_items_outside_the_mail_folders_are_out_of_reac
     assert (await mailbox.conversation_sizes(["c-h1", "c-o1"]))[0].messages == 0
 
 
-async def test_sync_issues_are_left_out_like_deleted_items_unless_asked(
-    mailbox: Mailbox, fake: FakeGraph
-) -> None:
+async def test_sync_issues_are_out_of_reach(mailbox: Mailbox, fake: FakeGraph) -> None:
     add_out_of_reach_mail(fake)
-    page = await mailbox.list_messages()
-    assert "c1" not in {m.id for m in page.items} and page.coverage.excluded["sync_issues"] == 1
-    assert "c1" in {m.id for m in (await mailbox.list_messages(include_deleted_items=True)).items}
-    # listed and reachable by name, even though Graph marks the Sync Issues folder hidden
-    assert {"f-sync", "f-conflicts"} <= {f.id for f in await mailbox.folders()}
-    named = await mailbox.list_messages(folder="Sync Issues/Conflicts")
-    assert [m.id for m in named.items] == ["c1"]
+    fake.add_folder("f-sync2", "Sync Issues 2", alias="syncissues")  # Graph does not mark it hidden
+    fake.add_folder("f-local", "Local Failures", parent="f-sync2", alias="localfailures")
+    fake.add(FakeMessage("l1", "budget l1", "f-local", "2026-10-01T09:00:00Z", conversation="c-l1"))
+    for include in (False, True):  # include_deleted_items never brings them back
+        page = await mailbox.list_messages(include_deleted_items=include)
+        assert not {"c1", "l1"} & {m.id for m in page.items}
+        found = await mailbox.search("budget", include_deleted_items=include)
+        assert not {"c1", "l1"} & {m.id for hit in found.conversations for m in hit.matching_messages}
+    assert not {"f-sync", "f-conflicts", "f-sync2", "f-local"} & {f.id for f in await mailbox.folders()}
+    with pytest.raises(InvalidRequest, match="hidden folder"):
+        await mailbox.resolve_folder("Sync Issues 2/Local Failures")
 
 
 async def test_a_folder_deleted_in_outlook_counts_as_deleted_items(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -411,7 +472,7 @@ async def test_total_counts_only_reachable_folders_in_scope(mailbox: Mailbox, fa
     page = await mailbox.list_messages(include_total=True)
     assert page.coverage.server_total == 4  # m1, m2, m3, m5: not Junk, Sync Issues, hidden or deleted
     with_deleted = await mailbox.list_messages(include_total=True, include_deleted_items=True)
-    assert with_deleted.coverage.server_total == 7  # + m4 (Junk), c1 (Sync Issues), d1 (deleted folder)
+    assert with_deleted.coverage.server_total == 6  # + m4 (Junk), d1 (deleted folder); never Sync Issues
 
 
 async def test_mail_in_a_folder_created_meanwhile_is_found(mailbox: Mailbox, fake: FakeGraph) -> None:

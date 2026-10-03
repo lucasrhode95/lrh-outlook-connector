@@ -17,12 +17,12 @@ ExportFormat = Literal["txt", "jsonl"]
 Detail = Literal["compact", "full"]
 
 # Why messages were left out of a result (Coverage.excluded, ExportArtifact.messages_excluded keys).
-ExclusionReason = Literal["deleted_or_junk", "sync_issues", "outgoing", "hidden"]
+ExclusionReason = Literal["deleted_or_junk", "outgoing", "hidden", "meeting_mail"]
 EXCLUSION_TEXT: dict[str, str] = {
     "deleted_or_junk": "in Deleted Items or Junk Email (include_deleted_items=false)",
-    "sync_issues": "in Sync Issues, Outlook's conflict and failure copies (include_deleted_items=false)",
     "outgoing": "in Sent Items, Drafts or Outbox (include_sent_items=false)",
-    "hidden": "in hidden folders or outside the mail folders (out of reach)",
+    "hidden": "in hidden folders, Sync Issues, or outside the mail folders (out of reach)",
+    "meeting_mail": "meeting invitations, replies and cancellations (include_meeting_mail=false)",
 }
 
 
@@ -62,8 +62,22 @@ class Folder(Compact):
     total: int | None = None
     unread: int | None = None
     child_count: int | None = None
-    hidden: bool = False  # Graph's isHidden. Hidden folders are out of reach and never listed, except
-    # Sync Issues, which Outlook hides from its mail view but which stays reachable like Deleted Items.
+    hidden: bool = False  # Graph's isHidden. Hidden folders (and Sync Issues) are out of reach.
+
+
+MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
+
+
+class Meeting(Compact):
+    """Meeting mail (Exchange's own item type, not guessed from the subject): an invitation or its
+    update, a cancellation, or a reply to an invitation."""
+
+    kind: MeetingKind
+    start: datetime | None = None
+    end: datetime | None = None
+    all_day: bool = False
+    location: str | None = None
+    out_of_date: bool = False  # a newer update replaced this invitation
 
 
 class MessageSummary(Compact):
@@ -85,6 +99,7 @@ class MessageSummary(Compact):
     flagged: bool = False
     preview: str | None = None
     internet_message_id: str | None = None
+    meeting: Meeting | None = None  # set on meeting mail only
     also_in: list[str] = Field(default_factory=list)  # folders holding another copy (same Internet id)
 
 
@@ -193,6 +208,13 @@ class Thread(Compact):
     body_errors: int = 0  # messages on this page whose body could not be fetched (see export_error)
 
 
+class UserProfile(Compact):
+    """The signed-in user, for the UI's header."""
+
+    display_name: str | None = None
+    email: str | None = None
+
+
 class ThreadSize(Compact):
     conversation_id: str
     messages: int  # what get_thread would list with the same include_deleted_items
@@ -212,6 +234,7 @@ class ExportRequest(BaseModel):
     until: datetime | None = None
     folder: str | None = None  # path, alias or id; None = whole mailbox
     include_sent_items: bool = True  # false: leave out Sent Items, Drafts and Outbox (range only)
+    include_meeting_mail: bool = True  # false: leave out invitations, RSVPs, cancellations (range only)
     limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
     format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
     include_attachments: bool = False
@@ -221,7 +244,13 @@ class ExportRequest(BaseModel):
 
     @property
     def by_range(self) -> bool:
-        return bool(self.since or self.until or self.folder or not self.include_sent_items)
+        return bool(
+            self.since
+            or self.until
+            or self.folder
+            or not self.include_sent_items
+            or not self.include_meeting_mail
+        )
 
 
 class ExportArtifact(Compact):

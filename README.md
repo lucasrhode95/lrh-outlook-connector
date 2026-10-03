@@ -57,12 +57,13 @@ Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` an
 and return a result per message: done, unchanged, not found, failed or unknown. Delete moves to
 Deleted Items and never deletes permanently.
 
-Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issues (the copies
-Outlook files when two versions of an item collide while syncing) are left out unless
+Every tool follows the same scope rules: Deleted Items and Junk Email are left out unless
 `include_deleted_items=true` (a folder you name is always included; a subfolder counts with its
 parent, so a folder you deleted in Outlook counts as Deleted Items). `include_sent_items=false`
-also leaves out Sent Items, Drafts and Outbox (included by default). Both flags point the same way:
-true shows more mail, false filters more. `coverage.excluded` counts what was left out. Copies of one
+also leaves out Sent Items, Drafts and Outbox (included by default), and
+`include_meeting_mail=false` leaves out invitations, RSVPs and cancellations in list, search and
+range exports (a conversation with real replies still shows through them). Every flag points the
+same way: true shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off. `coverage.excluded` counts what was left out. Copies of one
 message (mail sent to yourself or to a list you are on) are shown once, with `also_in` naming the
 other folders.
 
@@ -115,8 +116,9 @@ message is a plain row; a real thread shows its message count across all folders
 top), search the mailbox, filter what is loaded, read messages and download their attachments, tick
 threads or single messages, and export them as one `.txt` or `.zip` (one file per thread, one for
 everything, or one per message; attachments optional). "export this view" exports the whole current
-folder and date range. Deleted Items, Junk and Sync Issues are left out unless you tick
-"Deleted / Junk" (they are always shown inside those folders). Hidden folders are not listed.
+folder and date range. Deleted Items and Junk are left out unless you tick "Deleted / Junk"
+(they are always shown inside those folders). Hidden folders and Sync Issues (classic Outlook's
+conflict copies) are not listed at all.
 
 Exports and downloaded attachments go to the data directory (`%USERPROFILE%\.lrh-outlook-connector`)
 and are removed after a week. The local store there keeps only the account binding and the folder
