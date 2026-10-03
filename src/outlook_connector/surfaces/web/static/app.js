@@ -623,11 +623,35 @@ setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_
 
 (async function start() {
   const status = await json("/api/status");
-  $("account").textContent = status.account || "";
+  $("account-name").textContent = status.account || "";
   if (!status.signed_in.read) {
     showBanner(`Not signed in. Run \`${status.sign_in_command}\` in a terminal, then reload this page.`);
     return;
   }
   renderExportView();
+  loadProfile(); // the header's name and photo; never blocks the mail
   await Promise.all([loadFolders(), loadList(true)]); // independent: load side by side
 })();
+
+// Your display name and photo in the header. Plain fetches: a failure here only keeps the address
+// and the initials, and never touches the error banner.
+async function loadProfile() {
+  const headers = { "X-Session-Token": TOKEN };
+  try {
+    const response = await fetch("/api/me", { headers });
+    if (!response.ok) return;
+    const me = await response.json();
+    const name = me.display_name || me.email || "";
+    $("account-name").textContent = name;
+    $("account").title = me.email || "";
+    $("avatar").textContent = initials(name);
+    const photo = await fetch("/api/me/photo", { headers });
+    if (photo.ok) $("avatar").replaceChildren(el("img", { src: URL.createObjectURL(await photo.blob()), alt: "" }));
+  } catch { /* the address stays */ }
+}
+
+// "Rhode, Lucas" (Outlook's "Last, First") or "Lucas Rhode" -> "LR"
+function initials(name) {
+  const parts = name.includes(",") ? name.split(",").reverse() : name.split(/\s+/);
+  return parts.map((part) => part.trim()[0] || "").join("").slice(0, 2).toUpperCase();
+}

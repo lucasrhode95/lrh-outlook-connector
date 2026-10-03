@@ -105,6 +105,8 @@ class FakeGraph:
     # "no-items" / "not-json" (HTTP 200 without readable item results),
     # an int (that HTTP status), or a dict (that item result)
     me: str = "me@example.com"
+    display_name: str = "Doe, Jane"
+    photo: bytes | None = None  # the user's 48x48 profile photo; None: no photo set
 
     # ------------------------------------------------------------------ helpers for tests
     def add_folder(
@@ -278,6 +280,16 @@ class FakeGraph:
                 return status, {"error": {"code": code, "message": "Injected failure."}}, None
         text_body = 'outlook.body-content-type="text"' in prefer
 
+        if path == "/me":
+            return (
+                200,
+                {"displayName": self.display_name, "mail": self.me, "userPrincipalName": self.me},
+                None,
+            )
+        if path == "/me/photos/48x48/$value":
+            if self.photo is None:
+                return 404, {"error": {"code": "ImageNotFound", "message": "No photo."}}, None
+            return 200, None, self.photo
         if m := re.fullmatch(r"/me/mailFolders", path):
             return (
                 200,

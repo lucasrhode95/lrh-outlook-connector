@@ -32,7 +32,7 @@ Snapshot **2026-10-03** (end of day): the read MVP, drafts and send (W0, W1) and
 | L2 `search_messages` | **Done** | Graph `$search`, grouped by conversation with each conversation's message count, exact date bounds, coverage |
 | E1 Export | **Done** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download. Also a range selection (`since`/`until`/`folder`/`include_sent_items`), `limit` up to 2,000, source ids per message, counts of what was left out or unavailable; copies named per message (`also_in`). `format=jsonl` for agents. |
 | M1 MCP surface | **Done** (read-only tools) | Read tools; files returned as local paths (architecture §8) |
-| U1 Local UI | **Done** | Thread-grouped list (opens on the Inbox; real conversation sizes, one-message conversations as plain rows; newest message on top; merged copies), search, in-memory filter, selection, export and "export this view", attachment downloads, Deleted/Junk toggle (v4 O3) |
+| U1 Local UI | **Done** | Thread-grouped list (opens on the Inbox; real conversation sizes, one-message conversations as plain rows; newest message on top; merged copies), search, in-memory filter, selection, export and "export this view", attachment downloads, Deleted/Junk toggle (v4 O3); your display name and profile photo in the header, switches for on/off options and a segmented control for how export files are split (2026-10-04) |
 
 ## Hardening (90-day review and live check, 2026-10-02)
 

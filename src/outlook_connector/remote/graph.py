@@ -67,6 +67,15 @@ class Graph:
         data = await self._transport.json("GET", url, profile=self._profile, headers=_prefer(*prefer))
         return data if isinstance(data, dict) else {}
 
+    async def get_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """A small binary GET (a profile photo), read whole."""
+        response = await self._transport.request(
+            "GET", self._absolute(path), profile=self._profile, headers=_prefer()
+        )
+        if len(response.content) > max_bytes:
+            raise Upstream("Response too large.")
+        return response.content
+
     async def post(self, path: str, body: Any) -> dict[str, Any]:
         """POST for read-style APIs (search). Idempotent, so retried like a GET."""
         data = await self._transport.json(
