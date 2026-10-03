@@ -96,22 +96,22 @@ class Threads:
 
         entries: list[ThreadMessage] = []
         next_start: int | None = None
-        retryable = 0  # bodies the server could not deliver now (not deleted ones)
         if include_bodies:
             budget = max_chars
             index = start
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
                 bodies, missing = await self.bodies(chunk)
-                retryable += sum(1 for error in missing.values() if error.retry)
                 for offset, summary in enumerate(chunk):
-                    found = bodies.get(summary.id)
-                    text = found.body(body) if found else error_block(BODY_MISSING, missing[summary.id])
+                    error = missing.get(summary.id)
+                    text = error_block(BODY_MISSING, error) if error else bodies[summary.id].body(body)
                     if len(text) > budget and entries:
                         next_start = index + offset
                         break
                     cut = len(text) > budget
-                    entries.append(ThreadMessage(message=summary, text=text[:budget], truncated=cut))
+                    entries.append(
+                        ThreadMessage(message=summary, text=text[:budget], truncated=cut, export_error=error)
+                    )
                     budget -= min(len(text), budget)
                     if budget <= 0 and index + offset + 1 < len(items):
                         next_start = index + offset + 1
@@ -119,10 +119,12 @@ class Threads:
                 index += len(chunk)
         else:
             entries = [ThreadMessage(message=m) for m in items[start:]]
-        if retryable:
+        errors = [e.export_error for e in entries if e.export_error]
+        retryable = sum(1 for error in errors if error.retry)
+        if errors:
             notes.append(
-                f"{retryable} message body(ies) could not be fetched now; they are marked [EXPORT ERROR] "
-                "in the text."
+                f"{len(errors)} message body(ies) could not be fetched ({retryable} may work on a retry); "
+                "those messages carry export_error and an [EXPORT ERROR] block in their text."
             )
 
         return Thread(
@@ -145,6 +147,7 @@ class Threads:
                 excluded=excluded,
                 notes=notes,
             ),
+            body_errors=len(errors),
         )
 
     async def bodies(

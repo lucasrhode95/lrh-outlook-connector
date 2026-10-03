@@ -218,12 +218,12 @@ lrh-outlook-connector/
   1. fetch the conversation from remote;
   2. **sort locally**, oldest first;
   3. hydrate bodies via `$batch` when requested (a body that cannot be fetched is marked in the text).
-  Its cursor carries the original selection (conversation, body options, `include_deleted_items`, `max_chars`). Coverage is incomplete when the server listing was truncated (over 1,000 messages) or a body could not be fetched for a reason a retry could fix.
+  Its cursor carries the original selection (conversation, body options, `include_deleted_items`, `max_chars`). Coverage is incomplete when the server listing was truncated (over 1,000 messages) or a body could not be fetched for a reason a retry could fix. Every body that could not be fetched, retryable or not, sets `export_error` on its `ThreadMessage`, is counted in `Thread.body_errors` and is named in a coverage note.
 - `bodies()` returns a body or an `ExportError` for every message (still throttled, access denied, deleted meanwhile); the text shows the `[EXPORT ERROR]` block (`failures.py`) in place of the body.
 
 **`failures.py`:**
 - One classification of failed Microsoft requests for exports and threads: `export_error(step, failure)` turns the remote layer's `Failure` (status, code, shortened message, request id; status `None` = no response) into an `ExportError` with the likely cause, `retry` and the fix: 429/503 throttled (retry), other 5xx or no response service or network (retry), 403 access denied, 404 deleted or moved during the export, anything else unexpected (report it with the request id).
-- `error_block` renders the TXT block used by exports and `get_thread`; `error_summary` writes the export header's one "Export errors: …" line.
+- `error_block` renders the TXT block used by exports and `get_thread` (which also returns the `ExportError` itself); `error_summary` writes the export header's one "Export errors: …" line.
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`writes.py`:**
