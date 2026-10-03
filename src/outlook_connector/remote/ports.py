@@ -92,6 +92,26 @@ class MailReader(Protocol):
 
     async def download_mime(self, message_id: str, dest: Path) -> int: ...
 
+    async def get_summaries(self, message_ids: list[str]) -> FetchedSummaries:
+        """Batch lookup of message summaries (folder, read state, flag)."""
+        ...
+
+
+@dataclass(frozen=True)
+class FolderTarget:
+    """A move target: a well-known folder by its alias, or any folder by its Graph id."""
+
+    folder_id: str
+    well_known: str | None = None
+
+
+@dataclass
+class FetchedSummaries:
+    """A batch lookup: every requested id is in exactly one of the two maps."""
+
+    summaries: dict[str, MessageSummary | None] = field(default_factory=dict)  # None: not on the server
+    failed: dict[str, str] = field(default_factory=dict)
+
 
 class MailWriter(Protocol):
     """Writes as the signed-in account. Each call is sent once and never retried."""
@@ -106,4 +126,16 @@ class MailWriter(Protocol):
 
     async def send(self, message: EmailProposal) -> None:
         """Send and keep a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell."""
+        ...
+
+    # Mutations: {message id: None when done, else the backend's response code}.
+
+    async def set_read(self, message_ids: list[str], is_read: bool) -> dict[str, str | None]: ...
+
+    async def set_flag(self, message_ids: list[str], flagged: bool) -> dict[str, str | None]: ...
+
+    async def move(self, message_ids: list[str], folder: FolderTarget) -> dict[str, str | None]: ...
+
+    async def delete(self, message_ids: list[str]) -> dict[str, str | None]:
+        """Move to Deleted Items. There is no hard delete."""
         ...

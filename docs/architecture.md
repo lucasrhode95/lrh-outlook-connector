@@ -81,7 +81,7 @@ lrh-outlook-connector/
 │  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference, downloads
 │  │  ├─ graph_mail.py             # MailReader over Graph
 │  │  └─ graph_mapping.py          # Graph JSON → domain models
-│  │  ├─ ows.py                    # MailWriter over Outlook Web (OWS): drafts, send
+│  │  ├─ ows.py                    # MailWriter over Outlook Web (OWS): drafts, send, mutations
 │  │  ├─ ids.py                    # Graph ↔ OWS ids
 │  │
 │  ├─ domain/
@@ -103,6 +103,7 @@ lrh-outlook-connector/
 │  │     ├─ attachments.py         # attachment selection policy + safe filenames
 │  │     └─ packaging.py           # flat TXT vs single ZIP
 │  │  ├─ writes.py                 # drafts, confirmed send
+│  │  ├─ mutations.py              # read state, flag, move, delete
 │  │
 │  └─ surfaces/
 │     ├─ mcp_main.py               # FastMCP (stdio) tools
@@ -179,15 +180,15 @@ lrh-outlook-connector/
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `send` (`CreateItem` with `SendAndSaveCopy`), both with the body proven by the self-send. Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject (pending a live check, V2);
-  - `set_read` / `set_flag` / `set_categories` (`UpdateItem`);
-  - `move` (`MoveItem`);
-  - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**);
-  - `set_conversation_read` (`ApplyConversationAction`).
-- Returns per-item `WriteResult`s. Never retries.
+  - `set_read` / `set_flag` (`UpdateItem`, one `SetItemField` per message, read receipts suppressed);
+  - `move` (`MoveItem`; a well-known target by `DistinguishedFolderId` as proven, any other folder by `FolderId`, pending a live check, V3);
+  - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**).
+  Conversation read state is done per message with `UpdateItem` (all copies in scope), so `ApplyConversationAction` is not used.
+- Mutations return an outcome per message (`None`, or Outlook's `ResponseCode`). Never retries.
 
 ### 5.6 `domain/models.py` and `errors.py`
 
-- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` (to/cc/bcc, subject, plain-text body, optional `reply_to_message_id` and `reply_all`), `EmailProposal`, `DraftResult` and `SendResult`.
+- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` (to/cc/bcc, subject, plain-text body, optional `reply_to_message_id` and `reply_all`), `EmailProposal`, `DraftResult` and `SendResult`; mutations add `ItemResult` and `MutationResult`.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
 - Errors: `AuthenticationRequired`, `AccountMismatch`, `NotFound`, `InvalidRequest`, `Throttled`, `Upstream`, `WriteOutcomeUnknown`. Each surface maps them to its own protocol.
@@ -225,8 +226,12 @@ lrh-outlook-connector/
 - `propose(message)` resolves the message exactly as it would be sent: the sender is the signed-in account (no Send As), recipients are validated and de-duplicated, and a reply gets Outlook's defaults when recipients or subject are omitted (the sender, or the original recipients for your own message; with reply-all also the original To and Cc; never yourself, unless nobody else is left, as for mail you sent only to yourself; "RE: <subject>"). It returns an `EmailProposal` with a **confirmation code**: a hash of the account fingerprint and every material field. Stateless: nothing is stored between calls.
 - `create_draft` saves the proposal into Drafts and reads it back through Graph; it never sends, so it needs no confirmation.
 - `send(message, user_confirmation)` re-derives the proposal and refuses unless the code matches (any change to the account, recipients, subject or body changes it), checks that the write token's `tid`/`oid` are the bound account, and sends once. On `WriteOutcomeUnknown` it looks for the message in Sent Items (subject and recipients, from five minutes before the send): found → `sent`; not found → `unknown`, with "do not send again before checking Outlook".
-- `move` / `delete` / `set_read` / `set_flag` / `set_categories` act on **explicit ids only**. Folder targets are resolved via `list_folders`.
-- Every write returns per-item results and updates the store afterwards.
+
+**`mutations.py`:**
+- `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call. The write sign-in must be the bound account.
+- Flow: read every message's state through Graph (`get_summaries`, one `$batch`): unknown ids → `not_found`, hidden or outside the mail folders → `failed`, already as wanted → `unchanged` (nothing sent). Then send in chunks of 20, with a status per message (`done`, `not_found`, `failed` with the code). On `WriteOutcomeUnknown`, read the chunk back: `done` where the change is visible, `unknown` elsewhere. Changed messages are dropped from the summary cache.
+- Categories are not written (parked hard, 2026-10-03: never used). They are still read and returned with each message.
+- `move` resolves the target like `list_folders` (hidden folders refused) and refuses Deleted Items. `delete` moves to Deleted Items and leaves messages already in Deleted Items (or its subfolders) alone, since deleting there again would take them out of the folder view.
 
 **`export/`:**
 - `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. It hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids`, `attachments_unavailable` (files) and `attachment_listing_failures` (messages). A missing body is marked in the file; the export still completes.
@@ -273,7 +278,7 @@ The backend split is a **tenant-specific outcome**, not a design preference. The
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (send, set_read, set_flag, set_categories, move, delete, set_conversation_read). The service depends **only on these ports**, never on a concrete backend.
+- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (create_draft, send, set_read, set_flag, move, delete). The service depends **only on these ports**, never on a concrete backend.
 - **Adapters.** `remote/graph_mail.py` implements `MailReader`. `remote/ows.py` implements `MailWriter`. Each adapter maps its protocol to the same `domain` models, so swapping an adapter never changes the service, surfaces, store or tests above it.
 - **Wiring.** `bootstrap.py` picks one adapter per port, and one token profile per adapter, from `config.py`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
@@ -318,8 +323,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `create_draft(message)` | `writes.create_draft` | not read-only, not destructive, closed world |
 | `propose_email(message)` | `writes.propose` | read-only |
 | `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
-| `move_messages(ids, folder)` · `delete_messages(ids)` | `writes.move` / `writes.delete` | destructive |
-| `set_read_state(ids, read)` · `set_flag(ids, flagged)` · `set_categories(ids, categories)` | `writes.update` | not read-only, not destructive |
+| `move_messages(message_ids, folder)` · `delete_messages(message_ids)` | `mutations.move` / `mutations.delete` | destructive, idempotent |
+| `set_read_state(read, message_ids?, conversation_ids?, include_deleted_items)` · `set_flag(message_ids, flagged)` | `mutations` | not read-only, not destructive, idempotent |
 
 Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/search`, `/api/threads/{id}`, `/api/messages/{id}`, all with `include_deleted_items`) and add `GET /api/messages/{id}/attachments/{attachment_id}` (download), `POST /api/thread-sizes` (per-conversation message counts, one Graph `$batch` per 20 conversations), `POST /api/export`, `GET /api/status` and `POST /api/heartbeat`. Every `/api` call needs the per-run session token embedded in the page and a localhost Host header. Write tools are MCP-first. UI write actions are optional later.
 
@@ -351,7 +356,7 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 | 4. Export | `service/export/*` | E1 |
 | 5. UI | `surfaces/web/*` | U1 |
 | 6. Send | `remote/ows` (draft, send), `remote/ids` (Graph ↔ OWS ids), `service/writes` (propose, draft, send) | W0, W1 |
-| 7. Mutations | `remote/ows` (update/move/delete), `service/writes` | W2–W5 |
+| 7. Mutations | `remote/ows` (update/move/delete), `service/mutations` | W2–W5 |
 | Parked | branch-aware threads in `service/threads` | R4, E3 |
 
 ## 12. Decisions
