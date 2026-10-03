@@ -311,6 +311,10 @@ class DraftResult(Compact):
     folder: str = "Drafts"
     proposal: EmailProposal  # what the draft holds (its confirmation code is not needed to save)
     verified: bool  # the draft was read back from the mailbox
+    # replies: the quoted original was checked (its text and inline images as received); a problem
+    # says what differs. send_email refuses to send a reply whose draft fails this check.
+    history_intact: bool | None = None
+    history_problem: str | None = None
 
 
 SendStatus = Literal["sent", "unknown"]

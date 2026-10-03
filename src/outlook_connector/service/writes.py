@@ -12,6 +12,12 @@ short-lived, so nothing is remembered in between):
    again, refuses it unless the code matches (any change to the account, recipients, subject or
    body changes the code), checks that the write credential is the bound account, and sends
    once. With no clear answer it looks in Sent Items instead of retrying.
+
+A reply is sent through a draft (W6): the reply is saved into Drafts, read back and compared with
+the original (its whole text quoted, its inline images kept with the same bytes, no image turned into
+"[cid:...]" text), and only that checked draft is sent. ``create_draft`` runs the same check on a
+reply draft and reports it. If the check fails, nothing is sent and the draft
+stays in Drafts for the user to look at.
 """
 
 from __future__ import annotations
@@ -19,7 +25,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import tempfile
+from collections import Counter
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from outlook_connector.auth.tokens import Account
 from outlook_connector.domain.errors import (
@@ -32,6 +41,7 @@ from outlook_connector.domain.errors import (
 from outlook_connector.domain.models import (
     ADDRESS_PATTERN,
     MAX_RECIPIENTS,
+    Attachment,
     DraftResult,
     EmailProposal,
     Message,
@@ -119,7 +129,11 @@ class Writes:
             verified = True
         except NotFound:
             verified = False
-        return DraftResult(id=draft_id, proposal=proposal, verified=verified)
+        result = DraftResult(id=draft_id, proposal=proposal, verified=verified)
+        if proposal.reply_to_message_id and verified:
+            problem = await self._reply_problem(draft_id, proposal.reply_to_message_id)
+            result.history_intact, result.history_problem = problem is None, problem
+        return result
 
     # ---------------------------------------------------------------- send
 
@@ -134,7 +148,10 @@ class Writes:
         self.check_account()
         started = datetime.now(UTC)
         try:
-            await self.writer.send(proposal)
+            if proposal.reply_to_message_id:
+                await self._send_reply(proposal, proposal.reply_to_message_id)
+            else:
+                await self.writer.send(proposal)
         except WriteOutcomeUnknown as exc:
             try:
                 found = await self._find_sent(proposal, since=started - SENT_LOOKBACK)
@@ -151,6 +168,59 @@ class Writes:
                 "checked Outlook (Sent Items and Outbox).",
             )
         return SendResult(status="sent", detail="Sent; a copy is kept in Sent Items.")
+
+    async def _send_reply(self, proposal: EmailProposal, original_id: str) -> None:
+        """Save the reply as a draft, check it against the original, send exactly that draft."""
+        try:
+            draft_id = await self.writer.create_draft(proposal)
+        except WriteOutcomeUnknown:
+            raise ConnectorError(
+                "Not sent: Outlook gave no clear answer while saving the reply as a draft. Look in "
+                "Drafts before trying again."
+            ) from None
+        if not draft_id:
+            raise ConnectorError(
+                "Not sent: Outlook saved the reply as a draft but did not report its id. Look in Drafts."
+            )
+        problem = await self._reply_problem(draft_id, original_id)
+        if problem:
+            raise ConnectorError(
+                f"Not sent: the reply draft did not keep the original message intact ({problem}). "
+                f"The draft is in Drafts (id {draft_id}) for the user to check in Outlook."
+            )
+        await self.writer.send_draft(draft_id, proposal.subject)
+
+    async def _reply_problem(self, draft_id: str, original_id: str) -> str | None:
+        """Why the reply draft does not carry the original as received, or None when it does."""
+        reader = self.mailbox.reader
+        texts = await reader.get_messages([original_id, draft_id])
+        pages = await reader.get_messages([draft_id], body_format="html")
+        original, draft = texts.messages.get(original_id), texts.messages.get(draft_id)
+        page = pages.messages.get(draft_id)
+        if original is None or draft is None or page is None:
+            return "the draft or the original could not be read back"
+        if _flat(original.body_text) not in _flat(draft.body_text):
+            return "the quoted original is not the original's full text"
+        found, failed = await reader.list_attachments_many([original_id, draft_id])
+        if failed:
+            return "its attachments could not be listed"
+        hashes = {mid: await self._inline_hashes(mid, found.get(mid, [])) for mid in (original_id, draft_id)}
+        missing = Counter(hashes[original_id]) - Counter(hashes[draft_id])
+        if missing:
+            return f"{missing.total()} inline image(s) of the original are missing or changed"
+        if "[cid:" in _flat(re.sub(r"<[^>]+>", " ", page.body_html or "")):
+            return 'an inline image became "[cid:...]" text'
+        return None
+
+    async def _inline_hashes(self, message_id: str, attachments: list[Attachment]) -> list[str]:
+        """SHA-256 of each inline image's bytes (downloaded to a temporary folder, then removed)."""
+        out = []
+        with tempfile.TemporaryDirectory(prefix="outlook-reply-check-") as folder:
+            for index, attachment in enumerate(a for a in attachments if a.is_inline and a.kind == "file"):
+                target = Path(folder) / str(index)
+                await self.mailbox.reader.download_attachment(message_id, attachment.id, target)
+                out.append(hashlib.sha256(target.read_bytes()).hexdigest())
+        return out
 
     def check_account(self) -> None:
         claims = self.writer.account()
@@ -199,6 +269,11 @@ def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[l
         to = [sender]
     to = _unique(_addresses(to, "to"))
     return to, [a for a in _unique(_addresses(cc, "cc")) if a.lower() not in {t.lower() for t in to}]
+
+
+def _flat(text: str | None) -> str:
+    """Text with its whitespace collapsed, for comparing a quoted copy with its original."""
+    return re.sub(r"\s+", " ", text or "").strip()
 
 
 def _addresses(values: list[str], field: str) -> list[str]:
