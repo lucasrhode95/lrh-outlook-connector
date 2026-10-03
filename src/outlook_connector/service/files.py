@@ -47,8 +47,7 @@ class Files:
         return SavedFile(path=str(target), name=target.name, content_type=content_type, size=size)
 
     async def save_mime(self, message_id: str) -> SavedFile:
-        known = self.mailbox.store.summaries([message_id]).get(message_id)
-        subject = known.subject if known else (await self.mailbox.message(message_id)).subject
+        subject = (await self.mailbox.message(message_id)).subject
         target = claim(kept_dir("downloads"), safe_name(subject, fallback="message") + ".eml")
         try:
             size = await self.mailbox.reader.download_mime(message_id, target)

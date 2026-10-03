@@ -131,7 +131,6 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             since=_when(request, "since"),
             until=_when(request, "until"),
             limit=_int(request, "limit", 100),
-            refresh=_flag(request, "refresh", True),
             cursor=request.query_params.get("cursor") or None,
             include_deleted_items=_flag(request, "include_deleted_items"),
         )

@@ -122,9 +122,7 @@ class Exports:
         if request.by_range:
             await self._select_range(request, selected, excluded)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
-        cached = self.mailbox.store.summaries(explicit)  # listed before: bodies are fetched later
-        selected.update(cached)
-        known = await self._fetch([mid for mid in explicit if mid not in cached])
+        known = await self._fetch(explicit)
         selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
         merged, _ = await self.mailbox.finish(selected.values())  # copies across conversations and pages
         _check_limit({m.id: m for m in merged}, request.limit)
@@ -158,7 +156,7 @@ class Exports:
                 return
 
     async def _fetch(self, message_ids: list[str]) -> dict[str, Message]:
-        """Messages selected by id that this app has not listed, in batches; their bodies are reused."""
+        """Messages selected by id, read from the server in batches; their bodies are reused."""
         if not message_ids:
             return {}
         fetched = await self.reader.get_messages(message_ids)
