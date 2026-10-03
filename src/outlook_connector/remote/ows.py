@@ -19,7 +19,7 @@ import uuid
 from typing import Any, Protocol
 from urllib.parse import quote
 
-from outlook_connector.domain.errors import NotFound, Upstream
+from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnknown
 from outlook_connector.domain.models import EmailProposal
 from outlook_connector.remote import ids
 from outlook_connector.remote.transport import Transport, operation
@@ -89,8 +89,11 @@ def _items(data: Any, action: str) -> list[dict[str, Any]]:
     body = data.get("Body") if isinstance(data, dict) else None
     messages = body.get("ResponseMessages") if isinstance(body, dict) else None
     items = messages.get("Items") if isinstance(messages, dict) else None
-    if not isinstance(items, list) or not items:
-        raise Upstream(f"Outlook answered {action} without item results.")
+    if not isinstance(items, list) or not items:  # the write may have happened: never a plain failure
+        raise WriteOutcomeUnknown(
+            f"Outlook answered {action} without item results, so it is unclear whether the change "
+            "was made; it was not retried. Check the mailbox before trying again."
+        )
     for item in items:
         if not isinstance(item, dict) or item.get("ResponseClass") not in SUCCESS:
             raise item_error(item if isinstance(item, dict) else {}, action)
