@@ -15,6 +15,8 @@ from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     Coverage,
+    ExportError,
+    ExportStep,
     Message,
     MessageSummary,
     Thread,
@@ -22,9 +24,12 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
-from outlook_connector.service.mailbox import GONE, Mailbox, unavailable
+from outlook_connector.service.failures import error_block, export_error, gone
+from outlook_connector.service.mailbox import Mailbox
 
 BODY_BATCH = 10
+BODY_STEP: ExportStep = "fetching message bodies"
+BODY_MISSING = "The body of this message could not be fetched."
 _PREFIX = re.compile(r"^\s*((re|res|fw|fwd|enc|aw|wg|sv|tr|rv)\s*:\s*)+", re.IGNORECASE)
 
 
@@ -49,7 +54,6 @@ class Threads:
         remote, truncated = await self.mailbox.reader.conversation(conversation_id)
         if not remote:
             raise NotFound(f"No conversation {conversation_id} on the server.")
-        self.mailbox.store.upsert_summaries(remote)
         skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
         items, excluded = await self.mailbox.finish(sorted(remote, key=oldest_first), skip)
         return items, excluded, truncated
@@ -99,10 +103,10 @@ class Threads:
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
                 bodies, missing = await self.bodies(chunk)
-                retryable += sum(1 for reason in missing.values() if reason != GONE)
+                retryable += sum(1 for error in missing.values() if error.retry)
                 for offset, summary in enumerate(chunk):
                     found = bodies.get(summary.id)
-                    text = found.body(body) if found else unavailable(missing[summary.id])
+                    text = found.body(body) if found else error_block(BODY_MISSING, missing[summary.id])
                     if len(text) > budget and entries:
                         next_start = index + offset
                         break
@@ -117,7 +121,8 @@ class Threads:
             entries = [ThreadMessage(message=m) for m in items[start:]]
         if retryable:
             notes.append(
-                f"{retryable} message body(ies) could not be fetched now and are marked in the text."
+                f"{retryable} message body(ies) could not be fetched now; they are marked [EXPORT ERROR] "
+                "in the text."
             )
 
         return Thread(
@@ -144,15 +149,19 @@ class Threads:
 
     async def bodies(
         self, summaries: list[MessageSummary], *, known: dict[str, Message] | None = None
-    ) -> tuple[dict[str, Message], dict[str, str]]:
+    ) -> tuple[dict[str, Message], dict[str, ExportError]]:
         """Text bodies from the server, in batches.
 
         ``known``: messages already fetched with bodies, used as they are. Returns (bodies by id,
-        reason per message without a body): every summary is in exactly one of the two.
+        the error for each message without a body): every summary is in exactly one of the two.
         """
         known = {s.id: known[s.id] for s in summaries if known and s.id in known}
         wanted = [s.id for s in summaries if s.id not in known]
         fetched = await self.mailbox.reader.get_messages(wanted) if wanted else FetchedMessages()
         out = known | {mid: m for mid, m in fetched.messages.items() if m is not None}
-        missing = {s.id: fetched.failed.get(s.id, GONE) for s in summaries if s.id not in out}
+        missing = {
+            s.id: export_error(BODY_STEP, fetched.failed[s.id]) if s.id in fetched.failed else gone(BODY_STEP)
+            for s in summaries
+            if s.id not in out
+        }
         return out, missing

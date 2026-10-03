@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -69,26 +67,13 @@ async def test_list_messages_folder_and_window(mailbox: Mailbox) -> None:
     assert [m.id for m in page.items] == ["m5"] and page.coverage.complete
 
 
-async def test_cache_forgets_messages_deleted_on_the_server(mailbox: Mailbox, fake: FakeGraph) -> None:
+async def test_messages_deleted_on_the_server_are_gone_from_the_next_listing(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
     await mailbox.list_messages(folder="inbox")
     del fake.messages["m1"]
     page = await mailbox.list_messages(folder="inbox")
     assert "m1" not in [m.id for m in page.items]
-    cached = await mailbox.list_messages(folder="inbox", refresh=False)
-    assert "m1" not in [m.id for m in cached.items]  # the listing covered m1's time and lacked it
-
-
-async def test_paging_forgets_only_what_each_page_covered(mailbox: Mailbox, fake: FakeGraph) -> None:
-    async def cached() -> list[str]:
-        return [m.id for m in (await mailbox.list_messages(refresh=False, include_deleted_items=True)).items]
-
-    await mailbox.list_messages(include_deleted_items=True)  # caches all five
-    del fake.messages["m1"]  # the oldest
-    page = await mailbox.list_messages(limit=2, include_deleted_items=True)
-    assert await cached() == ["m5", "m4", "m3", "m2", "m1"]  # the first page did not cover m1
-    while page.cursor:
-        page = await mailbox.list_messages(limit=2, cursor=page.cursor)
-    assert await cached() == ["m5", "m4", "m3", "m2"]  # the last page reaches the window's start
 
 
 async def test_received_only_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
@@ -133,13 +118,6 @@ async def test_received_only_scans_past_filtered_pages_and_keeps_it_in_the_curso
     assert [m.id for m in first.items] == ["m5"] and first.cursor  # pages of junk skipped
     second = await mailbox.list_messages(limit=2, cursor=first.cursor)
     assert [m.id for m in second.items] == ["m3"]  # m4 (junk) and m2 (sent) left out
-
-
-async def test_local_only_listing_says_so(mailbox: Mailbox) -> None:
-    await mailbox.list_messages()
-    page = await mailbox.list_messages(refresh=False)
-    assert not page.coverage.complete and len(page.items) == 4
-    assert page.coverage.excluded == {"deleted_or_junk": 1}
 
 
 async def test_list_messages_validation(mailbox: Mailbox) -> None:
@@ -292,6 +270,28 @@ async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_backgro
     assert "f-new" in {f.id for f in (await mailbox.folders())}
 
 
+async def test_thread_marks_missing_bodies_with_the_export_error_block(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    await mailbox.folders()
+    fake.throttle_items = 10_000
+    thread = await Threads(mailbox).get_thread("c-rel")
+    text = thread.messages[0].text or ""
+    assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
+    assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
+    assert not thread.coverage.complete  # throttling is retryable
+
+
+async def test_thread_body_denied_does_not_make_coverage_incomplete(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    fake.fail[r"/me/messages/m2"] = 403
+    thread = await Threads(mailbox).get_thread("c-rel")
+    texts = {t.message.id: t.text or "" for t in thread.messages}
+    assert "  Likely: access denied for this item" in texts["m2"] and texts["m1"] == "First report"
+    assert thread.coverage.complete  # retrying will not help
+
+
 async def test_thread_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox, fake: FakeGraph) -> None:
     fake.add(
         FakeMessage("big", "Huge", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-big", text="x" * 5000)
@@ -306,16 +306,6 @@ async def test_truncated_listing_stays_incomplete_when_bodies_fit(
     monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
     thread = await Threads(mailbox).get_thread("c-rel", max_chars=100_000)
     assert not thread.coverage.complete
-
-
-async def test_summaries_are_stored_without_bodies(mailbox: Mailbox, tmp_path: Path) -> None:
-    await Threads(mailbox).get_thread("c-rel")
-    row = (
-        sqlite3.connect(tmp_path / "m.sqlite3")
-        .execute("SELECT summary FROM messages WHERE id='m1'")
-        .fetchone()
-    )
-    assert not {"body_text", "unique_body_text", "attachments", "bcc"} & set(json.loads(row[0]))
 
 
 async def test_search_dates_are_exact_whatever_the_time_zone(mailbox: Mailbox) -> None:

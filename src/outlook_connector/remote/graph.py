@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from outlook_connector.domain.errors import InvalidRequest, Upstream
-from outlook_connector.remote.transport import Transport, describe_failure, request_id, service_error
+from outlook_connector.domain.errors import ConnectorError, Failure, InvalidRequest, Upstream
+from outlook_connector.remote.transport import Transport, describe_failure, request_id, service_error, shorten
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 PREFER_IMMUTABLE = 'IdType="ImmutableId"'
@@ -182,7 +182,15 @@ def _retry_after(headers: Mapping[str, str]) -> float:
         return DEFAULT_RETRY_WAIT
 
 
-def sub_failure(response: SubResponse, *, detail: str | None = None) -> Exception:
+def failure_of(response: SubResponse) -> Failure:
+    """A failed $batch sub-response as a structured failure (per-item failures are reported, not raised)."""
+    code, message = service_error(response.body)
+    return Failure(
+        status=response.status, code=code, message=shorten(message), request_id=request_id(response.headers)
+    )
+
+
+def sub_failure(response: SubResponse, *, detail: str | None = None) -> ConnectorError:
     """The domain error for a failed $batch sub-response."""
     code, message = service_error(response.body)
     return describe_failure(

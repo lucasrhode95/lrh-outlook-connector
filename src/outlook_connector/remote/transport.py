@@ -29,6 +29,8 @@ import httpx
 
 from outlook_connector.domain.errors import (
     AuthenticationRequired,
+    ConnectorError,
+    Failure,
     InvalidRequest,
     NotFound,
     Throttled,
@@ -127,14 +129,16 @@ class Transport:
                 if attempt < attempts:
                     await self._sleep(min(2**attempt, 20))
                     continue
-                raise Upstream(f"Could not reach {urlsplit(url).hostname} ({type(exc).__name__}).") from None
+                raise _no_response(
+                    f"Could not reach {urlsplit(url).hostname} ({type(exc).__name__})."
+                ) from None
             except httpx.HTTPError as exc:  # sent, but no complete response
                 if write:
                     raise _unknown(url, type(exc).__name__) from None
                 if attempt < attempts:
                     await self._sleep(min(2**attempt, 20))
                     continue
-                raise Upstream(
+                raise _no_response(
                     f"No complete response from {urlsplit(url).hostname} ({type(exc).__name__})."
                 ) from None
             log.debug(
@@ -217,6 +221,12 @@ class Transport:
                 return response.headers.get("content-type"), size
 
 
+def _no_response(text: str) -> Upstream:
+    error = Upstream(text)
+    error.failure = Failure(status=None, message=text)
+    return error
+
+
 def _unknown(url: str, what: str) -> WriteOutcomeUnknown:
     prefix = f"While {_operation.get()}: " if _operation.get() else ""
     return WriteOutcomeUnknown(
@@ -285,6 +295,11 @@ def request_id(headers: Mapping[str, str]) -> str | None:
     return value[:64] if value else None
 
 
+def shorten(message: str | None) -> str | None:
+    """A service message flattened to one line and cut to MAX_ERROR_TEXT."""
+    return re.sub(r"\s+", " ", message).strip()[:MAX_ERROR_TEXT] if message else None
+
+
 def describe_failure(
     *,
     status: int,
@@ -293,7 +308,7 @@ def describe_failure(
     request: str | None,
     host: str | None = None,
     detail: str | None = None,
-) -> Exception:
+) -> ConnectorError:
     """The domain error for a failed Microsoft response, with sanitized diagnostics.
 
     The service message is shortened and flattened to one line; it never contains tokens, and
@@ -303,10 +318,17 @@ def describe_failure(
     parts = [f"HTTP {status}", code or "no error code"]
     text = ", ".join(parts)
     if message:
-        text += ": " + re.sub(r"\s+", " ", message).strip()[:MAX_ERROR_TEXT]
+        text += ": " + (shorten(message) or "")
     if request:
         text += f"; request-id {request}"
-    prefix = f"While {_operation.get()}: " if _operation.get() else ""
+    error = _failure_error(
+        status, f"While {_operation.get()}: " if _operation.get() else "", where, text, detail
+    )
+    error.failure = Failure(status=status, code=code, message=shorten(message), request_id=request)
+    return error
+
+
+def _failure_error(status: int, prefix: str, where: str, text: str, detail: str | None) -> ConnectorError:
     suffix = f" {detail}" if detail else ""
     if status == 404:
         return NotFound(f"{prefix}Not found ({text}).{suffix}")
@@ -323,7 +345,7 @@ def describe_failure(
     return Upstream(f"{prefix}{where} returned an error ({text}).{suffix}")
 
 
-def _error_for(response: httpx.Response) -> Exception:
+def _error_for(response: httpx.Response) -> ConnectorError:
     host = urlsplit(str(response.request.url)).hostname if response.request else None
     message = None
     with contextlib.suppress(json.JSONDecodeError, UnicodeDecodeError):

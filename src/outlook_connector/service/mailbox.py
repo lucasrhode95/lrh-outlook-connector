@@ -1,8 +1,7 @@
 """Folders, message listing, message content and search (requirements v4 §7–§9).
 
-Remote first: every call asks Outlook (Graph). The local store only caches folders and message
-summaries (for the UI's instant preview and ``refresh=false``); a message deleted on the server is
-gone here too.
+Remote first: every call asks Outlook (Graph). The local store caches the folder list only; no
+message data is kept locally, so a message deleted on the server is gone here too.
 
 Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
 - Deleted Items, Junk Email and Sync Issues (Outlook's own conflict and failure copies) are left out
@@ -52,7 +51,6 @@ RECEIVED_ONLY_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
 GONE = "deleted on the server"
-LOCAL_ONLY_NOTE = "Local cache only: messages this app has seen before. It is not a mirror of the mailbox."
 COMPACT_DROP = {
     "to": [],
     "cc": [],
@@ -196,7 +194,6 @@ class Mailbox:
         since: datetime | None = None,
         until: datetime | None = None,
         limit: int = 25,
-        refresh: bool = True,
         cursor: str | None = None,
         received_only: bool = False,
         include_deleted_items: bool = False,
@@ -229,25 +226,13 @@ class Mailbox:
             )
         )
 
-        if not refresh:
-            window = self.store.window(
-                folder_id=folder_id, since=since, until=until, limit=None if skip else limit
-            )
-            items, excluded = await self.finish(window, skip)
-            return MessagePage(
-                items=_detail(items[:limit], detail),
-                coverage=Coverage(complete=False, excluded=excluded, notes=[LOCAL_ONLY_NOTE]),
-            )
-
         link = state["link"] if state else None
         fetched: list[MessageSummary] = []
         drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
-        for attempt in range(RECEIVED_ONLY_PAGES if drop else 1):
+        for _ in range(RECEIVED_ONLY_PAGES if drop else 1):
             page, link = await self.reader.list_messages(
                 folder_id=folder_id, since=since, until=until, page_size=limit, page=link
             )
-            first, last = state is None and attempt == 0, link is None
-            self._cache(page, folder_id, since=since, until=until, first=first, last=last)
             fetched += page
             if not link or any(m.folder_id not in drop for m in page):
                 break  # a page that exclusions empty entirely is skipped, within bounds
@@ -287,26 +272,6 @@ class Mailbox:
                 notes=notes,
             ),
         )
-
-    def _cache(
-        self,
-        page: list[MessageSummary],
-        folder_id: str | None,
-        *,
-        since: datetime | None,
-        until: datetime | None,
-        first: bool,
-        last: bool,
-    ) -> None:
-        """Cache a listed page, and forget cached rows of the time span it covered that it does not
-        hold (deleted or moved on the server). The span runs from the page's oldest to its newest
-        message, extended to the window's ends on the last and the first page."""
-        dated = [m.received_at for m in page if m.received_at]
-        if dated or (first and last):
-            low = since if last else min(dated)
-            high = until if first else max(dated)
-            self.store.forget(folder_id=folder_id, since=low, until=high, keep={m.id for m in page})
-        self.store.upsert_summaries(page)
 
     async def _count(
         self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
@@ -433,7 +398,6 @@ class Mailbox:
         found, link = await self.reader.search(
             query=kql, folder_id=folder_id, page_size=limit, page=state["link"] if state else None
         )
-        self.store.upsert_summaries(found)
         in_window = [m for m in found if _within(m, since, until)]
         items, excluded = await self.finish(in_window, skip)
         items, seen = _skip_seen(items, state)
@@ -541,11 +505,6 @@ def _skip_seen(
 
 def _fingerprint(internet_id: str) -> str:
     return hashlib.blake2b(internet_id.encode(), digest_size=5).hexdigest()
-
-
-def unavailable(reason: str) -> str:
-    """The one marker for a body that cannot be shown (exports, threads, get_message)."""
-    return f"(Content unavailable: {reason})"
 
 
 def _detail(items: list[MessageSummary], detail: Detail) -> list[MessageSummary]:

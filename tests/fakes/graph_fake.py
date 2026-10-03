@@ -97,6 +97,7 @@ class FakeGraph:
     throttle_items: int = 0  # respond 429 to this many upcoming $batch sub-requests
     reject_tokens: int = 0  # respond 401 (token rejected) to this many upcoming top-level requests
     claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
+    fail: dict[str, int] = field(default_factory=dict)  # path regex -> HTTP status to answer instead
     batch_sizes: list[int] = field(default_factory=list)
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
@@ -271,6 +272,10 @@ class FakeGraph:
     ):
         if method == "POST" and path == "/$batch":
             return self.batch(json.loads(request.content))
+        for pattern, status in self.fail.items():
+            if re.fullmatch(pattern, path):
+                code = "ErrorAccessDenied" if status == 403 else f"Failure{status}"
+                return status, {"error": {"code": code, "message": "Injected failure."}}, None
         text_body = 'outlook.body-content-type="text"' in prefer
 
         if m := re.fullmatch(r"/me/mailFolders", path):
