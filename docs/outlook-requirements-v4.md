@@ -136,7 +136,7 @@ The selection is any mix of **whole threads**, **individual messages** and a **r
 
 | Option | Default | Effect |
 |---|---|---|
-| `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
+| `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download is marked `[EXPORT ERROR]` and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
 | `combine` | `per_thread` | `per_thread`: one TXT per thread, chronological; a selected individual message goes into its thread's TXT. `all`: one TXT for the whole selection, chronological, with per-thread section headers. `none`: one TXT per message. |
 | `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, dates, folder, people, body, attachments), always one file. |
 | `include_deleted_items` | off | Include Deleted Items and Junk Email (see §8). |
@@ -145,30 +145,12 @@ The selection is any mix of **whole threads**, **individual messages** and a **r
 TXT content:
 
 - Headers per message: From, To, CC, date, subject and folder, the message, conversation and Internet ids, the other folders of merged copies.
-- The file header says what was left out by folder, and one "Export errors: …" line counts what could not be exported, by kind and likely cause; a merged copy is named on its message (`Also in:`).
+- The file header says what was left out by folder, and how many parts could not be exported (marked `[EXPORT ERROR]`); a merged copy is named on its message (`Also in:`).
 - Then the body.
 
 **Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Threads and ranges are listed from the server at export time.
 
-Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes. Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_thread`):
-
-```text
-[EXPORT ERROR] The body of this message could not be fetched.
-  Step:   fetching message bodies
-  Error:  HTTP 429 TooManyRequests, request-id <id>
-  Likely: Microsoft throttled the mailbox (about 4 parallel requests or 10,000 per 10 minutes); the message itself is fine
-  Fix:    export it again in a few minutes
-```
-
-| Answer | Likely cause | Retry helps | Fix |
-|---|---|---|---|
-| 429 or 503 | Microsoft throttled the mailbox | yes | export it again in a few minutes |
-| other 5xx, no response | Microsoft service or network problem | yes | retry later |
-| 403 | access denied for this item (e.g. encrypted or protected) | no | retrying will not help |
-| 404 | deleted or moved in Outlook during the export | no | refresh and select it again |
-| anything else | unexpected error | no | report it with the request id |
-
-JSONL carries the same error as an `export_error` object (on the message when its body is missing, on a failed attachment record, or as `attachments_export_error` when the attachments could not be listed). The export result has `export_errors` (per step) and `error_summary` (the header line), and the UI shows that line after the download.
+Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place with the error text, e.g. `[EXPORT ERROR] The body could not be fetched: HTTP 429 TooManyRequests: …, request-id …`, and the export completes; a long export is never lost to one failure. `get_thread` marks a body the same way. JSONL carries the text as `export_error` (on the message, or on a failed attachment record; `attachments_export_error` for a failed listing). The export result counts the marks (`errors`), and the UI says how many there are after the download. Kept deliberately simple (2026-10-04): no error classification and no switch to fail instead.
 - The output must never contain tokens, signed URLs or authorization headers.
 
 ### 10.2 Output packaging rule

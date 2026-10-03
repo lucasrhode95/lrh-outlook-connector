@@ -98,6 +98,7 @@ class FakeGraph:
     reject_tokens: int = 0  # respond 401 (token rejected) to this many upcoming top-level requests
     claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
     fail: dict[str, int] = field(default_factory=dict)  # path regex -> HTTP status to answer instead
+    fail_batches: int = 0  # answer 500 to this many upcoming $batch requests
     batch_sizes: list[int] = field(default_factory=list)
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
@@ -271,6 +272,9 @@ class FakeGraph:
         self, method: str, path: str, params: dict[str, str], prefer: str, request: httpx.Request | None
     ):
         if method == "POST" and path == "/$batch":
+            if self.fail_batches:
+                self.fail_batches -= 1
+                return 500, {"error": {"code": "Failure500", "message": "Injected failure."}}, None
             return self.batch(json.loads(request.content))
         for pattern, status in self.fail.items():
             if re.fullmatch(pattern, path):

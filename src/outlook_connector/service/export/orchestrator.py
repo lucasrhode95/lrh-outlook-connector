@@ -11,18 +11,24 @@ import asyncio
 import hashlib
 import shutil
 import tempfile
-from collections import Counter, defaultdict
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Throttled, Upstream
+from outlook_connector.domain.errors import (
+    AuthenticationRequired,
+    ConnectorError,
+    InvalidRequest,
+    NotFound,
+    Throttled,
+    Upstream,
+)
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
     Attachment,
     ExportArtifact,
-    ExportError,
     ExportRequest,
     Message,
     MessageSummary,
@@ -30,23 +36,17 @@ from outlook_connector.domain.models import (
 from outlook_connector.service.export import attachments as policy
 from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
 from outlook_connector.service.export.packaging import TextFile, package
-from outlook_connector.service.failures import (
-    THROTTLING,
-    error_block,
-    error_from,
-    error_summary,
-    export_error,
-)
-from outlook_connector.service.threads import BODY_MISSING, Threads, base_subject, oldest_first
+from outlook_connector.service.threads import ERROR_MARK, Threads, base_subject, body_error, oldest_first
 
 RANGE_PAGE = 200
+THROTTLING = (429, 503)
 SHOWN_FAILURES = 3
 UNREADABLE_HINT = (
     "They may have been deleted or moved in Outlook, or Microsoft is throttling requests. "
     "Refresh the list (or list/search again) and retry the export. Nothing was exported."
 )
 
-Downloaded = list[tuple[Attachment, Path | ExportError]]  # the file, or why it could not be downloaded
+Downloaded = list[tuple[Attachment, Path | str]]  # the file, or why it could not be downloaded
 
 
 @dataclass
@@ -59,9 +59,9 @@ class Selection:
 @dataclass
 class Fetched:
     bodies: dict[str, Message]
-    missing: dict[str, ExportError]  # message id -> why it has no body
+    missing: dict[str, str]  # message id -> why it has no body
     attachments: dict[str, list[Attachment]]
-    attachment_failures: dict[str, ExportError]  # message id -> why its attachments could not be listed
+    attachment_failures: dict[str, str]  # message id -> why its attachments could not be listed
 
 
 class Exports:
@@ -93,14 +93,13 @@ class Exports:
                 if request.include_attachments
                 else {}
             )
-            failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, ExportError)]
-            summary = error_summary(list(missing.values()), failed_files, list(attachment_failures.values()))
-            files = self._render(summaries, fetched, downloads, request, selection, summary)
+            failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, str)]
+            errors = [*missing.values(), *attachment_failures.values(), *failed_files]
+            files = self._render(summaries, fetched, downloads, request, selection, len(errors))
             base = files[0].folder if len(files) == 1 else _range_name(summaries)
             result = package(files, base_name=base)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
-        counts = Counter(e.step for e in [*missing.values(), *failed_files, *attachment_failures.values()])
         return ExportArtifact(
             path=str(result.path),
             filename=result.filename,
@@ -111,8 +110,7 @@ class Exports:
             attachment_files=sum(len(f.attachments) for f in files),
             messages_excluded=selection.excluded,
             unavailable_message_ids=list(missing),
-            export_errors=dict(counts),
-            error_summary=summary,
+            errors=len(errors),
         )
 
     # ---------------------------------------------------------------- selection
@@ -196,7 +194,7 @@ class Exports:
         *,
         inline: bool,
         skip: set[str],
-    ) -> tuple[dict[str, list[Attachment]], dict[str, ExportError]]:
+    ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
         """Attachments per message, and why listing failed for others. ``skip``: messages without
         a body (deleted on the server, or not fetched). Graph reports hasAttachments=false when a
         message has only inline attachments, so when files are exported (inline images included)
@@ -205,7 +203,7 @@ class Exports:
         if not wanted:
             return {}, {}
         found, failed = await self.reader.list_attachments_many(wanted)
-        return found, {mid: export_error("listing attachments", f) for mid, f in failed.items()}
+        return found, {mid: f"While listing attachments: {f.describe()}" for mid, f in failed.items()}
 
     # ---------------------------------------------------------------- attachments
 
@@ -239,11 +237,13 @@ class Exports:
                 if policy.wanted(attachment, content_id=cid, body_html=page_html):
                     jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
 
-        async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | ExportError:
+        async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | str:
             try:
                 await self.reader.download_attachment(message_id, attachment.id, target)
+            except AuthenticationRequired:
+                raise  # every other download would fail the same way
             except ConnectorError as exc:
-                return error_from("downloading an attachment", exc)
+                return str(exc)
             return target
 
         results = await asyncio.gather(*(fetch(*job) for job in jobs))
@@ -261,14 +261,16 @@ class Exports:
         downloads: dict[str, Downloaded],
         request: ExportRequest,
         selection: Selection,
-        summary: str | None,
+        errors: int,
     ) -> list[TextFile]:
         notes = [
             f"Left out: {count} message(s) {EXCLUSION_TEXT[key]}."
             for key, count in selection.excluded.items()
         ]
-        if summary:
-            notes.append(summary)
+        if errors:
+            notes.append(
+                f"Export errors: {errors} part(s) could not be exported; they are marked {ERROR_MARK}."
+            )
         combine = "all" if request.format == "jsonl" else request.combine
         suffix = ".jsonl" if request.format == "jsonl" else ".txt"
         files: list[TextFile] = []
@@ -300,17 +302,17 @@ class Exports:
     ) -> RenderedMessage:
         """One message's text, attachment lines (TXT) and attachment records (JSONL)."""
         lines: list[str] = []
-        blocks: list[str] = []
         records: list[dict[str, Any]] = []
         listing_error = fetched.attachment_failures.get(message.id)
         if listing_error:
-            blocks.append(error_block("The attachments of this message could not be listed.", listing_error))
+            lines.append(f"{ERROR_MARK} The attachments could not be listed: {listing_error}")
         listed = fetched.attachments.get(message.id, [])
         if request.include_attachments:
             for attachment, path in downloads.get(message.id, []):
-                if isinstance(path, ExportError):
-                    name = attachment.name or "(unnamed)"
-                    blocks.append(error_block(f"The attachment {name} could not be downloaded.", path))
+                if isinstance(path, str):
+                    lines.append(
+                        f"{ERROR_MARK} {attachment.name or 'attachment'} could not be downloaded: {path}"
+                    )
                     records.append(_attachment_record(attachment, error=path))
                     continue
                 # The same bytes (a signature logo on every message) are stored once; every
@@ -340,28 +342,23 @@ class Exports:
                     lines.append(f"{a.name} ({policy.size_label(a.size)})")
                     records.append(_attachment_record(a))
         error = fetched.missing.get(message.id)
-        text = (
-            error_block(BODY_MISSING, error) if error else body_text(fetched.bodies[message.id], request.body)
-        )
+        text = body_error(error) if error else body_text(fetched.bodies[message.id], request.body)
         return RenderedMessage(
             message,
             text,
             lines,
             export_error=error,
-            error_blocks=blocks,
             attachments=records,
             attachments_export_error=listing_error,
         )
 
 
-def _attachment_record(
-    a: Attachment, *, file: str | None = None, error: ExportError | None = None
-) -> dict[str, Any]:
+def _attachment_record(a: Attachment, *, file: str | None = None, error: str | None = None) -> dict[str, Any]:
     record: dict[str, Any] = {"name": a.name, "size": a.size, "kind": a.kind, "inline": a.is_inline}
     if file:
         record["file"] = file
     if error:
-        record["export_error"] = error.model_dump(mode="json")
+        record["export_error"] = error
     return record
 
 

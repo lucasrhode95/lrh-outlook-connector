@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import zipfile
 from io import BytesIO
-from urllib.parse import unquote
 
 import httpx
 import pytest
@@ -91,15 +90,12 @@ def test_export_downloads_one_file(client: TestClient) -> None:
         assert any(name.endswith("numbers.xlsx") for name in archive.namelist())
 
 
-def test_export_reports_its_error_summary(client: TestClient, fake: FakeGraph) -> None:
+def test_export_reports_its_error_count(client: TestClient, fake: FakeGraph) -> None:
     clean = client.post("/api/export", json={"conversation_ids": ["c-lunch"]})
     assert clean.status_code == 200 and "x-export-errors" not in clean.headers
     fake.fail[r"/me/messages/m5"] = 403
     response = client.post("/api/export", json={"conversation_ids": ["c-lunch"]})
-    assert unquote(response.headers["x-export-errors"]) == (
-        "Export errors: 1 message body (1 access denied) could not be exported; "
-        "they are marked [EXPORT ERROR] below."
-    )
+    assert response.status_code == 200 and response.headers["x-export-errors"] == "1"
 
 
 def test_export_rejects_an_empty_selection(client: TestClient) -> None:

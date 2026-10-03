@@ -15,8 +15,6 @@ from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     Coverage,
-    ExportError,
-    ExportStep,
     Message,
     MessageSummary,
     Thread,
@@ -24,12 +22,17 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
-from outlook_connector.service.failures import error_block, export_error, gone
 from outlook_connector.service.mailbox import Mailbox
 
 BODY_BATCH = 10
-BODY_STEP: ExportStep = "fetching message bodies"
-BODY_MISSING = "The body of this message could not be fetched."
+ERROR_MARK = "[EXPORT ERROR]"  # marks what could not be fetched, in exports and threads
+GONE = "the message is no longer on the server (deleted or moved meanwhile)"
+
+
+def body_error(reason: str) -> str:
+    return f"{ERROR_MARK} The body could not be fetched: {reason}"
+
+
 _PREFIX = re.compile(r"^\s*((re|res|fw|fwd|enc|aw|wg|sv|tr|rv)\s*:\s*)+", re.IGNORECASE)
 
 
@@ -96,17 +99,17 @@ class Threads:
 
         entries: list[ThreadMessage] = []
         next_start: int | None = None
-        retryable = 0  # bodies the server could not deliver now (not deleted ones)
+        unfetched = 0
         if include_bodies:
             budget = max_chars
             index = start
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
                 bodies, missing = await self.bodies(chunk)
-                retryable += sum(1 for error in missing.values() if error.retry)
+                unfetched += len(missing)
                 for offset, summary in enumerate(chunk):
                     found = bodies.get(summary.id)
-                    text = found.body(body) if found else error_block(BODY_MISSING, missing[summary.id])
+                    text = found.body(body) if found else body_error(missing[summary.id])
                     if len(text) > budget and entries:
                         next_start = index + offset
                         break
@@ -119,11 +122,8 @@ class Threads:
                 index += len(chunk)
         else:
             entries = [ThreadMessage(message=m) for m in items[start:]]
-        if retryable:
-            notes.append(
-                f"{retryable} message body(ies) could not be fetched now; they are marked [EXPORT ERROR] "
-                "in the text."
-            )
+        if unfetched:
+            notes.append(f"{unfetched} message body(ies) could not be fetched; they are marked {ERROR_MARK}.")
 
         return Thread(
             conversation_id=conversation_id,
@@ -141,7 +141,7 @@ class Threads:
             if next_start is not None
             else None,
             coverage=Coverage(
-                complete=next_start is None and not listing_truncated and not retryable,
+                complete=next_start is None and not listing_truncated and not unfetched,
                 excluded=excluded,
                 notes=notes,
             ),
@@ -149,18 +149,18 @@ class Threads:
 
     async def bodies(
         self, summaries: list[MessageSummary], *, known: dict[str, Message] | None = None
-    ) -> tuple[dict[str, Message], dict[str, ExportError]]:
+    ) -> tuple[dict[str, Message], dict[str, str]]:
         """Text bodies from the server, in batches.
 
         ``known``: messages already fetched with bodies, used as they are. Returns (bodies by id,
-        the error for each message without a body): every summary is in exactly one of the two.
+        why each other message has none): every summary is in exactly one of the two.
         """
         known = {s.id: known[s.id] for s in summaries if known and s.id in known}
         wanted = [s.id for s in summaries if s.id not in known]
         fetched = await self.mailbox.reader.get_messages(wanted) if wanted else FetchedMessages()
         out = known | {mid: m for mid, m in fetched.messages.items() if m is not None}
         missing = {
-            s.id: export_error(BODY_STEP, fetched.failed[s.id]) if s.id in fetched.failed else gone(BODY_STEP)
+            s.id: fetched.failed[s.id].describe() if s.id in fetched.failed else GONE
             for s in summaries
             if s.id not in out
         }

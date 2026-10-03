@@ -122,7 +122,14 @@ class Graph:
 
         async def send(keys: list[str]) -> dict[str, SubResponse]:
             async with self._batch_gate:  # shared by every batch() call of this process
-                return await self._batch_once({k: requests[k] for k in keys}, prefer, headers)
+                try:
+                    return await self._batch_once({k: requests[k] for k in keys}, prefer, headers)
+                except ConnectorError as exc:
+                    if exc.failure is None:  # not a Microsoft answer (a sign-in is needed): stop
+                        raise
+                    # The batch request itself failed: report it on each of its items, so the
+                    # other batches still complete (a throttled one is re-sent like a throttled item).
+                    return {k: _failed_item(exc.failure) for k in keys}
 
         for attempt in range(BATCH_RETRIES + 1):
             chunks = [pending[i : i + BATCH_LIMIT] for i in range(0, len(pending), BATCH_LIMIT)]
@@ -182,11 +189,20 @@ def _retry_after(headers: Mapping[str, str]) -> float:
         return DEFAULT_RETRY_WAIT
 
 
+def _failed_item(failure: Failure) -> SubResponse:
+    body = {"error": {"code": failure.code, "message": failure.message}}
+    headers = {"request-id": failure.request_id} if failure.request_id else {}
+    return SubResponse(failure.status or 0, body, headers)
+
+
 def failure_of(response: SubResponse) -> Failure:
     """A failed $batch sub-response as a structured failure (per-item failures are reported, not raised)."""
     code, message = service_error(response.body)
     return Failure(
-        status=response.status, code=code, message=shorten(message), request_id=request_id(response.headers)
+        status=response.status or None,  # 0: the batch request itself got no response
+        code=code,
+        message=shorten(message),
+        request_id=request_id(response.headers),
     )
 
 

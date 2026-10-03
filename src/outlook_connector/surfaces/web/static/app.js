@@ -495,9 +495,9 @@ async function runExport(button, request, label) {
   button.textContent = "Exporting…";
   try {
     const response = await download("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
-    // Parts that could not be exported: the file's header line, shown until the next request.
-    const errors = response.headers.get("X-Export-Errors");
-    if (errors) showBanner(decodeURIComponent(errors).replace("below", "in the file"));
+    // Parts that could not be exported are marked in the file; say so until the next request.
+    const errors = Number(response.headers.get("X-Export-Errors") || 0);
+    if (errors) showBanner(`Export completed with ${errors} error(s); search the file for [EXPORT ERROR].`);
   } catch { /* the banner shows the error */ } finally {
     button.textContent = label;
     renderSelection();

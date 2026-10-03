@@ -94,7 +94,6 @@ lrh-outlook-connector/
 │  ├─ service/
 │  │  ├─ mailbox.py                # folders, list, get, search
 │  │  ├─ threads.py                # conversation retrieval (+ branch labelling later)
-│  │  ├─ failures.py               # one classification and rendering of export errors
 │  │  ├─ cursors.py                # self-contained continuation cursors
 │  │  ├─ files.py                  # attachment and .eml downloads (MCP and UI)
 │  │  ├─ localfiles.py             # exports/ and downloads/ folders: 7-day cleanup, exclusive file names
@@ -157,7 +156,7 @@ lrh-outlook-connector/
   - batch request ids are numbers assigned per batch and mapped back. Graph compares them case-insensitively, and immutable ids can differ only by case;
   - at most 2 batches in flight per process, shared by all concurrent callers (each sub-request counts against the mailbox's concurrency limit);
   - throttled (429) sub-requests are re-sent in new batches of at most 20 after the advised `Retry-After`, for up to 4 rounds;
-  - results are per item: what is still throttled or failed is returned to the caller, which reports it per message instead of failing the whole call.
+  - results are per item: what is still throttled or failed is returned to the caller, which reports it per message instead of failing the whole call. A batch request that fails as a whole (not a sign-in problem) is reported the same way on each of its items, so the other batches still complete.
 
 **`graph_mail.py`** implements `MailReader`. Operations:
 - `list_folders()` with hidden folders included (the service needs them to tell what is out of reach). Folder delta is researched (S2) but not used: the folder cache is refreshed in full.
@@ -192,7 +191,6 @@ lrh-outlook-connector/
 - Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ThreadMessage` + `Thread`, `ThreadSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` (to/cc/bcc, subject, plain-text body, optional `reply_to_message_id` and `reply_all`), `EmailProposal`, `DraftResult` and `SendResult`; mutations add `ItemResult` and `MutationResult`.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
-- `ExportError` (step, status, code, message, request id, likely cause, `retry`, fix) describes a gap in an export or thread body.
 - Errors: `AuthenticationRequired`, `AccountMismatch`, `NotFound`, `InvalidRequest`, `Throttled`, `Upstream`, `WriteOutcomeUnknown`. Each surface maps them to its own protocol. A transport error carries Microsoft's answer as a `Failure` (status, code, shortened message, request id), which batch results also report per item.
 
 ### 5.7 `store/`
@@ -219,11 +217,7 @@ lrh-outlook-connector/
   2. **sort locally**, oldest first;
   3. hydrate bodies via `$batch` when requested (a body that cannot be fetched is marked in the text).
   Its cursor carries the original selection (conversation, body options, `include_deleted_items`, `max_chars`). Coverage is incomplete when the server listing was truncated (over 1,000 messages) or a body could not be fetched for a reason a retry could fix.
-- `bodies()` returns a body or an `ExportError` for every message (still throttled, access denied, deleted meanwhile); the text shows the `[EXPORT ERROR]` block (`failures.py`) in place of the body.
-
-**`failures.py`:**
-- One classification of failed Microsoft requests for exports and threads: `export_error(step, failure)` turns the remote layer's `Failure` (status, code, shortened message, request id; status `None` = no response) into an `ExportError` with the likely cause, `retry` and the fix: 429/503 throttled (retry), other 5xx or no response service or network (retry), 403 access denied, 404 deleted or moved during the export, anything else unexpected (report it with the request id).
-- `error_block` renders the TXT block used by exports and `get_thread`; `error_summary` writes the export header's one "Export errors: …" line.
+- `bodies()` returns a body or the error text for every message (still throttled, access denied, deleted meanwhile); the text shows `[EXPORT ERROR] The body could not be fetched: <error>` in place of the body.
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`writes.py`:**
@@ -238,14 +232,14 @@ lrh-outlook-connector/
 - `move` resolves the target like `list_folders` (hidden folders refused) and refuses Deleted Items. `delete` moves to Deleted Items and leaves messages already in Deleted Items (or its subfolders) alone, since deleting there again would take them out of the folder view.
 
 **`export/`:**
-- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. Messages selected by id are read from the server in `$batch`; if any cannot be read, the export fails before writing anything: `NotFound` when they are gone, `Throttled` when any is still throttled after the batch retries, `Upstream` otherwise, with their count, the first few ids and their case, and what to do. It then hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids`, `export_errors` (failures per step) and `error_summary` (the header's "Export errors" line). A body, attachment download or attachment listing that fails during the export becomes an `ExportError` marked in the file; the export still completes.
-- `formatter.py` renders **TXT** (for people): a header (counts, date span, what was left out, and the "Export errors" summary), then per-message headers with the message, conversation and internet ids, `Also in:` for merged copies, `uniqueBody` by default and `full` optional, plus attachment lines and `[EXPORT ERROR]` blocks for what failed; people are separated by `; ` (display names are often "Last, First"). Or **JSONL** (`format=jsonl`, for agents): one record per message with ids, dates, folder, `also_in`, people, the body (or `body: null` and an `export_error` object), attachment records (with the file path inside the ZIP when attachments are included, or their own `export_error`), and `attachments_export_error` when the attachments could not be listed.
+- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `received_only`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. Messages selected by id are read from the server in `$batch`; if any cannot be read, the export fails before writing anything: `NotFound` when they are gone, `Throttled` when any is still throttled after the batch retries, `Upstream` otherwise, with their count, the first few ids and their case, and what to do. It then hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids` and `errors`. A body, attachment download or attachment listing that fails during the export is marked `[EXPORT ERROR] <error>` in the file and counted in `errors`; the export always completes (decided 2026-10-04: no `continue_on_error` switch). A sign-in error still stops it.
+- `formatter.py` renders **TXT** (for people): a header (counts, date span, what was left out, and how many parts are marked `[EXPORT ERROR]`), then per-message headers with the message, conversation and internet ids, `Also in:` for merged copies, `uniqueBody` by default and `full` optional, plus attachment lines (an `[EXPORT ERROR]` line for a failed download or listing); people are separated by `; ` (display names are often "Last, First"). Or **JSONL** (`format=jsonl`, for agents): one record per message with ids, dates, folder, `also_in`, people, the body (or `body: null` and the `export_error` text), attachment records (with the file path inside the ZIP when attachments are included, or their `export_error`), and `attachments_export_error` when the attachments could not be listed.
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
   - inline images only when the rendered body references their `cid:`;
   - `itemAttachment` → `.eml`;
   - sanitized, deduplicated names; identical files (same bytes, e.g. a signature logo on every message) are stored once per output file, and every message points to that file;
-  - a failed download becomes an `[EXPORT ERROR]` block ("The attachment <name> could not be downloaded.") and an `export_error` on its JSONL record.
+  - a failed download becomes an `[EXPORT ERROR] <name> could not be downloaded: <error>` line and an `export_error` on its JSONL record.
 - `packaging.py` decides the output: one flat `.txt` only when the result is a single TXT with no attachment files, otherwise one `.zip` (TXTs at the root, `<stem>/` folders for attachments). The file is created exclusively in the exports directory (a numbered suffix on a name clash, so concurrent exports never overwrite each other).
 
 ### 5.9 `surfaces/`
@@ -258,7 +252,7 @@ lrh-outlook-connector/
 - List and search results are compact by default (`detail="full"` for every field).
 
 **`web/`:**
-- Starlette JSON API over the same service calls, plus `POST /api/export` (one download; an `X-Export-Errors` header carries the "Export errors" line when something could not be exported, and the UI shows it) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
+- Starlette JSON API over the same service calls, plus `POST /api/export` (one download; an `X-Export-Errors` header carries the error count when something could not be exported, and the UI says so) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
   - a thread-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, threads show an accurate count. An expanded thread spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
   - a "Deleted / Junk" toggle in the list header (it also covers Sync Issues), applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date range). The folder list shows only reachable folders;

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from outlook_connector.domain.models import ExportError, Message, MessageSummary, Recipient
+from outlook_connector.domain.models import Message, MessageSummary, Recipient
 
 RULE = "=" * 78
 THIN = "-" * 78
@@ -19,10 +19,9 @@ class RenderedMessage:
     message: MessageSummary
     text: str
     attachment_lines: list[str] = field(default_factory=list)
-    export_error: ExportError | None = None  # why the body is missing (``text`` then holds its block)
-    error_blocks: list[str] = field(default_factory=list)  # attachment errors, rendered (TXT)
+    export_error: str | None = None  # why the body is missing (``text`` then holds the marker)
     attachments: list[dict[str, Any]] = field(default_factory=list)  # JSONL attachment records
-    attachments_export_error: ExportError | None = None  # why the attachments could not be listed
+    attachments_export_error: str | None = None  # why the attachments could not be listed
 
 
 def stamp(value: datetime | None) -> str:
@@ -59,8 +58,6 @@ def render_message(item: RenderedMessage, *, position: str) -> str:
     for line in item.attachment_lines:
         lines.append(f"Attachment: {line}")
     lines.append(THIN)
-    for block in item.error_blocks:
-        lines += [block, ""]
     lines.append(item.text)
     return "\n".join(lines)
 
@@ -124,7 +121,7 @@ def jsonl_record(item: RenderedMessage, *, body_kind: str) -> str:
         "attachments": item.attachments,
     }
     if item.export_error:  # present only when the body is missing
-        record["export_error"] = item.export_error.model_dump(mode="json")
+        record["export_error"] = item.export_error
     if item.attachments_export_error:
-        record["attachments_export_error"] = item.attachments_export_error.model_dump(mode="json")
+        record["attachments_export_error"] = item.attachments_export_error
     return json.dumps(record, ensure_ascii=False)
