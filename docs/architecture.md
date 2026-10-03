@@ -261,13 +261,13 @@ lrh-outlook-connector/
 - Starlette JSON API over the same service calls, plus `POST /api/export` (one download; an `X-Export-Errors` header carries the "Export errors" line when something could not be exported, and the UI shows it) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
   - a thread-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, threads show an accurate count. An expanded thread spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
-  - a "Deleted / Junk" toggle in the list header (it also covers Sync Issues), applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date range). The folder list shows only reachable folders;
+  - a "Deleted / Junk" switch in the list header (it also covers Sync Issues), applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date range). The folder list shows only reachable folders;
   - attachment download buttons in the reader;
   - a folder picker and a "recent, all mail" view;
   - an online search box;
   - an in-memory filter;
   - selection checkboxes;
-  - export options.
+  - export options: switches for attachments and quoted history, and a segmented control for how files are split (per thread, all in one, per message).
 - Binds to localhost only.
 
 ## 6. Capability routing and portability

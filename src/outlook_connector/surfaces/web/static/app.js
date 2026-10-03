@@ -454,7 +454,7 @@ function coveredByThread(messageId) {
 function exportOptions() {
   return {
     include_attachments: $("opt-attachments").checked,
-    combine: $("opt-files").value,
+    combine: document.querySelector('input[name="files"]:checked').value,
     body: $("opt-full").checked ? "full" : "unique",
     include_deleted_items: includeDeleted(),
   };
