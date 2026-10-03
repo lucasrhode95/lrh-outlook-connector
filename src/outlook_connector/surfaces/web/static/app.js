@@ -15,6 +15,7 @@ const state = {
   threads: new Map(),    // key -> { key, conversationId, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
   selectedThreads: new Set(),
   selectedMessages: new Set(),
+  attachments: new Map(), // message id -> its files (null while asked), for the list's chips
   activeMessage: null,
   listRequest: 0,        // newest list/search load; older responses are ignored
   readerRequest: 0,      // same for the reader pane
@@ -66,13 +67,35 @@ function fold(text) {
   return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+// Like Outlook: today "9:31 AM", this week "Fri 9:31 AM", this year "Sep 28", older "Sep 28, 2025".
 function formatDate(iso) {
   if (!iso) return "";
   const date = new Date(iso);
-  const today = new Date();
-  return date.toDateString() === today.toDateString()
-    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : date.toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (date.toDateString() === now.toDateString()) return time;
+  if (now - date < 6 * 86_400_000 && date < now) return `${date.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  const options = { month: "short", day: "numeric" };
+  if (date.getFullYear() !== now.getFullYear()) options.year = "numeric";
+  return date.toLocaleDateString([], options);
+}
+
+// ------------------------------------------------------------------ icons (inline: the UI loads nothing from the internet)
+
+const ICONS = {
+  chevronRight: '<path d="M9 6l6 6l-6 6"/>',
+  chevronDown: '<path d="M6 9l6 6l6 -6"/>',
+  paperclip: '<path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5"/>',
+  flag: '<path d="M5 5a5 5 0 0 1 7 0a5 5 0 0 0 7 0v9a5 5 0 0 1 -7 0a5 5 0 0 0 -7 0v-9z"/><path d="M5 21v-7"/>',
+  calendar: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/>',
+  calendarOff: '<path d="M4 7a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M10 14l4 4m0 -4l-4 4"/>',
+  file: '<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/>',
+};
+
+function icon(name, extraClass = "") {
+  const span = el("span", { class: `icon ${extraClass}`.trim(), "aria-hidden": "true" });
+  span.innerHTML = `<svg viewBox="0 0 24 24">${ICONS[name]}</svg>`; // fixed markup above, never mail content
+  return span;
 }
 
 function who(person) {
@@ -186,6 +209,7 @@ async function loadPage(reset, path, apply, loadingText) {
     showCoverage(result.coverage);
     render();
     loadSizes(request);
+    loadAttachmentNames(request);
   } catch {
     if (request !== state.listRequest) return;
     if (reset) $("threads").replaceChildren(el("p", { class: "muted pad" }, "Could not load messages (see the message above)."));
@@ -234,6 +258,26 @@ async function loadSizes(request) {
       if (size) { thread.size = size.messages; thread.sizeAtLeast = size.at_least; }
     }
     render();
+  }
+}
+
+// File names for the chips under messages with attachments: one batched request per 200 messages
+// (Graph takes them 20 at a time). Rows work without them.
+async function loadAttachmentNames(request = state.listRequest) {
+  const pending = [...state.threads.values()].flatMap((t) => [...t.messages.values()])
+    .filter((m) => m.has_attachments && !state.attachments.has(m.id)).map((m) => m.id);
+  for (let start = 0; start < pending.length; start += 200) {
+    const ids = pending.slice(start, start + 200);
+    for (const id of ids) state.attachments.set(id, null); // asked; not asked again
+    let names;
+    try {
+      names = await json("/api/attachments", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message_ids: ids }) });
+    } catch {
+      return;
+    }
+    for (const [id, items] of Object.entries(names)) state.attachments.set(id, items);
+    if (request === state.listRequest) render();
   }
 }
 
@@ -286,26 +330,100 @@ function countLabel(thread, loaded) {
   return `${loaded}+`;
 }
 
+// Rows look like Outlook's: sender, subject, preview; a blue bar and blue subject when unread; flag
+// and paperclip icons; file chips; meeting mail labelled, with its time and place. The whole row is
+// clickable; only a file chip has its own action (download).
+
+const MEETING_LABELS = { invite: "Invite", update: "Updated", cancelled: "Canceled", accepted: "Accepted",
+  tentative: "Tentative", declined: "Declined" };
+const RESPONSES = new Set(["accepted", "tentative", "declined"]);
+
+function rowClasses(base, { unread, active, response, matched }) {
+  return [base, unread && "unread", active && "active", response && "response", matched && "matched"].filter(Boolean).join(" ");
+}
+
+function kindBadge(meeting) {
+  return meeting ? el("span", { class: `kind kind-${meeting.kind}` }, MEETING_LABELS[meeting.kind]) : null;
+}
+
+function subjectLine(message) {
+  const cancelled = message.meeting && message.meeting.kind === "cancelled";
+  return el("div", { class: "subject" }, kindBadge(message.meeting),
+    el("span", { class: cancelled ? "struck" : "" }, message.subject || "(no subject)"));
+}
+
+// "Tue Oct 6, 10:00 – 10:30 AM · Microsoft Teams Meeting"; a cancellation says when it was
+function meetingPanel(meeting) {
+  if (!meeting || RESPONSES.has(meeting.kind) || !meeting.start) return null;
+  const start = new Date(meeting.start);
+  const end = meeting.end ? new Date(meeting.end) : null;
+  const day = start.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  const hours = (d) => d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const time = meeting.all_day ? `${day} (all day)` : `${day}, ${hours(start)}${end ? ` – ${hours(end)}` : ""}`;
+  const cancelled = meeting.kind === "cancelled";
+  const text = [cancelled ? `Was ${time}` : time, meeting.location].filter(Boolean).join(" · ");
+  return el("div", { class: `meeting${cancelled ? " cancelled" : ""}${meeting.out_of_date ? " outdated" : ""}`,
+    title: meeting.out_of_date ? "A newer update replaced this invitation" : undefined },
+    icon(cancelled ? "calendarOff" : "calendar"), el("span", {}, text));
+}
+
+const FILE_COLORS = { xlsx: "sheet", xls: "sheet", csv: "sheet", docx: "doc", doc: "doc", pptx: "slides", ppt: "slides",
+  pdf: "pdf", png: "image", jpg: "image", jpeg: "image", gif: "image", zip: "archive", eml: "mail", msg: "mail" };
+
+function fileChips(message) {
+  const files = state.attachments.get(message.id);
+  if (!files || !files.length) return null;
+  return el("div", { class: "chips" }, files.map((file) => {
+    const name = file.name || "attachment";
+    const kind = FILE_COLORS[name.split(".").pop().toLowerCase()] || "other";
+    if (file.kind === "reference") return el("span", { class: "chip", title: "Cloud link" }, icon("file", kind), name);
+    return el("button", { type: "button", class: "chip", title: `Download ${name}`,
+      onclick: (event) => { event.stopPropagation(); download(`/api/messages/${encodeURIComponent(message.id)}/attachments/${encodeURIComponent(file.id)}`, {}); } },
+      icon("file", kind), name);
+  }));
+}
+
+function sideColumn(date, { flagged, attachments }) {
+  return el("div", { class: "side" },
+    el("span", { class: "date" }, formatDate(date)),
+    el("span", { class: "icons" }, flagged ? icon("flag", "flagged") : null, attachments ? icon("paperclip") : null));
+}
+
+function selectBox(title, checked, disabled, onchange) {
+  const box = el("input", { type: "checkbox", title, disabled, onclick: (event) => event.stopPropagation(), onchange });
+  box.checked = checked;
+  return box;
+}
+
+// The invitation a thread is about: the newest current one, else the newest cancellation.
+function threadMeeting(messages) {
+  const meetings = messages.map((m) => m.meeting).filter(Boolean);
+  return meetings.find((m) => (m.kind === "invite" || m.kind === "update") && !m.out_of_date)
+    || meetings.find((m) => m.kind === "cancelled") || null;
+}
+
 // A conversation with one message: a plain row, like Outlook's conversation view.
 function renderSingle(thread) {
   const [message] = thread.messages.values();
-  const checkbox = el("input", { type: "checkbox", title: "Export this message",
-    onclick: (event) => event.stopPropagation(),
-    onchange: (event) => {
+  const checkbox = selectBox("Export this message",
+    state.selectedMessages.has(message.id) || state.selectedThreads.has(thread.conversationId), false, (event) => {
       toggle(state.selectedMessages, message.id, event.target.checked);
       if (!event.target.checked && thread.conversationId) state.selectedThreads.delete(thread.conversationId);
       render();
-    } });
-  checkbox.checked = state.selectedMessages.has(message.id) || state.selectedThreads.has(thread.conversationId);
+    });
+  const response = message.meeting && RESPONSES.has(message.meeting.kind);
   return el("div", { class: "thread" },
-    el("div", { class: `thread-row${message.is_read === false ? " unread" : ""}${state.activeMessage === message.id ? " active" : ""}`,
+    el("div", { class: rowClasses("thread-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response }),
       onclick: () => openMessage(message.id) },
       checkbox,
       el("span", { class: "toggle" }),
-      el("div", {},
-        el("div", { class: "subject" }, message.subject || "(no subject)", ...badges(message, state.folder === null)),
-        el("div", { class: "who" }, who(message.sender))),
-      el("span", { class: "date" }, formatDate(message.received_at || message.sent_at))));
+      el("div", { class: "lines" },
+        el("div", { class: "who" }, who(message.sender), ...badges(message, state.folder === null)),
+        subjectLine(message),
+        response ? null : el("div", { class: "preview" }, message.preview || ""),
+        meetingPanel(message.meeting),
+        fileChips(message)),
+      sideColumn(message.received_at || message.sent_at, { flagged: message.flagged, attachments: message.has_attachments })));
 }
 
 function renderThread(thread) {
@@ -317,18 +435,19 @@ function renderThread(thread) {
   const senders = [...new Set(messages.map((m) => who(m.sender)))].join(SEPARATOR);
   const unread = messages.some((m) => m.is_read === false);
   const selectable = Boolean(thread.conversationId);
-  const checkbox = el("input", { type: "checkbox", title: "Export the whole thread", disabled: !selectable,
-    onclick: (event) => event.stopPropagation(),
-    onchange: (event) => { toggle(state.selectedThreads, thread.conversationId, event.target.checked); render(); } });
-  checkbox.checked = state.selectedThreads.has(thread.conversationId);
-  const row = el("div", { class: `thread-row${unread ? " unread" : ""}`, onclick: () => expand(thread) },
+  const checkbox = selectBox("Export the whole thread", state.selectedThreads.has(thread.conversationId), !selectable,
+    (event) => { toggle(state.selectedThreads, thread.conversationId, event.target.checked); render(); });
+  const meeting = threadMeeting(messages);
+  const row = el("div", { class: rowClasses("thread-row", { unread }), onclick: () => expand(thread) },
     checkbox,
-    el("span", { class: "toggle" }, thread.expanded ? "▾" : "▸"),
-    el("div", {},
-      el("div", { class: "subject" }, newest.subject || "(no subject)",
-        el("span", { class: "badge" }, countLabel(thread, messages.length))),
-      el("div", { class: "who" }, senders)),
-    el("span", { class: "date" }, formatDate(newest.received_at || newest.sent_at)));
+    el("span", { class: "toggle" }, icon(thread.expanded ? "chevronDown" : "chevronRight")),
+    el("div", { class: "lines" },
+      el("div", { class: "who" }, senders, el("span", { class: "count" }, countLabel(thread, messages.length))),
+      el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
+      el("div", { class: "preview" }, newest.preview || ""),
+      meetingPanel(meeting)),
+    sideColumn(newest.received_at || newest.sent_at,
+      { flagged: messages.some((m) => m.flagged), attachments: messages.some((m) => m.has_attachments) }));
   const node = el("div", { class: "thread" }, row);
   if (thread.expanded) {
     node.append(el("div", { class: "messages" }, messages.map((m) => renderMessage(m, thread)),
@@ -347,18 +466,19 @@ function badges(message, withFolder) {
 
 function renderMessage(message, thread) {
   const covered = state.selectedThreads.has(thread.conversationId);
-  const checkbox = el("input", { type: "checkbox", disabled: covered, title: covered ? "Included with the thread" : "Export this message",
-    onclick: (event) => event.stopPropagation(),
-    onchange: (event) => { toggle(state.selectedMessages, message.id, event.target.checked); renderSelection(); } });
-  checkbox.checked = covered || state.selectedMessages.has(message.id);
-  const classes = ["msg-row", state.activeMessage === message.id && "active", message.is_read === false && "unread",
-    message.matched && "matched"].filter(Boolean).join(" ");
-  return el("div", { class: classes, title: message.matched ? "Matches the search" : undefined, onclick: () => openMessage(message.id) },
+  const checkbox = selectBox(covered ? "Included with the thread" : "Export this message",
+    covered || state.selectedMessages.has(message.id), covered,
+    (event) => { toggle(state.selectedMessages, message.id, event.target.checked); renderSelection(); });
+  const response = message.meeting && RESPONSES.has(message.meeting.kind);
+  return el("div", { class: rowClasses("msg-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response, matched: message.matched }),
+    title: message.matched ? "Matches the search" : undefined, onclick: () => openMessage(message.id) },
     checkbox,
-    el("div", {},
-      el("div", { class: "msg-subject" }, who(message.sender), ...badges(message, true)),
-      el("div", { class: "who" }, message.preview || message.subject || "")),
-    el("span", { class: "date" }, formatDate(message.received_at || message.sent_at)));
+    el("div", { class: "lines" },
+      el("div", { class: "who" }, kindBadge(message.meeting), who(message.sender), ...badges(message, true)),
+      response ? null : el("div", { class: "preview" }, message.preview || message.subject || ""),
+      meetingPanel(message.meeting),
+      fileChips(message)),
+    sideColumn(message.received_at || message.sent_at, { flagged: message.flagged, attachments: message.has_attachments }));
 }
 
 function toggle(set, value, on) {
@@ -377,6 +497,7 @@ async function expand(thread) {
       thread.complete = full.coverage.complete;
       thread.size = full.messages.length;
       thread.sizeAtLeast = !full.coverage.complete;
+      loadAttachmentNames();
     } finally {
       thread.loading = false;
     }

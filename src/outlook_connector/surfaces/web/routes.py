@@ -202,6 +202,17 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             artifact.path, media_type=artifact.content_type, filename=artifact.filename, headers=headers
         )
 
+    async def attachment_names(request: Request) -> Response:
+        payload = await request.json()
+        ids = [str(i) for i in payload.get("message_ids") or []]
+        found = await (await context.services()).mailbox.attachments_many(ids)
+        return JSONResponse(
+            {
+                mid: [a.model_dump(mode="json") for a in items if not a.is_inline]
+                for mid, items in found.items()
+            }
+        )
+
     async def heartbeat(_: Request) -> Response:
         return JSONResponse({"ok": True})
 
@@ -216,6 +227,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         Route("/api/messages/{message_id}/attachments/{attachment_id}", api(attachment)),
         Route("/api/search", api(search)),
         Route("/api/thread-sizes", api(thread_sizes), methods=["POST"]),
+        Route("/api/attachments", api(attachment_names), methods=["POST"]),
         Route("/api/threads/{conversation_id}", api(thread)),
         Route("/api/export", api(export), methods=["POST"]),
         Route("/api/heartbeat", heartbeat, methods=["POST"]),

@@ -2,15 +2,36 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary, Recipient
+from outlook_connector.domain.models import (
+    Attachment,
+    Folder,
+    Meeting,
+    MeetingKind,
+    Message,
+    MessageSummary,
+    Recipient,
+)
 
 SUMMARY_FIELDS = (
     "id,conversationId,parentFolderId,subject,from,sender,toRecipients,ccRecipients,receivedDateTime,"
-    "sentDateTime,isRead,isDraft,hasAttachments,importance,categories,flag,bodyPreview,internetMessageId"
+    "sentDateTime,isRead,isDraft,hasAttachments,importance,categories,flag,bodyPreview,internetMessageId,"
+    # meeting mail: typed fields of Graph's eventMessage subtypes, absent on ordinary mail
+    "microsoft.graph.eventMessage/meetingMessageType,microsoft.graph.eventMessage/startDateTime,"
+    "microsoft.graph.eventMessage/endDateTime,microsoft.graph.eventMessage/location,"
+    "microsoft.graph.eventMessage/isAllDay,microsoft.graph.eventMessage/isOutOfDate,"
+    "microsoft.graph.eventMessageRequest/meetingRequestType"
 )
+MEETING_KINDS: dict[str, MeetingKind] = {
+    "meetingRequest": "invite",
+    "meetingCancelled": "cancelled",
+    "meetingAccepted": "accepted",
+    "meetingTenativelyAccepted": "tentative",  # sic: Graph's spelling
+    "meetingDeclined": "declined",
+}
+NEW_REQUEST = (None, "none", "newMeetingRequest")
 MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody"
 FOLDER_FIELDS = "id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount,isHidden"
 ATTACHMENT_FIELDS = "id,name,contentType,size,isInline"
@@ -23,6 +44,31 @@ def parse_dt(value: Any) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+
+
+def event_time(value: Any) -> datetime | None:
+    """A Graph dateTimeTimeZone. Graph sends UTC unless asked otherwise; another zone is not guessed."""
+    if not isinstance(value, dict) or value.get("timeZone") != "UTC":
+        return None
+    stamp = parse_dt(str(value.get("dateTime") or "")[:19])  # Graph sends 7 fraction digits
+    return stamp.replace(tzinfo=UTC) if stamp else None
+
+
+def meeting(data: dict[str, Any]) -> Meeting | None:
+    kind = MEETING_KINDS.get(str(data.get("meetingMessageType")))
+    if kind is None:
+        return None
+    if kind == "invite" and data.get("meetingRequestType") not in NEW_REQUEST:
+        kind = "update"
+    place = data.get("location")
+    return Meeting(
+        kind=kind,
+        start=event_time(data.get("startDateTime")),
+        end=event_time(data.get("endDateTime")),
+        all_day=bool(data.get("isAllDay")),
+        location=(place.get("displayName") or None) if isinstance(place, dict) else None,
+        out_of_date=bool(data.get("isOutOfDate")),
+    )
 
 
 def recipient(value: Any) -> Recipient | None:
@@ -69,6 +115,7 @@ def _summary_fields(data: dict[str, Any]) -> dict[str, Any]:
         "flagged": flag.get("flagStatus") == "flagged",
         "preview": data.get("bodyPreview"),
         "internet_message_id": data.get("internetMessageId"),
+        "meeting": meeting(data),
     }
 
 
