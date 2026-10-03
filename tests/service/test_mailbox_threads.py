@@ -62,6 +62,26 @@ async def test_list_messages_pages_with_self_contained_cursor(mailbox: Mailbox) 
     assert [m.id for m in second.items] == ["m3", "m2"]
 
 
+async def test_meeting_mail_is_marked(mailbox: Mailbox, fake: FakeGraph) -> None:
+    when = {"dateTime": "2026-10-07T18:00:00.0000000", "timeZone": "UTC"}
+    fake.add(
+        FakeMessage("inv", "CCB", "f-inbox", "2026-10-02T09:00:00Z", conversation="c-ccb",
+                    meeting={"meetingMessageType": "meetingRequest", "meetingRequestType": "fullUpdate",
+                             "startDateTime": when, "endDateTime": when, "location": {"displayName": "Teams"},
+                             "isAllDay": False, "isOutOfDate": True})
+    )  # fmt: skip
+    fake.add(
+        FakeMessage("acc", "Accepted: CCB", "f-inbox", "2026-10-02T10:00:00Z", conversation="c-ccb",
+                    meeting={"meetingMessageType": "meetingTenativelyAccepted"})
+    )  # fmt: skip
+    items = {m.id: m for m in (await mailbox.list_messages(folder="inbox")).items}
+    invite = items["inv"].meeting
+    assert invite and invite.kind == "update" and invite.location == "Teams" and invite.out_of_date
+    assert invite.start == datetime(2026, 10, 7, 18, tzinfo=UTC)
+    assert items["acc"].meeting and items["acc"].meeting.kind == "tentative"
+    assert items["m5"].meeting is None  # ordinary mail
+
+
 async def test_list_messages_folder_and_window(mailbox: Mailbox) -> None:
     page = await mailbox.list_messages(folder="inbox", since=datetime(2026, 9, 29, tzinfo=UTC))
     assert [m.id for m in page.items] == ["m5"] and page.coverage.complete

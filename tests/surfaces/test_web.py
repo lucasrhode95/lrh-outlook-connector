@@ -53,6 +53,16 @@ def test_profile_photo_is_served(fake: FakeGraph) -> None:
     assert client.get("/api/me/photo", headers={"X-Session-Token": "wrong"}).status_code == 403
 
 
+def test_attachment_names_for_the_list(client: TestClient) -> None:
+    names = client.post("/api/attachments", json={"message_ids": ["m3", "m1"]}).json()
+    assert [a["name"] for a in names["m3"]] == ["numbers.xlsx"]  # inline images left out
+    assert names["m1"] == []
+    assert (
+        client.post("/api/attachments", json={"message_ids": [f"x{i}" for i in range(201)]}).status_code
+        == 400
+    )
+
+
 def test_api_requires_the_session_token(client: TestClient) -> None:
     assert client.get("/api/folders", headers={"X-Session-Token": "wrong"}).status_code == 403
 

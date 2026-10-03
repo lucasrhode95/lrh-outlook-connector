@@ -66,6 +66,21 @@ class Folder(Compact):
     # Sync Issues, which Outlook hides from its mail view but which stays reachable like Deleted Items.
 
 
+MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
+
+
+class Meeting(Compact):
+    """Meeting mail (Exchange's own item type, not guessed from the subject): an invitation or its
+    update, a cancellation, or a reply to an invitation."""
+
+    kind: MeetingKind
+    start: datetime | None = None
+    end: datetime | None = None
+    all_day: bool = False
+    location: str | None = None
+    out_of_date: bool = False  # a newer update replaced this invitation
+
+
 class MessageSummary(Compact):
     id: str  # Graph immutable id
     conversation_id: str | None = None
@@ -85,6 +100,7 @@ class MessageSummary(Compact):
     flagged: bool = False
     preview: str | None = None
     internet_message_id: str | None = None
+    meeting: Meeting | None = None  # set on meeting mail only
     also_in: list[str] = Field(default_factory=list)  # folders holding another copy (same Internet id)
 
 

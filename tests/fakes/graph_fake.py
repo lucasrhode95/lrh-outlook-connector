@@ -54,6 +54,7 @@ class FakeMessage:
     is_read: bool = True
     attachments: list[FakeAttachment] = field(default_factory=list)
     internet_id: str | None = None  # copies of one message (e.g. sent to yourself) share it
+    meeting: dict[str, Any] = field(default_factory=dict)  # eventMessage fields of meeting mail
 
     def json(self, *, text_body: bool) -> dict[str, Any]:
         body = self.text if text_body else self.html
@@ -84,6 +85,7 @@ class FakeMessage:
             "internetMessageId": self.internet_id or f"<{self.id}@example.com>",
             "body": {"contentType": kind, "content": body},
             "uniqueBody": {"contentType": kind, "content": unique},
+            **self.meeting,
         }
 
 

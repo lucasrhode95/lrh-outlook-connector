@@ -357,6 +357,15 @@ class Mailbox:
         except NotFound:
             raise NotFound(f"Message {message_id} is not on the server ({GONE}).") from None
 
+    async def attachments_many(self, message_ids: list[str]) -> dict[str, list[Attachment]]:
+        """Attachments of many messages at once (batched), for the list's file chips. Messages whose
+        listing failed are left out: the chips are a convenience."""
+        ids = list(dict.fromkeys(message_ids))
+        if len(ids) > MAX_SIZE_LOOKUPS:
+            raise InvalidRequest(f"At most {MAX_SIZE_LOOKUPS} messages per request.")
+        found, _ = await self.reader.list_attachments_many(ids) if ids else ({}, {})
+        return found
+
     async def get_message(
         self, message_id: str, *, body: BodyKind = "unique", offset: int = 0, max_chars: int = 20000
     ) -> MessageContent:

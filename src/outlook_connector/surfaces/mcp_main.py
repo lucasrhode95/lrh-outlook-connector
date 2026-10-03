@@ -57,6 +57,9 @@ coverage.excluded counts what was left out.
 and other non-mail items), are never listed, searched, counted, threaded or exported, and \
 list_folders does not show them; coverage.excluded.hidden counts any that were dropped. Search \
 covers mail only.
+- Meeting mail (invitations and their updates, cancellations, replies to invitations) carries \
+meeting: kind (invite, update, cancelled, accepted, tentative, declined), start, end, location, \
+out_of_date; ordinary mail has none. A reply written to an invitation stays in its conversation.
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
 - Reading: get_thread returns a whole conversation across folders, oldest first, with bodies \
