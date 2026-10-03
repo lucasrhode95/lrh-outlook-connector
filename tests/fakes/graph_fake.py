@@ -2,7 +2,8 @@
 
 It understands exactly the request shapes the connector sends (research §3): folder listing,
 message listing with receivedDateTime / conversationId filters, $search, $top paging,
-$batch, attachments and $value downloads. All data is synthetic.
+$batch, attachments and $value downloads. It also answers the OWS write actions (research §4)
+on the same mailbox, so a write can be read back through Graph. All data is synthetic.
 """
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 import httpx
 
@@ -41,6 +42,9 @@ class FakeMessage:
     conversation: str = "conv-1"
     sender: str = "alice@example.com"
     to: tuple[str, ...] = ("me@example.com",)
+    cc: tuple[str, ...] = ()
+    bcc: tuple[str, ...] = ()
+    is_draft: bool = False
     text: str = "Hello"
     unique_text: str | None = None
     html: str = "<p>Hello</p>"
@@ -64,12 +68,12 @@ class FakeMessage:
             "subject": self.subject,
             "from": {"emailAddress": {"name": self.sender.split("@")[0].title(), "address": self.sender}},
             "toRecipients": [{"emailAddress": {"name": t, "address": t}} for t in self.to],
-            "ccRecipients": [],
-            "bccRecipients": [],
+            "ccRecipients": [{"emailAddress": {"name": t, "address": t}} for t in self.cc],
+            "bccRecipients": [{"emailAddress": {"name": t, "address": t}} for t in self.bcc],
             "receivedDateTime": self.received,
             "sentDateTime": self.received,
             "isRead": self.is_read,
-            "isDraft": False,
+            "isDraft": self.is_draft,
             "hasAttachments": any(not a.inline for a in self.attachments),  # false when inline-only
             "importance": "normal",
             "categories": [],
@@ -92,6 +96,12 @@ class FakeGraph:
     reject_tokens: int = 0  # respond 401 (token rejected) to this many upcoming top-level requests
     claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
     batch_sizes: list[int] = field(default_factory=list)
+    ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
+    ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
+    # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
+    # "no-items" / "not-json" (HTTP 200 without readable item results),
+    # an int (that HTTP status), or a dict (that item result)
+    me: str = "me@example.com"
 
     # ------------------------------------------------------------------ helpers for tests
     def add_folder(
@@ -137,6 +147,8 @@ class FakeGraph:
             return httpx.Response(
                 429, headers={"retry-after": "0"}, json={"error": {"code": "TooManyRequests"}}
             )
+        if request.url.host == "outlook.cloud.microsoft":
+            return self.handle_ows(request)
         assert request.headers.get("authorization", "").startswith("Bearer "), "missing bearer token"
         prefer = request.headers.get("prefer", "")
         assert 'IdType="ImmutableId"' in prefer, "every Graph request must ask for immutable ids"
@@ -149,6 +161,60 @@ class FakeGraph:
                 status, content=content, headers={"content-type": "application/octet-stream", **request_id}
             )
         return httpx.Response(status, json=body, headers=request_id)
+
+    # ------------------------------------------------------------------ OWS (writes)
+    def handle_ows(self, request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/owa/service.svc", request.url.path
+        assert request.headers.get("authorization", "").startswith("Bearer ")
+        assert 'IdType="ImmutableId"' in request.headers.get("prefer", "")
+        action = request.url.params["action"]
+        assert request.headers.get("action") == action
+        posted = request.headers.get("x-owa-urlpostdata")
+        envelope = json.loads(unquote(posted)) if posted else json.loads(request.content)
+        assert envelope["__type"] == f"{action}JsonRequest:#Exchange"
+        body = envelope["Body"]
+        assert body["__type"] == f"{action}Request:#Exchange"
+        self.ows_calls.append((action, body))
+        script = self.ows_next.pop(0) if self.ows_next else None
+        if script == "no-answer":
+            raise httpx.ReadTimeout("no answer", request=request)
+        if script == "no-items":
+            return httpx.Response(200, json={"Body": {}})
+        if script == "not-json":
+            return httpx.Response(200, content=b"<html>", headers={"content-type": "text/html"})
+        if isinstance(script, int):
+            return httpx.Response(script, headers={"x-owa-error": "FakeError"}, json={})
+        if isinstance(script, dict):
+            return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": [script]}}})
+        items = getattr(self, f"ows_{action}")(body)
+        if script == "done-no-answer":
+            raise httpx.ReadTimeout("no answer", request=request)
+        return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": items}}})
+
+    def ows_CreateItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
+        disposition = body["MessageDisposition"]
+        (item,) = body["Items"]
+        addresses = lambda key: tuple(r["EmailAddress"] for r in item.get(key, []))  # noqa: E731
+        text = (item.get("Body") or item.get("NewBodyContent"))["Value"]
+        conversation = f"conv-new-{len(self.messages)}"
+        if item["__type"] in ("ReplyToItem:#Exchange", "ReplyAllToItem:#Exchange"):
+            original = self.messages.get(_graph_id(item["ReferenceItemId"]["Id"]))
+            if original is None:
+                return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
+            conversation = original.conversation
+            text += "\n\n> " + original.text
+        else:
+            assert item["__type"] == "Message:#Exchange" and item["MessageDisposition"] == disposition
+        new_id = f"w{len(self.messages)}-x_y"  # has "-" and "_", so the id mapping is exercised
+        folder = self.aliases["drafts" if disposition == "SaveOnly" else "sentitems"]
+        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.add(
+            FakeMessage(new_id, item.get("Subject") or "", folder, now, conversation=conversation,
+                        sender=self.me, to=addresses("ToRecipients"), cc=addresses("CcRecipients"),
+                        bcc=addresses("BccRecipients"), is_draft=disposition == "SaveOnly", text=text)
+        )  # fmt: skip
+        created = [{"ItemId": {"Id": _ows_id(new_id)}}] if disposition == "SaveOnly" else []
+        return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
 
     def route(
         self, method: str, path: str, params: dict[str, str], prefer: str, request: httpx.Request | None
@@ -301,6 +367,9 @@ class StaticTokens:
     class _T:
         value = "test-token"
 
+        def claims(self) -> dict[str, Any]:
+            return {"tid": "tenant-x", "oid": "user-x", "upn": "me@example.com"}
+
     def __init__(self) -> None:
         self.renewals: list[dict[str, Any]] = []
 
@@ -317,6 +386,7 @@ def sample_mailbox() -> FakeGraph:
     g = FakeGraph()
     g.add_folder("f-inbox", "Inbox", alias="inbox")
     g.add_folder("f-sent", "Sent Items", alias="sentitems")
+    g.add_folder("f-drafts", "Drafts", alias="drafts")
     g.add_folder("f-deleted", "Deleted Items", alias="deleteditems")
     g.add_folder("f-junk", "Junk Email", alias="junkemail")
     g.add_folder("f-archive", "Archive", alias="archive")
@@ -380,3 +450,11 @@ def sample_mailbox() -> FakeGraph:
         )
     )
     return g
+
+
+def _ows_id(graph_id: str) -> str:
+    return graph_id.replace("-", "/").replace("_", "+")
+
+
+def _graph_id(ows_id: str) -> str:
+    return ows_id.replace("/", "-").replace("+", "_")

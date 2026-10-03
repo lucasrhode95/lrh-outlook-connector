@@ -221,3 +221,58 @@ class ExportArtifact(Compact):
     attachment_listing_failures: int = 0  # messages whose attachments could not be listed
     messages_excluded: dict[str, int] = Field(default_factory=dict)  # ExclusionReason -> count
     unavailable_message_ids: list[str] = Field(default_factory=list)  # bodies not fetched (marked in file)
+
+
+# ---------------------------------------------------------------- writes (requirements v4 §11)
+
+MAX_RECIPIENTS = 100
+MAX_BODY_CHARS = 100_000
+ADDRESS_PATTERN = r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$"
+
+
+class OutgoingMessage(BaseModel):
+    """A plain-text message to draft or send from the signed-in account (no attachments, no Send As).
+
+    As a reply (``reply_to_message_id``), Outlook appends the quoted original below ``body``, and
+    omitted recipients and subject default to Outlook's: the sender (and, with ``reply_all``, the
+    other recipients, minus you unless nobody else is left) and "RE: <subject>".
+    """
+
+    to: list[str] = Field(default_factory=list, description="Email addresses.")
+    cc: list[str] = Field(default_factory=list, description="Email addresses.")
+    bcc: list[str] = Field(default_factory=list, description="Email addresses.")
+    subject: str | None = Field(default=None, max_length=255)
+    body: str = Field(max_length=MAX_BODY_CHARS, description="Plain text.")
+    reply_to_message_id: str | None = Field(default=None, description="Reply to this message.")
+    reply_all: bool = False
+
+
+class EmailProposal(Compact):
+    """Exactly what would be sent, resolved and validated, with the code that confirms it."""
+
+    sender: str  # the signed-in account; there is no Send As
+    to: list[str] = Field(default_factory=list)
+    cc: list[str] = Field(default_factory=list)
+    bcc: list[str] = Field(default_factory=list)
+    subject: str
+    body: str
+    reply_to_message_id: str | None = None
+    reply_all: bool = False
+    quotes_original: bool = False  # a reply: Outlook appends the quoted original below the body
+    confirmation: str  # changes with any field above
+
+
+class DraftResult(Compact):
+    id: str  # the draft's Graph immutable id (readable with get_message)
+    folder: str = "Drafts"
+    proposal: EmailProposal  # what the draft holds (its confirmation code is not needed to save)
+    verified: bool  # the draft was read back from the mailbox
+
+
+SendStatus = Literal["sent", "unknown"]
+
+
+class SendResult(Compact):
+    status: SendStatus  # "unknown": no clear answer and no copy found in Sent Items yet
+    detail: str
+    sent_item_id: str | None = None  # the Sent Items copy, when it was looked for and found

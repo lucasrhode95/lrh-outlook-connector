@@ -169,11 +169,13 @@ Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` h
 
 The transport is OWS `CreateItem` with `SendAndSaveCopy` via the write (One Outlook Web) token. It starts as plain text only, with no attachments and no Send As.
 
-Teams-style safeguards:
+**Draft first:** `create_draft` saves a message or reply into Drafts and never sends it, so it needs no confirmation; the user sends it from Outlook. Agents prefer it unless the user explicitly asks them to send.
 
-- An explicit per-message `user_confirmation`.
-- Revalidate the account, From, To/CC/BCC, subject and body against the confirmed proposal before sending.
-- No retry on an ambiguous result. Check Sent Items instead.
+Teams-style safeguards for `send_email`:
+
+- An explicit per-message `user_confirmation`: `propose_email` returns the message exactly as it would be sent and a confirmation code; the agent shows the proposal and passes the code only after the user confirms it.
+- Revalidate the account, From, To/CC/BCC, subject and body against the confirmed proposal before sending: the code is a hash of all of them, recomputed at send time, so any change is refused. The write sign-in must be the bound account.
+- No retry on an ambiguous result. Check Sent Items instead; if the copy is not there, report "unknown" and tell the user to check before anything is sent again.
 - MCP annotations `destructiveHint=true`, `openWorldHint=true`.
 
 Live testing is limited to self-sends to `lucas.rhode@landisgyr.com`.
