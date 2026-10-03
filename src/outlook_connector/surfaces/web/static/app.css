@@ -3,6 +3,7 @@
   --accent: #1f5fbf; --accent-soft: #e8f0fc; --danger: #b3261e; --danger-soft: #fbe9e7;
   --switch-off: #c3c9d4; --segment-bg: #eceef2;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px;
+  color-scheme: light dark; /* native scrollbars and controls follow the theme */
 }
 @media (prefers-color-scheme: dark) {
   :root {
