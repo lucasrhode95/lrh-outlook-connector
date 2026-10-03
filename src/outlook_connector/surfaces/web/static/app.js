@@ -223,7 +223,8 @@ async function loadPage(reset, path, apply, loadingText) {
 
 function loadList(reset) {
   const { since, until } = dateBounds();
-  const scope = { folder: state.folder, since, until, limit: 100, include_deleted_items: includeDeleted() };
+  const scope = { folder: state.folder, since, until, limit: 100, include_deleted_items: includeDeleted(),
+    include_meeting_mail: $("opt-meetings").checked };
   const path = `/api/messages?${query({ ...scope, cursor: reset ? null : state.cursor })}`;
   return loadPage(reset, path, (page) => {
     for (const item of page.items) addMessage(item);
@@ -233,7 +234,8 @@ function loadList(reset) {
 function runSearch(reset) {
   const { since, until } = dateBounds();
   const path = `/api/search?${query({ q: state.query, since, until, folder: state.folder, limit: 50,
-    include_deleted_items: includeDeleted(), cursor: reset ? null : state.cursor })}`;
+    include_deleted_items: includeDeleted(), include_meeting_mail: $("opt-meetings").checked,
+    cursor: reset ? null : state.cursor })}`;
   return loadPage(reset, path, (result) => {
     for (const hit of result.conversations) for (const message of hit.matching_messages) addMessage(message, { matched: true });
   }, "Searching the mailbox…");
@@ -286,6 +288,7 @@ function showCoverage(coverage) {
   const excluded = coverage.excluded || {};
   const notShown = (excluded.deleted_or_junk || 0) + (excluded.sync_issues || 0);
   if (notShown) parts.push(`${notShown} in Deleted / Junk / Sync Issues not shown`);
+  if (excluded.meeting_mail) parts.push(`${excluded.meeting_mail} meeting messages not shown`);
   $("coverage").textContent = parts.join(" · ");
   $("coverage").title = (coverage.notes || []).join("\n");
 }
@@ -442,7 +445,7 @@ function renderThread(thread) {
     checkbox,
     el("span", { class: "toggle" }, icon(thread.expanded ? "chevronDown" : "chevronRight")),
     el("div", { class: "lines" },
-      el("div", { class: "who" }, senders, el("span", { class: "count" }, countLabel(thread, messages.length))),
+      el("div", { class: "who" }, senders, el("span", { class: "thread-count" }, countLabel(thread, messages.length))),
       el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
       el("div", { class: "preview" }, newest.preview || ""),
       meetingPanel(meeting)),
@@ -592,7 +595,7 @@ function exportRequest() {
 // The whole current view: this folder (or the mailbox) within the chosen dates, up to 2,000 messages.
 function viewRequest() {
   const { since, until } = dateBounds();
-  return { folder: state.folder, since, until, ...exportOptions() };
+  return { folder: state.folder, since, until, include_meeting_mail: $("opt-meetings").checked, ...exportOptions() };
 }
 
 function renderExportView() {
@@ -738,6 +741,7 @@ $("export-view").addEventListener("click", () => runExport($("export-view"), vie
 $("refresh-folders").addEventListener("click", () => loadFolders(true));
 $("reader-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
 $("opt-deleted").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
+$("opt-meetings").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
 $("clear").addEventListener("click", () => { state.selectedThreads.clear(); state.selectedMessages.clear(); render(); });
 $("export").addEventListener("click", () => runExport($("export"), exportRequest(), "Export"));
 setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_000);

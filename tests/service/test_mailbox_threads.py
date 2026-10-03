@@ -82,6 +82,45 @@ async def test_meeting_mail_is_marked(mailbox: Mailbox, fake: FakeGraph) -> None
     assert items["m5"].meeting is None  # ordinary mail
 
 
+def add_meeting_threads(fake: FakeGraph) -> None:
+    """c-only: an invitation, an RSVP and a cancellation. c-talk: an invitation with a real reply."""
+    for mid, kind, conv in (
+        ("inv1", "meetingRequest", "c-only"),
+        ("rsvp1", "meetingAccepted", "c-only"),
+        ("cxl1", "meetingCancelled", "c-only"),
+        ("inv2", "meetingRequest", "c-talk"),
+    ):
+        fake.add(FakeMessage(mid, "Sync", "f-inbox", "2026-10-02T09:00:00Z", conversation=conv,
+                             meeting={"meetingMessageType": kind}))  # fmt: skip
+    fake.add(FakeMessage("reply2", "RE: Sync", "f-inbox", "2026-10-02T10:00:00Z", conversation="c-talk"))
+
+
+async def test_meeting_mail_can_be_left_out(mailbox: Mailbox, fake: FakeGraph) -> None:
+    add_meeting_threads(fake)
+    everything = await mailbox.list_messages(folder="inbox")
+    assert {"inv1", "rsvp1", "cxl1", "inv2", "reply2"} <= {m.id for m in everything.items}  # default: shown
+    page = await mailbox.list_messages(folder="inbox", include_meeting_mail=False)
+    ids = {m.id for m in page.items}
+    assert "reply2" in ids  # the conversation with a real reply still shows, through the reply
+    assert not ids & {"inv1", "rsvp1", "cxl1", "inv2"}  # the meeting-only conversation is gone
+    assert page.coverage.excluded == {"meeting_mail": 4}
+    thread = await Threads(mailbox).get_thread("c-talk", include_bodies=False)
+    assert [t.message.id for t in thread.messages] == ["inv2", "reply2"]  # threads stay whole
+
+
+async def test_meeting_filter_survives_paging_and_search(mailbox: Mailbox, fake: FakeGraph) -> None:
+    add_meeting_threads(fake)
+    first = await mailbox.list_messages(include_meeting_mail=False, limit=2)
+    rest, cursor = list(first.items), first.cursor
+    while cursor:
+        page = await mailbox.list_messages(limit=2, cursor=cursor)
+        rest += page.items
+        cursor = page.cursor
+    assert not any(m.meeting for m in rest) and "reply2" in {m.id for m in rest}
+    result = await mailbox.search("Sync", include_meeting_mail=False)
+    assert [m.id for h in result.conversations for m in h.matching_messages] == ["reply2"]
+
+
 async def test_list_messages_folder_and_window(mailbox: Mailbox) -> None:
     page = await mailbox.list_messages(folder="inbox", since=datetime(2026, 9, 29, tzinfo=UTC))
     assert [m.id for m in page.items] == ["m5"] and page.coverage.complete
