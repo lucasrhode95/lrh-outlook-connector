@@ -97,7 +97,7 @@ Lazy population:
 
 ## 8. Listing, threads and search
 
-**Scope, shared by list, search, thread and export:** Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies) are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. `received_only` also leaves out Sent Items, Drafts and Outbox. Results count what was left out. **Hidden folders and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, thread and export:** Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies) are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
 
@@ -132,7 +132,7 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 ### 10.1 Selection and options (UI and MCP)
 
-The selection is any mix of **whole threads**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `received_only`), deduplicated by message and by copy. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
+The selection is any mix of **whole threads**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `include_sent_items`), deduplicated by message and by copy. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
 
 | Option | Default | Effect |
 |---|---|---|

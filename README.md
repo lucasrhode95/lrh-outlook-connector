@@ -60,8 +60,9 @@ Deleted Items and never deletes permanently.
 Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issues (the copies
 Outlook files when two versions of an item collide while syncing) are left out unless
 `include_deleted_items=true` (a folder you name is always included; a subfolder counts with its
-parent, so a folder you deleted in Outlook counts as Deleted Items). `received_only=true` also leaves
-out Sent Items, Drafts and Outbox, and `coverage.excluded` counts what was left out. Copies of one
+parent, so a folder you deleted in Outlook counts as Deleted Items). `include_sent_items=false`
+also leaves out Sent Items, Drafts and Outbox (included by default). Both flags point the same way:
+true shows more mail, false filters more. `coverage.excluded` counts what was left out. Copies of one
 message (mail sent to yourself or to a list you are on) are shown once, with `also_in` naming the
 other folders.
 
@@ -72,8 +73,8 @@ search hits carry the conversation's message count, and `list_messages(include_t
 server's count for the window.
 
 `export_messages` takes conversations, message ids and/or a range (`since`, `until`, `folder`,
-`received_only`), up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one JSON record
-per message for agents; `txt` is for people. Every exported message carries its message,
+`include_sent_items=false`), up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one
+JSON record per message for agents; `txt` is for people. Every exported message carries its message,
 conversation and Internet ids, and a message that exists in several folders is exported once, with
 `also_in` naming the other folders. Messages selected by id are read from the server: if any of them
 cannot be read (deleted or moved meanwhile, or still throttled), the export fails, writes nothing and

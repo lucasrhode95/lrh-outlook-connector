@@ -76,8 +76,8 @@ async def test_messages_deleted_on_the_server_are_gone_from_the_next_listing(
     assert "m1" not in [m.id for m in page.items]
 
 
-async def test_received_only_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
-    page = await mailbox.list_messages(received_only=True)
+async def test_without_sent_items_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
+    page = await mailbox.list_messages(include_sent_items=False)
     assert [m.id for m in page.items] == ["m5", "m3", "m1"]
     assert page.coverage.excluded == {"deleted_or_junk": 1, "outgoing": 1}
 
@@ -109,12 +109,12 @@ async def test_copies_of_one_message_are_shown_once(mailbox: Mailbox, fake: Fake
     assert (await mailbox.conversation_sizes(["c-self"]))[0].messages == 1
 
 
-async def test_received_only_scans_past_filtered_pages_and_keeps_it_in_the_cursor(
+async def test_without_sent_items_scans_past_filtered_pages_and_keeps_it_in_the_cursor(
     mailbox: Mailbox, fake: FakeGraph
 ) -> None:
     for i in range(3):
         fake.add(FakeMessage(f"j{i}", "spam", "f-junk", f"2026-10-01T0{i}:00:00Z", conversation=f"cj{i}"))
-    first = await mailbox.list_messages(received_only=True, limit=2)
+    first = await mailbox.list_messages(include_sent_items=False, limit=2)
     assert [m.id for m in first.items] == ["m5"] and first.cursor  # pages of junk skipped
     second = await mailbox.list_messages(limit=2, cursor=first.cursor)
     assert [m.id for m in second.items] == ["m3"]  # m4 (junk) and m2 (sent) left out
