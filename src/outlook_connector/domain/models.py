@@ -17,12 +17,11 @@ ExportFormat = Literal["txt", "jsonl"]
 Detail = Literal["compact", "full"]
 
 # Why messages were left out of a result (Coverage.excluded, ExportArtifact.messages_excluded keys).
-ExclusionReason = Literal["deleted_or_junk", "sync_issues", "outgoing", "hidden", "meeting_mail"]
+ExclusionReason = Literal["deleted_or_junk", "outgoing", "hidden", "meeting_mail"]
 EXCLUSION_TEXT: dict[str, str] = {
     "deleted_or_junk": "in Deleted Items or Junk Email (include_deleted_items=false)",
-    "sync_issues": "in Sync Issues, Outlook's conflict and failure copies (include_deleted_items=false)",
     "outgoing": "in Sent Items, Drafts or Outbox (include_sent_items=false)",
-    "hidden": "in hidden folders or outside the mail folders (out of reach)",
+    "hidden": "in hidden folders, Sync Issues, or outside the mail folders (out of reach)",
     "meeting_mail": "meeting invitations, replies and cancellations (include_meeting_mail=false)",
 }
 
@@ -63,8 +62,7 @@ class Folder(Compact):
     total: int | None = None
     unread: int | None = None
     child_count: int | None = None
-    hidden: bool = False  # Graph's isHidden. Hidden folders are out of reach and never listed, except
-    # Sync Issues, which Outlook hides from its mail view but which stays reachable like Deleted Items.
+    hidden: bool = False  # Graph's isHidden. Hidden folders (and Sync Issues) are out of reach.
 
 
 MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
