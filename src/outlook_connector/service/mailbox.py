@@ -507,11 +507,6 @@ def _fingerprint(internet_id: str) -> str:
     return hashlib.blake2b(internet_id.encode(), digest_size=5).hexdigest()
 
 
-def unavailable(reason: str) -> str:
-    """The one marker for a body that cannot be shown (exports, threads, get_message)."""
-    return f"(Content unavailable: {reason})"
-
-
 def _detail(items: list[MessageSummary], detail: Detail) -> list[MessageSummary]:
     return items if detail == "full" else [m.model_copy(update=COMPACT_DROP) for m in items]
 

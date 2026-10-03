@@ -81,8 +81,8 @@ class MailReader(Protocol):
 
     async def list_attachments_many(
         self, message_ids: list[str]
-    ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
-        """Attachments per message, and the reason for each message whose listing failed."""
+    ) -> tuple[dict[str, list[Attachment]], dict[str, Failure]]:
+        """Attachments per message, and why listing failed for the others (per item, not raised)."""
         ...
 
     async def attachment_content_ids(

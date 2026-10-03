@@ -182,6 +182,22 @@ class ThreadSize(Compact):
 
 EXPORT_MAX_MESSAGES = 2000  # hard cap per export
 
+ExportStep = Literal["fetching message bodies", "listing attachments", "downloading an attachment"]
+
+
+class ExportError(Compact):
+    """Why part of an export (or a thread body) is missing: the step, Microsoft's answer, the
+    likely cause, whether retrying can help, and what to do."""
+
+    step: ExportStep
+    status: int | None = None  # HTTP status; None: no response (or no HTTP failure at all)
+    code: str | None = None  # Microsoft's error code
+    message: str | None = None  # Microsoft's message, shortened to one line
+    request_id: str | None = None
+    likely_cause: str
+    retry: bool  # retrying later can succeed
+    fix: str
+
 
 class ExportRequest(BaseModel):
     """What to export: conversations, messages, and/or every message in a range. All are combined."""
@@ -213,10 +229,10 @@ class ExportArtifact(Compact):
     message_count: int
     text_files: int
     attachment_files: int
-    attachments_unavailable: int  # attachment files that could not be downloaded
-    attachment_listing_failures: int = 0  # messages whose attachments could not be listed
     messages_excluded: dict[str, int] = Field(default_factory=dict)  # ExclusionReason -> count
     unavailable_message_ids: list[str] = Field(default_factory=list)  # bodies not fetched (marked in file)
+    export_errors: dict[str, int] = Field(default_factory=dict)  # ExportStep -> failures, marked in file
+    error_summary: str | None = None  # the file header's "Export errors: ..." line
 
 
 # ---------------------------------------------------------------- writes (requirements v4 §11)

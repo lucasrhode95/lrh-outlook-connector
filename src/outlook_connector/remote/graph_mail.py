@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
+from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary
 from outlook_connector.remote import graph_mapping as mapping
 from outlook_connector.remote.graph import (
@@ -260,17 +261,17 @@ class GraphMailReader:
     @_named("listing attachments")
     async def list_attachments_many(
         self, message_ids: list[str]
-    ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
+    ) -> tuple[dict[str, list[Attachment]], dict[str, Failure]]:
         requests = {
             mid: relative(f"/me/messages/{mid}/attachments", {"$select": mapping.ATTACHMENT_FIELDS})
             for mid in message_ids
         }
         responses = await self._graph.batch(requests)
         out: dict[str, list[Attachment]] = {}
-        failed: dict[str, str] = {}
+        failed: dict[str, Failure] = {}
         for mid, response in responses.items():
             if not response.ok:
-                failed[mid] = str(sub_failure(response))
+                failed[mid] = failure_of(response)
             elif "@odata.nextLink" in response.body:  # rare: more than one page of attachments
                 out[mid] = await self.list_attachments(mid)
             else:
