@@ -517,7 +517,7 @@ async function openMessage(id) {
   $("reader-title").replaceChildren(spinner("Loading message…"));
   $("reader-meta").replaceChildren();
   $("reader-body").textContent = "";
-  const body = $("reader-full").checked ? "full" : "unique";
+  const body = $("opt-full").checked ? "full" : "unique"; // one setting for the reader and exports
   let content;
   try {
     content = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body })}`);
@@ -739,7 +739,7 @@ document.addEventListener("keydown", (event) => {
 $("more").addEventListener("click", () => (state.mode === "search" ? runSearch : loadList)(false));
 $("export-view").addEventListener("click", () => runExport($("export-view"), viewRequest(), "export this view"));
 $("refresh-folders").addEventListener("click", () => loadFolders(true));
-$("reader-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
+$("opt-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
 $("opt-deleted").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
 $("opt-meetings").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
 $("clear").addEventListener("click", () => { state.selectedThreads.clear(); state.selectedMessages.clear(); render(); });

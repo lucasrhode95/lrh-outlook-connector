@@ -72,7 +72,6 @@
     <aside class="reader">
       <div class="reader-head">
         <span id="reader-title" class="muted">Select a message to read it</span>
-        <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: only what this message adds. On: the whole body, with that repeated history."><input id="reader-full" type="checkbox"> Include quoted history</label>
       </div>
       <dl id="reader-meta" class="meta"></dl>
       <pre id="reader-body" class="body"></pre>
@@ -82,6 +81,7 @@
   <footer class="exportbar">
     <span id="selection" class="muted">Nothing selected</span>
     <label class="switch"><input id="opt-attachments" type="checkbox"> Include attachments</label>
+    <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a thread reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox"> Include quoted history</label>
     <span class="files">Files
       <span class="segmented" role="radiogroup" aria-label="Files">
         <label title="One file per thread"><input type="radio" name="files" value="per_thread" checked><span>Per thread</span></label>
@@ -89,7 +89,6 @@
         <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
       </span>
     </span>
-    <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text. Off: each exported message holds only what it adds, so a thread reads once, without repetition. On: every message keeps its full body, repeated history included."><input id="opt-full" type="checkbox"> Include quoted history</label>
     <button id="clear">Clear</button>
     <button id="export" class="primary" disabled>Export</button>
   </footer>
