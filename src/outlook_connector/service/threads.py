@@ -153,5 +153,9 @@ class Threads:
         wanted = [s.id for s in summaries if s.id not in known]
         fetched = await self.mailbox.reader.get_messages(wanted) if wanted else FetchedMessages()
         out = known | {mid: m for mid, m in fetched.messages.items() if m is not None}
-        missing = {s.id: fetched.failed.get(s.id, GONE) for s in summaries if s.id not in out}
+        missing = {
+            s.id: fetched.failed[s.id].describe() if s.id in fetched.failed else GONE
+            for s in summaries
+            if s.id not in out
+        }
         return out, missing

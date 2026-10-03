@@ -10,7 +10,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound
+from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled
 from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
@@ -19,6 +19,7 @@ from outlook_connector.service.export.attachments import dedupe, safe_name
 from outlook_connector.service.export.formatter import people
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
+from outlook_connector.service.localfiles import kept_dir
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads
 from outlook_connector.store.db import Store
@@ -183,13 +184,35 @@ async def test_inline_image_ids_of_many_messages_are_read_in_shared_batches(
     assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
 
 
-async def test_listed_message_deleted_before_export_fails_the_export(
+HINT = "Refresh the list (or list/search again) and retry the export. Nothing was exported."
+
+
+def exported_files() -> list[Path]:
+    folder = kept_dir("exports")
+    return sorted(folder.iterdir()) if folder.exists() else []
+
+
+async def test_message_deleted_before_export_fails_the_export_and_writes_nothing(
     exports: Exports, fake: FakeGraph
 ) -> None:
     await exports.mailbox.list_messages()
     del fake.messages["m3"]
-    with pytest.raises(NotFound):
-        await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
+    with pytest.raises(NotFound) as caught:
+        await exports.export(ExportRequest(message_ids=["m1", "m3"], include_attachments=True))
+    assert "1 of the 2 message(s) selected by id could not be read: m3 (gone" in str(caught.value)
+    assert "deleted or moved in Outlook" in str(caught.value) and HINT in str(caught.value)
+    assert exported_files() == []
+
+
+async def test_message_still_throttled_fails_the_export_as_throttled(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    await exports.mailbox.folders()
+    fake.throttle_items = 10_000  # every body sub-request stays throttled
+    with pytest.raises(Throttled) as caught:
+        await exports.export(ExportRequest(message_ids=["m5"]))
+    assert "m5 (failed: HTTP 429 ApplicationThrottled" in str(caught.value) and HINT in str(caught.value)
+    assert exported_files() == []
 
 
 async def test_truncated_conversation_is_not_exported_silently(
@@ -253,7 +276,7 @@ async def test_unfetchable_bodies_are_marked_and_counted_not_fatal(exports: Expo
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], combine="all"))
     assert len(artifact.unavailable_message_ids) == 3
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert "(Content unavailable: While fetching message bodies" in text
+    assert "(Content unavailable: HTTP 429 ApplicationThrottled" in text
     assert "Unavailable: 3 message body(ies); they are marked below." in text
 
 
