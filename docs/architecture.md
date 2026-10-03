@@ -296,9 +296,10 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 - **Item key:** the Graph immutable id, within the account's own store. Immutable ids survive moves within the mailbox (verified).
 - **Conversation key:** Graph `conversationId`.
 - **Locations:**
-  - token cache: `%LOCALAPPDATA%/lrh-outlook-connector/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
+  - data directory: `%USERPROFILE%/.lrh-outlook-connector` on Windows, `$XDG_DATA_HOME/lrh-outlook-connector` (or `~/.local/share/...`) elsewhere. Not under AppData: Windows redirects files that packaged apps (the Claude desktop app and the MCP servers it starts) create there into a private per-app copy that terminals and Explorer never see, which split tokens, store and exports in two (found 2026-10-03);
+  - token cache: `<data directory>/token-cache.bin` (encrypted), or `token-cache.plaintext-dev.json` with `--unsecure`;
   - `OUTLOOK_CONNECTOR_HOME` overrides the data directory (tests, portability);
-  - store: `%LOCALAPPDATA%/lrh-outlook-connector/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields;
+  - store: `<data directory>/accounts/<fingerprint>/mail.sqlite3`. The summary column holds only summary fields;
   - exports and downloaded attachments: `<data directory>/exports/`, removed after 7 days. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
 
 ## 8. Surfaces: tools and endpoints

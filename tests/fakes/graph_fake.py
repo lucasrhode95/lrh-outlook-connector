@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 import httpx
 
 ROOT = "https://graph.microsoft.com/v1.0"
+REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
 
 @dataclass
@@ -237,7 +238,7 @@ class FakeGraph:
             folder = self.aliases.get(folder, folder) if folder else None
             return 200, self.list_messages(folder, params, path, text_body), None
         if m := re.fullmatch(r"/me/messages/([^/]+)", path):
-            msg = self.messages.get(m[1])
+            msg = self.messages.get(m[1].removeprefix(REST_PREFIX))  # either id form is readable
             if not msg:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
             return 200, msg.json(text_body=text_body), None
@@ -287,8 +288,11 @@ class FakeGraph:
             rows = [m for m in rows if m.conversation == cid[1].replace("''", "'")]
         if "$search" in params:
             rows = self.search_matches(params["$search"].strip('"'), rows)
-        else:
-            rows.sort(key=lambda m: m.received, reverse=True)
+            # Like Graph (live 2026-10-03): $search ignores Prefer: IdType="ImmutableId" and returns
+            # the regular id, which changes when the message moves.
+            items = [m.json(text_body=text_body) | {"id": REST_PREFIX + m.id} for m in rows]
+            return self.paged(items, path, params)
+        rows.sort(key=lambda m: m.received, reverse=True)
         return self.paged([m.json(text_body=text_body) for m in rows], path, params)
 
     def search_matches(self, query: str, rows: list[FakeMessage] | None) -> list[FakeMessage]:
