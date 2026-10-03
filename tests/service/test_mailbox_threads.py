@@ -270,6 +270,28 @@ async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_backgro
     assert "f-new" in {f.id for f in (await mailbox.folders())}
 
 
+async def test_thread_marks_missing_bodies_with_the_export_error_block(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    await mailbox.folders()
+    fake.throttle_items = 10_000
+    thread = await Threads(mailbox).get_thread("c-rel")
+    text = thread.messages[0].text or ""
+    assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
+    assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
+    assert not thread.coverage.complete  # throttling is retryable
+
+
+async def test_thread_body_denied_does_not_make_coverage_incomplete(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    fake.fail[r"/me/messages/m2"] = 403
+    thread = await Threads(mailbox).get_thread("c-rel")
+    texts = {t.message.id: t.text or "" for t in thread.messages}
+    assert "  Likely: access denied for this item" in texts["m2"] and texts["m1"] == "First report"
+    assert thread.coverage.complete  # retrying will not help
+
+
 async def test_thread_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox, fake: FakeGraph) -> None:
     fake.add(
         FakeMessage("big", "Huge", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-big", text="x" * 5000)

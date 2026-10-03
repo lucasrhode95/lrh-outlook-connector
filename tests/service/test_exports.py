@@ -97,12 +97,37 @@ async def test_selected_messages_join_their_thread_file(exports: Exports) -> Non
     assert artifact.text_files == 2 and artifact.message_count == 3
 
 
-async def test_failed_download_becomes_a_marker(exports: Exports, fake: FakeGraph) -> None:
-    fake.messages["m3"].attachments[0].broken = True
+async def test_failed_download_becomes_an_export_error_block(exports: Exports, fake: FakeGraph) -> None:
+    fake.messages["m3"].attachments[0].broken = True  # its download answers 503
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
-    assert artifact.attachments_unavailable == 1
+    assert artifact.export_errors == {"downloading an attachment": 1}
     text = zip_text(artifact.path, "2026-09-29 Relatório BE semanal.txt")
-    assert "[Attachment unavailable: numbers.xlsx]" in text
+    assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
+    assert "  Step:   downloading an attachment\n" in text
+    assert "  Error:  HTTP 503 ServiceUnavailable, request-id req-" in text
+    assert "  Likely: Microsoft throttled the mailbox" in text
+    assert "  Fix:    export it again in a few minutes" in text
+    summary = (
+        "Export errors: 1 attachment (1 throttled) could not be exported; "
+        "they are marked [EXPORT ERROR] below."
+    )
+    assert summary in text and artifact.error_summary == summary
+
+
+async def test_failed_attachment_listing_becomes_an_export_error_block(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.fail[r"/me/messages/m3/attachments"] = 500
+    artifact = await exports.export(ExportRequest(message_ids=["m3"], format="jsonl"))
+    record = json.loads(Path(artifact.path).read_text(encoding="utf-8"))
+    error = record["attachments_export_error"]
+    assert error["step"] == "listing attachments" and error["status"] == 500 and error["retry"] is True
+    assert error["likely_cause"] == "Microsoft service or network problem" and record["body"]
+    assert "export_error" not in record  # the body is there
+    txt = await exports.export(ExportRequest(message_ids=["m3"]))
+    text = Path(txt.path).read_text(encoding="utf-8")
+    assert "[EXPORT ERROR] The attachments of this message could not be listed." in text
+    assert "the attachments of 1 message (1 service or network problem)" in text
 
 
 async def test_forwarded_mail_attachment_is_saved_as_eml(exports: Exports, fake: FakeGraph) -> None:
@@ -270,14 +295,65 @@ def test_export_limit_cannot_exceed_the_hard_cap() -> None:
         ExportRequest(message_ids=["m1"], limit=2001)
 
 
-async def test_unfetchable_bodies_are_marked_and_counted_not_fatal(exports: Exports, fake: FakeGraph) -> None:
+async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Exports, fake: FakeGraph) -> None:
     await exports.mailbox.folders()
     fake.throttle_items = 10_000  # every body sub-request stays throttled
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], combine="all"))
     assert len(artifact.unavailable_message_ids) == 3
+    assert artifact.export_errors == {"fetching message bodies": 3}
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert "(Content unavailable: HTTP 429 ApplicationThrottled" in text
-    assert "Unavailable: 3 message body(ies); they are marked below." in text
+    block = (
+        "[EXPORT ERROR] The body of this message could not be fetched.\n"
+        "  Step:   fetching message bodies\n"
+        "  Error:  HTTP 429 ApplicationThrottled: Too many requests.\n"
+        "  Likely: Microsoft throttled the mailbox (about 4 parallel requests or 10,000 per 10 minutes); "
+        "the message itself is fine\n"
+        "  Fix:    export it again in a few minutes"
+    )
+    assert text.count(block) == 3
+    summary = (
+        "Export errors: 3 message bodies (3 throttled) could not be exported; "
+        "they are marked [EXPORT ERROR] below."
+    )
+    assert summary in text and artifact.error_summary == summary
+    assert "Content unavailable" not in text
+
+
+async def test_denied_body_is_not_retryable_and_jsonl_carries_the_error(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.fail[r"/me/messages/m2"] = 403
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], format="jsonl"))
+    records = {
+        r["id"]: r for r in map(json.loads, Path(artifact.path).read_text(encoding="utf-8").splitlines())
+    }
+    error = records["m2"]["export_error"]
+    assert records["m2"]["body"] is None and "body_unavailable" not in records["m2"]
+    assert error == {
+        "step": "fetching message bodies",
+        "status": 403,
+        "code": "ErrorAccessDenied",
+        "message": "Injected failure.",
+        "likely_cause": "access denied for this item (for example an encrypted or protected message)",
+        "retry": False,
+        "fix": "retrying will not help",
+    }
+    assert "export_error" not in records["m1"] and records["m1"]["body"] == "First report"
+
+
+async def test_jsonl_failed_attachment_record_carries_its_export_error(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.messages["m3"].attachments[0].broken = True
+    artifact = await exports.export(
+        ExportRequest(message_ids=["m3"], format="jsonl", include_attachments=True)
+    )
+    jsonl = next(n for n in zip_names(artifact.path) if n.endswith(".jsonl"))
+    record = json.loads(zip_text(artifact.path, jsonl))
+    failed = next(a for a in record["attachments"] if a["name"] == "numbers.xlsx")
+    assert failed["export_error"]["step"] == "downloading an attachment" and "file" not in failed
+    assert failed["export_error"]["status"] == 503 and failed["export_error"]["request_id"].startswith("req-")
+    assert all("export_error" not in a for a in record["attachments"] if a["name"] != "numbers.xlsx")
 
 
 async def test_bulk_export_stays_within_batch_limits_under_throttling(
