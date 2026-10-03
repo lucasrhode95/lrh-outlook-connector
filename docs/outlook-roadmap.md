@@ -2,7 +2,7 @@
 
 The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
 
-Snapshot **2026-10-03** (end of day): the read MVP, drafts and send (W0, W1) and the mailbox changes (W2–W5) are built and passed their live checks (V2, V3). **Open, by priority:** W6 reply history fidelity (replies flatten the quoted thread: must be fixed before replying to real threads), H12 search ids (done 2026-10-04), H7 (count-guided mailbox-wide listing), then W7 and W8 (HTML for new messages, signatures), and W9 (inbox rules). H14 was accepted as is (2026-10-04).
+Snapshot **2026-10-04**: the read MVP, drafts and send (W0, W1) and the mailbox changes (W2–W5) are built and passed their live checks (V2, V3). W6 reply history fidelity and H12 search ids are done (2026-10-04). **Open, by priority:** H7 (count-guided mailbox-wide listing; decision postponed by the owner), then W7 and W8 (HTML for new messages, signatures), and W9 (inbox rules). H14 was accepted as is (2026-10-04).
 
 **Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
 
