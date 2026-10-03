@@ -2,7 +2,7 @@
 
 The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
 
-Snapshot **2026-10-02**: the read MVP is built, tested against a fake Graph mailbox, and verified live (read-only) against the real mailbox. Two hardening passes (the 90-day review, H1–H3, and the code review, H4–H6) are built, and the live check (V1) passed against the real mailbox. Of its findings, H8, H9 and H10 are done, and H11 simplified the code; **next: H7 (count-guided mailbox-wide listing)**, then a draft-first write path (W0) before send and the mutations, lowest risk first.
+Snapshot **2026-10-03**: the read MVP is built and verified live. The hardening passes (H1–H6, H8–H13) are done. Drafts and send (W0, W1) passed the live write check (V2), with one rerun pending (a default-recipient reply draft, fixed). **Next:** H7 (count-guided mailbox-wide listing); the mailbox changes (W2–W5) are built and wait for their live check (V3).
 
 **Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
 
@@ -59,8 +59,9 @@ Draft first: an agent prepares the message and you send it from Outlook. It prov
 
 | Item | Status | Scope |
 |---|---|---|
-| W0 Create draft | **Pending — first write** | `MailWriter.create_draft` via OWS `CreateItem` (`SaveOnly`) into Drafts, optionally as a reply. Returns the draft id; never sends. Needs the write sign-in. |
-| W1 Send | **Pending** | After W0. `MailWriter.send` via OWS `CreateItem`. Plain text, `user_confirmation`, revalidation, no retry. |
+| W0 Create draft | **Done** (live 2026-10-03) | `create_draft` via OWS `CreateItem` (`SaveOnly`) into Drafts, optionally as a reply (`ReplyToItem`/`ReplyAllToItem`, Outlook's reply defaults). Read back through Graph; never sends. Needs the write sign-in. |
+| W1 Send | **Done** (live 2026-10-03) | `propose_email` → user confirms → `send_email(message, user_confirmation)`. The code hashes the account and every material field and is recomputed at send time; the write sign-in must be the bound account. `CreateItem` `SendAndSaveCopy`, plain text, sent once; an unclear answer is checked against Sent Items and otherwise reported as "unknown". |
+| V2 Live write check | **Done** (2026-10-03), one rerun pending | Real mailbox, self-sends only. **Passed:** a new-message draft (read back, `verified`); a confirmed send (in Sent Items and Inbox); a confirmed reply to "A TEST EMAIL HALPRIO190" with `to` set (threaded into the conversation, quoted original below the body, reply target given as a search id); a changed body with the old code was refused and nothing went out. **Failed, fixed:** a reply draft with default recipients to mail you sent yourself was refused ("Name at least one recipient"); the default now goes back to you. **Rerun:** that reply draft. Found on the way: H12 (search ids) and H13 (data folder). |
 
 ## Mutations
 

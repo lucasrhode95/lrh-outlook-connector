@@ -3,7 +3,8 @@
 - One ``httpx.AsyncClient`` per process (keep-alive within a call).
 - No redirects, and only allowlisted hosts.
 - Retries only when the caller marks the request idempotent (GETs by default), honoring
-  429 / Retry-After.
+  429 / Retry-After. Writes (``write=True``) are sent once: an answer that never completes, or a
+  server error, raises ``WriteOutcomeUnknown`` because the write may have happened.
 - Concurrency limiter: Exchange Online allows 4 concurrent requests per app and mailbox.
 - Logs metadata only: no URLs with query text, no bodies, no tokens.
 - Errors name the operation in progress (``operation()``), the service error code and message
@@ -32,6 +33,7 @@ from outlook_connector.domain.errors import (
     NotFound,
     Throttled,
     Upstream,
+    WriteOutcomeUnknown,
 )
 
 log = logging.getLogger(__name__)
@@ -102,10 +104,11 @@ class Transport:
         headers: dict[str, str] | None = None,
         json_body: Any = None,
         retry: bool | None = None,
+        write: bool = False,
     ) -> httpx.Response:
         """Send a request and return a successful response, or raise a domain error."""
         _check_host(url)
-        retry = (method.upper() == "GET") if retry is None else retry
+        retry = False if write else (method.upper() == "GET") if retry is None else retry
         attempts = self._max_attempts if retry else 1
         renewal: dict[str, Any] | None = None  # after a 401: how to renew the token, for one request
         renewed = False
@@ -126,6 +129,8 @@ class Transport:
                     continue
                 raise Upstream(f"Could not reach {urlsplit(url).hostname} ({type(exc).__name__}).") from None
             except httpx.HTTPError as exc:  # sent, but no complete response
+                if write:
+                    raise _unknown(url, type(exc).__name__) from None
                 if attempt < attempts:
                     await self._sleep(min(2**attempt, 20))
                     continue
@@ -150,6 +155,8 @@ class Transport:
                 continue
             if response.is_success:
                 return response
+            if write and response.status_code >= 500:
+                raise _unknown(url, f"HTTP {response.status_code}, {error_code(response) or 'no error code'}")
             raise _error_for(response)
         raise AssertionError("unreachable")
 
@@ -165,14 +172,19 @@ class Transport:
 
     async def json(self, method: str, url: str, **kwargs: Any) -> Any:
         response = await self.request(method, url, **kwargs)
+        problem = None
         if len(response.content) > MAX_JSON_BYTES:
-            raise Upstream("Response too large.")
-        if not response.content:
+            problem = "Response too large."
+        elif response.content:
+            try:
+                return response.json()
+            except json.JSONDecodeError:
+                problem = "Expected a JSON response."
+        else:
             return None
-        try:
-            return response.json()
-        except json.JSONDecodeError:
-            raise Upstream("Expected a JSON response.") from None
+        if kwargs.get("write"):  # a write was accepted, but its answer is unreadable
+            raise _unknown(url, problem)
+        raise Upstream(problem)
 
     async def download(
         self, url: str, dest: BinaryIO, *, profile: str, headers: dict[str, str] | None = None, max_bytes: int
@@ -203,6 +215,14 @@ class Transport:
                         raise InvalidRequest(f"Download exceeds the {max_bytes // (1024 * 1024)} MiB limit.")
                     dest.write(chunk)
                 return response.headers.get("content-type"), size
+
+
+def _unknown(url: str, what: str) -> WriteOutcomeUnknown:
+    prefix = f"While {_operation.get()}: " if _operation.get() else ""
+    return WriteOutcomeUnknown(
+        f"{prefix}{urlsplit(url).hostname} gave no clear answer ({what}). The change may or may not "
+        "have been made; it was not retried. Check the mailbox before trying again."
+    )
 
 
 def _check_host(url: str) -> None:

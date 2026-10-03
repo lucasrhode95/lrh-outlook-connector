@@ -17,7 +17,9 @@ from tests.fakes.msal_fakes import jwt
 READ_TOOLS = {
     "auth_status", "list_folders", "list_messages", "search_messages", "get_thread",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
+    "propose_email",
 }  # fmt: skip
+WRITE_TOOLS = {"create_draft", "send_email"}
 
 
 class FakeTokens:
@@ -64,10 +66,28 @@ async def call(server: FastMCP, name: str, **arguments: Any) -> Any:
 
 async def test_tools_and_annotations(server: FastMCP) -> None:
     tools = {t.name: t for t in await server.list_tools()}
-    assert set(tools) == READ_TOOLS  # the MVP surface is read-only
-    for tool in tools.values():
-        assert tool.annotations and tool.annotations.readOnlyHint and not tool.annotations.destructiveHint
+    assert set(tools) == READ_TOOLS | WRITE_TOOLS
+    for name in READ_TOOLS:
+        annotations = tools[name].annotations
+        assert annotations and annotations.readOnlyHint and not annotations.destructiveHint
+    draft, send = tools["create_draft"].annotations, tools["send_email"].annotations
+    assert draft and not draft.readOnlyHint and not draft.destructiveHint and not draft.openWorldHint
+    assert send and not send.readOnlyHint and send.destructiveHint and send.openWorldHint
     assert "never attempt to sign in" in (server.instructions or "")
+    assert "Never confirm on the user's behalf" in (server.instructions or "")
+
+
+async def test_draft_then_proposal_then_confirmed_send(server: FastMCP, fake: FakeGraph) -> None:
+    message = {"to": ["bob@example.com"], "subject": "Hi", "body": "Hello Bob"}
+    draft = await call(server, "create_draft", message=message)
+    assert draft["verified"] and fake.messages[draft["id"]].folder == "f-drafts"
+    proposal = await call(server, "propose_email", message=message)
+    assert proposal["sender"] == "me@example.com" and proposal["to"] == ["bob@example.com"]
+    with pytest.raises(Exception, match="does not match"):
+        await server.call_tool("send_email", {"message": message, "user_confirmation": "SEND-WRONG"})
+    sent = await call(server, "send_email", message=message, user_confirmation=proposal["confirmation"])
+    assert sent["status"] == "sent"
+    assert [body["MessageDisposition"] for _, body in fake.ows_calls] == ["SaveOnly", "SendAndSaveCopy"]
 
 
 async def test_list_search_thread_message_flow(server: FastMCP) -> None:

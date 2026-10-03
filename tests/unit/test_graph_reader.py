@@ -40,7 +40,16 @@ def fake() -> FakeGraph:
 
 async def test_folders_are_walked_recursively_with_aliases(fake: FakeGraph) -> None:
     folders = {f.id: f for f in await reader_for(fake).list_folders()}
-    assert set(folders) == {"f-inbox", "f-sent", "f-deleted", "f-junk", "f-archive", "f-proj", "f-rie"}
+    assert set(folders) == {
+        "f-inbox",
+        "f-sent",
+        "f-drafts",
+        "f-deleted",
+        "f-junk",
+        "f-archive",
+        "f-proj",
+        "f-rie",
+    }
     assert folders["f-inbox"].well_known == "inbox"
     assert folders["f-rie"].parent_id == "f-proj" and folders["f-rie"].well_known is None
 
