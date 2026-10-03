@@ -270,6 +270,7 @@ lrh-outlook-connector/
   - an online search box;
   - an in-memory filter;
   - selection checkboxes;
+  - Ctrl+click (Cmd+click on a Mac) on a row toggles its selection instead of opening it;
   - export options: switches for attachments and quoted history (one quoted-history setting for the reader and exports), and a segmented control for how files are split (per thread, all in one, per message).
 - Binds to localhost only.
 
