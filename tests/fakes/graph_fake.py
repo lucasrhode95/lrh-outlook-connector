@@ -45,6 +45,8 @@ class FakeMessage:
     cc: tuple[str, ...] = ()
     bcc: tuple[str, ...] = ()
     is_draft: bool = False
+    flagged: bool = False
+    categories: list[str] = field(default_factory=list)
     text: str = "Hello"
     unique_text: str | None = None
     html: str = "<p>Hello</p>"
@@ -76,8 +78,8 @@ class FakeMessage:
             "isDraft": self.is_draft,
             "hasAttachments": any(not a.inline for a in self.attachments),  # false when inline-only
             "importance": "normal",
-            "categories": [],
-            "flag": {"flagStatus": "notFlagged"},
+            "categories": list(self.categories),
+            "flag": {"flagStatus": "flagged" if self.flagged else "notFlagged"},
             "bodyPreview": self.text[:50],
             "internetMessageId": self.internet_id or f"<{self.id}@example.com>",
             "body": {"contentType": kind, "content": body},
@@ -215,6 +217,54 @@ class FakeGraph:
         )  # fmt: skip
         created = [{"ItemId": {"Id": _ows_id(new_id)}}] if disposition == "SaveOnly" else []
         return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
+
+    def _ows_target(self, item_id: dict[str, Any]) -> FakeMessage | None:
+        return self.messages.get(_graph_id(item_id["Id"]))
+
+    def ows_UpdateItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
+        assert body["SuppressReadReceipts"] is True and body["MessageDisposition"] == "SaveOnly"
+        out = []
+        for change in body["ItemChanges"]:
+            message = self._ows_target(change["ItemId"])
+            if message is None:
+                out.append({"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"})
+                continue
+            (update,) = change["Updates"]
+            field_uri, props = update["Path"]["FieldURI"], update["Item"]
+            if field_uri == "message:IsRead":
+                message.is_read = props["IsRead"]
+            elif field_uri == "item:Flag":
+                message.flagged = props["Flag"]["FlagStatus"] == "Flagged"
+            else:
+                raise AssertionError(field_uri)
+            out.append({"ResponseClass": "Success", "ResponseCode": "NoError"})
+        return out
+
+    def _ows_move(self, item_ids: list[dict[str, Any]], folder: str) -> list[dict[str, Any]]:
+        out = []
+        for item_id in item_ids:
+            message = self._ows_target(item_id)
+            if message is None:
+                out.append({"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"})
+                continue
+            message.folder = folder
+            out.append(
+                {"ResponseClass": "Success", "ResponseCode": "NoError", "Items": [{"ItemId": item_id}]}
+            )
+        return out
+
+    def ows_MoveItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
+        target = body["ToFolderId"]["BaseFolderId"]
+        if target["__type"] == "DistinguishedFolderId:#Exchange":
+            folder = self.aliases[target["Id"]]
+        else:
+            folder = _graph_id(target["Id"])
+            assert any(f["id"] == folder for f in self.folders), folder
+        return self._ows_move(body["ItemIds"], folder)
+
+    def ows_DeleteItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
+        assert body["DeleteType"] == "MoveToDeletedItems", "never a hard delete"
+        return self._ows_move(body["ItemIds"], self.aliases["deleteditems"])
 
     def route(
         self, method: str, path: str, params: dict[str, str], prefer: str, request: httpx.Request | None

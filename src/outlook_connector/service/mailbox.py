@@ -123,6 +123,12 @@ class Mailbox:
             raise InvalidRequest(f"Unknown folder '{ref}'. Use list_folders to see folder paths.")
         return found
 
+    async def under(self, folder_id: str | None, alias: str) -> bool:
+        """Whether the folder is the well-known folder ``alias`` or inside it."""
+        folders = await self.folder_map()
+        folder = folders.get(folder_id or "")
+        return folder is not None and any(f.well_known == alias for f in _ancestry(folder, folders))
+
     async def exclusions(self, *, include_deleted_items: bool, received_only: bool = False) -> dict[str, str]:
         """Folder id -> reason (an ExclusionReason) for every folder this scope leaves out.
 
