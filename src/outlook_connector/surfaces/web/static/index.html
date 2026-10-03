@@ -55,7 +55,7 @@
       <div class="list-head">
         <span id="list-title">Inbox</span>
         <span id="coverage" class="muted"></span>
-        <label class="muted" title="Also list, count and export messages in Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies); always on inside those folders">
+        <label class="switch" title="Also list, count and export messages in Deleted Items, Junk Email and Sync Issues (Outlook's conflict copies); always on inside those folders">
           <input id="opt-deleted" type="checkbox"> Deleted / Junk</label>
         <button id="export-view" class="link" title="Export every message of this folder and date range">export this view</button>
       </div>
@@ -66,7 +66,7 @@
     <aside class="reader">
       <div class="reader-head">
         <span id="reader-title" class="muted">Select a message to read it</span>
-        <label class="muted"><input id="reader-full" type="checkbox"> include quoted history</label>
+        <label class="switch"><input id="reader-full" type="checkbox"> Include quoted history</label>
       </div>
       <dl id="reader-meta" class="meta"></dl>
       <pre id="reader-body" class="body"></pre>
@@ -75,13 +75,15 @@
 
   <footer class="exportbar">
     <span id="selection" class="muted">Nothing selected</span>
-    <label><input id="opt-attachments" type="checkbox"> include attachments</label>
-    <label>files: <select id="opt-files">
-      <option value="per_thread" selected>one per thread</option>
-      <option value="all">one for everything</option>
-      <option value="none">one per message</option>
-    </select></label>
-    <label><input id="opt-full" type="checkbox"> include quoted history</label>
+    <label class="switch"><input id="opt-attachments" type="checkbox"> Include attachments</label>
+    <span class="files">Files
+      <span class="segmented" role="radiogroup" aria-label="Files">
+        <label title="One file per thread"><input type="radio" name="files" value="per_thread" checked><span>Per thread</span></label>
+        <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
+        <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
+      </span>
+    </span>
+    <label class="switch"><input id="opt-full" type="checkbox"> Include quoted history</label>
     <button id="clear">Clear</button>
     <button id="export" class="primary" disabled>Export</button>
   </footer>

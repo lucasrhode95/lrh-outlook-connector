@@ -1,12 +1,14 @@
 :root {
   --bg: #f6f7f9; --panel: #ffffff; --text: #1d2430; --muted: #6a7486; --line: #dfe3ea;
   --accent: #1f5fbf; --accent-soft: #e8f0fc; --danger: #b3261e; --danger-soft: #fbe9e7;
+  --switch-off: #c3c9d4; --segment-bg: #eceef2;
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #14171c; --panel: #1b1f26; --text: #e4e8ef; --muted: #98a2b3; --line: #2b313b;
     --accent: #7aa7ff; --accent-soft: #1f2a3d; --danger: #ff8a80; --danger-soft: #3a2422;
+    --switch-off: #4a5262; --segment-bg: #14171c;
   }
 }
 * { box-sizing: border-box; }
@@ -19,6 +21,26 @@ button.link { border: 0; background: none; color: var(--accent); padding: 0; }
 input[type=search], input[type=date] { font: inherit; color: inherit; background: var(--panel);
   border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
 .muted { color: var(--muted); }
+input[type=checkbox] { accent-color: var(--accent); }
+
+/* On/off options are switches; the selection boxes in the list stay checkboxes. */
+.switch { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); cursor: pointer; user-select: none; }
+.switch input { appearance: none; width: 30px; height: 17px; margin: 0; border-radius: 9px; background: var(--switch-off);
+  position: relative; cursor: pointer; transition: background .15s; flex: none; }
+.switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%;
+  background: #fff; transition: transform .15s; }
+.switch input:checked { background: var(--accent); }
+.switch input:checked::after { transform: translateX(13px); }
+.switch:has(input:checked) { color: var(--text); }
+.switch input:focus-visible, .segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* A choice among a few options: all visible, one click. */
+.files { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+.segmented { display: inline-flex; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--segment-bg); }
+.segmented label { cursor: pointer; position: relative; }
+.segmented input { position: absolute; opacity: 0; pointer-events: none; }
+.segmented span { display: block; padding: 3px 10px; border-radius: 5px; font-size: 13px; color: var(--muted); }
+.segmented input:checked + span { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
 
 .topbar { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line);
   background: var(--panel); flex-wrap: wrap; }
