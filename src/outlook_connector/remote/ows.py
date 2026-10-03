@@ -19,7 +19,7 @@ import uuid
 from typing import Any, Protocol
 from urllib.parse import quote
 
-from outlook_connector.domain.errors import NotFound, Upstream
+from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnknown
 from outlook_connector.domain.models import EmailProposal
 from outlook_connector.remote import ids
 from outlook_connector.remote.ports import FolderTarget
@@ -91,8 +91,11 @@ def _items(data: Any, action: str, *, strict: bool) -> list[dict[str, Any]]:
     body = data.get("Body") if isinstance(data, dict) else None
     messages = body.get("ResponseMessages") if isinstance(body, dict) else None
     items = messages.get("Items") if isinstance(messages, dict) else None
-    if not isinstance(items, list) or not items:
-        raise Upstream(f"Outlook answered {action} without item results.")
+    if not isinstance(items, list) or not items:  # the write may have happened: never a plain failure
+        raise WriteOutcomeUnknown(
+            f"Outlook answered {action} without item results, so it is unclear whether the change "
+            "was made; it was not retried. Check the mailbox before trying again."
+        )
     if not strict:
         return [item if isinstance(item, dict) else {} for item in items]
     for item in items:
@@ -233,8 +236,10 @@ def _item_id(message_id: str) -> dict[str, str]:
 
 
 def _per_id(message_ids: list[str], items: list[dict[str, Any]]) -> dict[str, str | None]:
-    if len(items) != len(message_ids):
-        raise Upstream(f"Outlook answered {len(items)} item results for {len(message_ids)} messages.")
+    if len(items) != len(message_ids):  # the change may have been made: read back, never repeat
+        raise WriteOutcomeUnknown(
+            f"Outlook answered {len(items)} item results for {len(message_ids)} messages; it was not retried."
+        )
     return {mid: outcome(item) for mid, item in zip(message_ids, items, strict=True)}
 
 

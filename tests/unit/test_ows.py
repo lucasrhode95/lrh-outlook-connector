@@ -101,6 +101,13 @@ async def test_no_answer_or_server_error_is_an_unknown_outcome_never_retried(fak
         assert len(fake.ows_calls) == 1
 
 
+async def test_a_success_without_readable_results_is_an_unknown_outcome(fake: FakeGraph) -> None:
+    for script in ("no-items", "not-json"):
+        fake.ows_next = [script]
+        with pytest.raises(WriteOutcomeUnknown):
+            await writer_for(fake).send(proposal())
+
+
 async def test_throttled_write_is_not_retried(fake: FakeGraph) -> None:
     fake.ows_next = [429]
     with pytest.raises(Throttled):
@@ -165,5 +172,5 @@ async def test_delete_only_moves_to_deleted_items(fake: FakeGraph) -> None:
 
 async def test_mismatched_item_results_are_an_error(fake: FakeGraph) -> None:
     fake.ows_next = [{"ResponseClass": "Success", "ResponseCode": "NoError"}]  # one result for two
-    with pytest.raises(Upstream, match="1 item results for 2 messages"):
+    with pytest.raises(WriteOutcomeUnknown, match="1 item results for 2 messages"):
         await writer_for(fake).set_read(["m1", "m5"], True)

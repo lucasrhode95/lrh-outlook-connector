@@ -115,13 +115,20 @@ class Mutations:
 
     async def delete(self, message_ids: list[str]) -> MutationResult:
         """Move to Deleted Items. Messages already in Deleted Items (or its subfolders) are left alone."""
-        folders = await self.mailbox.folder_map()
-        deleted = {fid for fid in folders if await self.mailbox.under(fid, "deleteditems")}
+        deleted: set[str] = set()
+
+        async def classify() -> None:  # after _apply has refreshed the folder list for these messages
+            folders = await self.mailbox.folder_map()
+            for folder_id in folders:
+                if await self.mailbox.under(folder_id, "deleteditems"):
+                    deleted.add(folder_id)
+
         return await self._apply(
             "delete (move to Deleted Items)",
             message_ids,
             lambda m: m.folder_id in deleted,
             self.writer.delete,
+            prepare=classify,
         )
 
     # ---------------------------------------------------------------- shared flow
@@ -138,7 +145,13 @@ class Mutations:
         ]
 
     async def _apply(
-        self, action: str, message_ids: list[str], already: Wanted, send: Send
+        self,
+        action: str,
+        message_ids: list[str],
+        already: Wanted,
+        send: Send,
+        *,
+        prepare: Callable[[], Awaitable[None]] | None = None,
     ) -> MutationResult:
         ids = list(dict.fromkeys(message_ids))
         if not ids:
@@ -148,6 +161,8 @@ class Mutations:
         self.check_account()
         before = await self.mailbox.reader.get_summaries(ids)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in before.summaries.values() if m)
+        if prepare:
+            await prepare()
         results: dict[str, ItemResult] = {}
         pending: list[str] = []
         for mid in ids:
@@ -177,9 +192,9 @@ class Mutations:
                     results[mid] = ItemResult(id=mid, status="not_found", detail=code)
                 else:
                     results[mid] = ItemResult(id=mid, status="failed", detail=code)
-        changed = [mid for mid, r in results.items() if r.status in ("done", "unknown")]
+        changed = [mid for mid, r in results.items() if r.status in ("done", "unknown", "not_found")]
         if changed:
-            self.mailbox.store.drop(changed)  # the summary cache relists them with their new state
+            self.mailbox.store.drop(changed)  # relisted with their new state; gone ones stay gone
         ordered = [results[mid] for mid in ids]
         return MutationResult(action=action, results=ordered, counts=dict(Counter(r.status for r in ordered)))
 

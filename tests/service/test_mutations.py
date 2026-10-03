@@ -168,3 +168,25 @@ async def test_changed_messages_leave_the_summary_cache(mutations: Mutations) ->
     await mutations.set_read(["m5"], True)
     cached = await mutations.mailbox.list_messages(folder="inbox", refresh=False)
     assert "m5" not in [m.id for m in cached.items]
+
+
+async def test_new_deleted_items_subfolder_is_left_alone(mutations: Mutations, fake: FakeGraph) -> None:
+    await mutations.mailbox.folders()  # cached before the subfolder exists
+    fake.add_folder("f-new", "Fresh", parent="f-deleted")
+    fake.add(FakeMessage("d3", "old", "f-new", "2026-09-01T00:00:00Z"))
+    assert statuses(await mutations.delete(["d3"])) == {"d3": "unchanged"}
+    assert not fake.ows_calls
+
+
+async def test_mismatched_item_results_are_read_back(mutations: Mutations, fake: FakeGraph) -> None:
+    fake.ows_next = [{"ResponseClass": "Success", "ResponseCode": "NoError"}]  # one result for two
+    result = await mutations.set_flag(["m1", "m5"], True)
+    assert statuses(result) == {"m1": "unknown", "m5": "unknown"} and len(fake.ows_calls) == 1
+
+
+async def test_messages_found_gone_leave_the_summary_cache(mutations: Mutations, fake: FakeGraph) -> None:
+    await mutations.mailbox.list_messages(folder="inbox")
+    del fake.messages["m5"]
+    assert statuses(await mutations.set_read(["m5"], True)) == {"m5": "not_found"}
+    cached = await mutations.mailbox.list_messages(folder="inbox", refresh=False)
+    assert "m5" not in [m.id for m in cached.items]
