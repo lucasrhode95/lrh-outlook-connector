@@ -172,13 +172,6 @@ class OwsMailWriter:
         with operation("changing flags"):
             return await self._update({mid: ("item:Flag", flag) for mid in message_ids})
 
-    async def set_categories(self, categories: dict[str, list[str]]) -> dict[str, str | None]:
-        """The full category list per message (replaces what it had)."""
-        with operation("changing categories"):
-            return await self._update(
-                {mid: ("item:Categories", {"Categories": names}) for mid, names in categories.items()}
-            )
-
     async def move(self, message_ids: list[str], folder: FolderTarget) -> dict[str, str | None]:
         body = {
             "ToFolderId": {"__type": "TargetFolderId:#Exchange", "BaseFolderId": _folder(folder)},

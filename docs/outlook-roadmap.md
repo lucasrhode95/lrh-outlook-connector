@@ -70,9 +70,9 @@ Ordered by risk: reversible state changes first, then moves and deletes.
 | Item | Status | Scope |
 |---|---|---|
 | W4 Read/unread | **Partial**: built and fake-tested; live check V3 pending | `set_read_state`: per message, and per conversation (every message in scope, all copies) with `UpdateItem`; read receipts suppressed |
-| W5 Flag / categories | **Partial**: built and fake-tested; live check V3 pending | `set_flag`; `categorize(add, remove)` keeps other categories and adds only names in the mailbox's category list (Graph `masterCategories`; whether the read sign-in may read it is part of V3) |
+| W5 Flag | **Partial**: built and fake-tested; live check V3 pending | `set_flag`: follow-up flag on / off, per message. |
 | W2 Move to folder | **Partial**: built and fake-tested; live check V3 pending | `move_messages`: explicit ids + a target resolved like `list_folders`; well-known targets by alias (proven), other folders by id (V3). Deleted Items refused (use delete). Per-message results |
-| V3 Live mutation check | **Pending — needs you** | On a few test messages you name: read/unread (one message, then one conversation), flag and unflag, add and remove an existing category (and confirm `masterCategories` is readable), a move to Archive and to a project folder (the folder-id target) and back, and a delete, then restore from Deleted Items in Outlook. |
+| V3 Live mutation check | **Pending — needs you** | On a few test messages you name: read/unread (one message, then one conversation), flag and unflag, a move to Archive and to a project folder by path (the folder-id target) and back, and a delete, then restore from Deleted Items in Outlook. |
 | W3 Delete (soft) | **Partial**: built and fake-tested; live check V3 pending | `delete_messages`: `DeleteItem` `MoveToDeletedItems`; messages already in Deleted Items are left alone. Never purge. |
 
 ## Later and parked
@@ -89,3 +89,4 @@ Ordered by risk: reversible state changes first, then moves and deletes.
 | X7 Resumable export with progress | **Parked** | Review suggestion. Not needed while exports finish in one call with per-item gaps (H1–H3); revisit if a real export still hits limits. |
 | X9 Folder delta | **Parked** | Researched (S2); a full folder refresh takes under a second. |
 | X10 Meeting search | **Later — nice to have** | Decided 2026-10-02: belongs here, not in lrh-teams. Meetings are calendar events in the same Exchange mailbox (Graph `/me/calendarView`, `/me/events`: subject, time, organizer, attendees, agenda, Teams join link). lrh-teams keeps meeting chats, which it already reads; the join link carries the meeting chat id (`19:meeting_…`) so an agent can hand over to lrh-teams without duplicating either side. Not the `TeamsMeetings` folder items (undocumented Teams storage). First step: probe whether the read client's token grants `Calendars.Read`. |
+| X11 Categories | **Parked hard** (2026-10-03) | Never used. Writing them was built and removed: adding needs the master category list, which Graph only gives with `MailboxSettings.Read` (not in the read sign-in), and a free-form name creates an uncoloured category. Categories are still read and shown with each message. |

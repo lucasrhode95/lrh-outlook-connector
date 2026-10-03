@@ -72,27 +72,6 @@ async def test_flag(mutations: Mutations, fake: FakeGraph) -> None:
     assert statuses(await mutations.set_flag(["m1"], True)) == {"m1": "unchanged"}
 
 
-async def test_categories_must_exist_and_keep_the_others(mutations: Mutations, fake: FakeGraph) -> None:
-    fake.messages["m1"].categories = ["Project X"]
-    with pytest.raises(InvalidRequest, match="Unknown categor.*Blue.*the mailbox has: Project X, Red"):
-        await mutations.categorize(["m1"], add=["Blue"])
-    result = await mutations.categorize(["m1", "m5"], add=["red"])  # spelled as in the list
-    assert statuses(result) == {"m1": "done", "m5": "done"}
-    assert fake.messages["m1"].categories == ["Project X", "Red"] and fake.messages["m5"].categories == [
-        "Red"
-    ]
-    await mutations.categorize(["m1"], remove=["project x"])
-    assert fake.messages["m1"].categories == ["Red"]
-    assert statuses(await mutations.categorize(["m5"], remove=["Project X"])) == {"m5": "unchanged"}
-
-
-async def test_unreadable_category_list_refuses_to_add(mutations: Mutations, fake: FakeGraph) -> None:
-    fake.master_categories = None
-    with pytest.raises(Exception, match="denied access"):
-        await mutations.categorize(["m1"], add=["Red"])
-    assert not fake.ows_calls
-
-
 async def test_move_to_a_folder_by_path_or_alias(mutations: Mutations, fake: FakeGraph) -> None:
     result = await mutations.move(["m1", "m5"], "Inbox/Projects/RIE")
     assert statuses(result) == {"m1": "done", "m5": "done"} and fake.messages["m1"].folder == "f-rie"
