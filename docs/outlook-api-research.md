@@ -17,7 +17,7 @@ This is the single record of what Microsoft's APIs allow and how they behave for
 - **Writes → OWS** (Outlook Web's private JSON RPC) via the One Outlook Web client. Graph mail write and send scopes are denied to every usable client (§2), so OWS fills exactly that gap. Send and all mutations are proven (§4).
 - **Search → Graph `$search`.** It matched Outlook's own top-bar search (Substrate) on recall. Substrate works with our token, but it is parked (§3.3, §5).
 - **Cache folders only.** The mailbox has 25.6k items, two thirds of them Junk, and a full metadata mirror takes about 12 minutes (§3.2).
-- **The id model is simple.** Graph immutable ids survive moves, and they become OWS ids by a base64 alphabet swap (§4.2).
+- **The id model is simple.** Graph immutable ids survive moves, and they become OWS ids by a base64 alphabet swap (§4.2). Exception: `$search` returns regular ids, so the connector reads its hits' ids back (§3.1).
 - **Delta `@removed` with `reason: "deleted"` is also reported for soft deletes.** Resolve it with a GET by id. Only a 404 means the item is gone (§3.6).
 
 ## 2. Authentication (STANDALONE)
@@ -51,11 +51,13 @@ Every call sent `Prefer: IdType="ImmutableId"`.
 | `GET /me/messages/{id}`: text and HTML body, `uniqueBody`, `internetMessageHeaders` | 200. Reading does not change `isRead`. |
 | `/me/messages/{id}/$value` (MIME) | 200 |
 | `/me/messages?$filter=conversationId eq '…'` | 200, across all folders (§3.4) |
-| `$search` (`subject:`, `from:`, `to:`, body, `attachment:`, `received:`) | 200. Field terms must be quoted. |
+| `$search` (`subject:`, `from:`, `to:`, body, `attachment:`, `received:`) | 200. Field terms must be quoted. **Ignores `Prefer: IdType="ImmutableId"`** (live 2026-10-03): hits carry the regular id (`AQMk…`), not the immutable one (`AAkALg…`) that listings return; a GET by either id honours the header. Outlook Web accepted the regular id as a reply target. |
 | `POST /search/query` (message entity) | 200. Gives a server `total`. |
 | Attachments: list, item (`$select` must not include `@odata.type`), `$value`, `$select=microsoft.graph.fileAttachment/contentId` | 200 |
 | `/me/mailFolders/delta`, `/me/mailFolders/{id}/messages/delta` (`odata.maxpagesize`) | 200, `deltaLink`, no-change replay returns 0 |
 | `/me/translateExchangeIds` | 200, but not needed (§4.2) |
+
+**Sign-in (live 2026-10-03):** `auth write` asked for its own device code right after `auth read`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The read token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`); the write token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
 
 Not tested: shared mailboxes (no target supplied). Online Archive: the account reports `HasArchive=false`, and Graph does not support it.
 

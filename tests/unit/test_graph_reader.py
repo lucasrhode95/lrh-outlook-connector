@@ -267,3 +267,11 @@ async def test_renewal_applies_to_one_request_only(fake: FakeGraph) -> None:
     transport = Transport(tokens_, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
     assert await GraphMailReader(Graph(transport)).list_folders()
     assert tokens_.renewals == [{"force_refresh": True}]  # the retry after 429 did not refresh again
+
+
+async def test_search_returns_the_same_permanent_ids_as_listings(fake: FakeGraph) -> None:
+    # Graph's $search ignores the immutable-id preference; the reader reads the ids back.
+    reader = reader_for(fake)
+    hits, _ = await reader.search(query="relatório", folder_id=None, page_size=25, page=None)
+    listed, _ = await reader.list_messages(folder_id=None, since=None, until=None, page_size=25, page=None)
+    assert {m.id for m in hits} <= {m.id for m in listed} and not any(m.id.startswith("rest.") for m in hits)
