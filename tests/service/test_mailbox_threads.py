@@ -415,7 +415,7 @@ async def test_copies_split_across_pages_are_returned_once(mailbox: Mailbox, fak
     assert seen.count("cp-in") + seen.count("cp-out") == 1
 
 
-# ---------------------------------------------------------------- reach: hidden folders, Sync Issues
+# ---------------------------------------------------------------- reach: hidden folders and Sync Issues
 
 
 def add_out_of_reach_mail(fake: FakeGraph) -> None:
@@ -436,7 +436,7 @@ async def test_hidden_folders_and_items_outside_the_mail_folders_are_out_of_reac
     for include in (False, True):  # include_deleted_items never brings them back
         page = await mailbox.list_messages(include_deleted_items=include)
         assert not {"h1", "o1"} & {m.id for m in page.items}
-        assert page.coverage.excluded["hidden"] == 2
+        assert page.coverage.excluded["hidden"] == 3  # h1, o1 and c1 (Sync Issues)
         found = await mailbox.search("budget", include_deleted_items=include)
         assert not {"h1", "o1"} & {m.id for hit in found.conversations for m in hit.matching_messages}
     assert "f-hidden" not in {f.id for f in await mailbox.folders()}
@@ -445,17 +445,19 @@ async def test_hidden_folders_and_items_outside_the_mail_folders_are_out_of_reac
     assert (await mailbox.conversation_sizes(["c-h1", "c-o1"]))[0].messages == 0
 
 
-async def test_sync_issues_are_left_out_like_deleted_items_unless_asked(
-    mailbox: Mailbox, fake: FakeGraph
-) -> None:
+async def test_sync_issues_are_out_of_reach(mailbox: Mailbox, fake: FakeGraph) -> None:
     add_out_of_reach_mail(fake)
-    page = await mailbox.list_messages()
-    assert "c1" not in {m.id for m in page.items} and page.coverage.excluded["sync_issues"] == 1
-    assert "c1" in {m.id for m in (await mailbox.list_messages(include_deleted_items=True)).items}
-    # listed and reachable by name, even though Graph marks the Sync Issues folder hidden
-    assert {"f-sync", "f-conflicts"} <= {f.id for f in await mailbox.folders()}
-    named = await mailbox.list_messages(folder="Sync Issues/Conflicts")
-    assert [m.id for m in named.items] == ["c1"]
+    fake.add_folder("f-sync2", "Sync Issues 2", alias="syncissues")  # Graph does not mark it hidden
+    fake.add_folder("f-local", "Local Failures", parent="f-sync2", alias="localfailures")
+    fake.add(FakeMessage("l1", "budget l1", "f-local", "2026-10-01T09:00:00Z", conversation="c-l1"))
+    for include in (False, True):  # include_deleted_items never brings them back
+        page = await mailbox.list_messages(include_deleted_items=include)
+        assert not {"c1", "l1"} & {m.id for m in page.items}
+        found = await mailbox.search("budget", include_deleted_items=include)
+        assert not {"c1", "l1"} & {m.id for hit in found.conversations for m in hit.matching_messages}
+    assert not {"f-sync", "f-conflicts", "f-sync2", "f-local"} & {f.id for f in await mailbox.folders()}
+    with pytest.raises(InvalidRequest, match="hidden folder"):
+        await mailbox.resolve_folder("Sync Issues 2/Local Failures")
 
 
 async def test_a_folder_deleted_in_outlook_counts_as_deleted_items(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -470,7 +472,7 @@ async def test_total_counts_only_reachable_folders_in_scope(mailbox: Mailbox, fa
     page = await mailbox.list_messages(include_total=True)
     assert page.coverage.server_total == 4  # m1, m2, m3, m5: not Junk, Sync Issues, hidden or deleted
     with_deleted = await mailbox.list_messages(include_total=True, include_deleted_items=True)
-    assert with_deleted.coverage.server_total == 7  # + m4 (Junk), c1 (Sync Issues), d1 (deleted folder)
+    assert with_deleted.coverage.server_total == 6  # + m4 (Junk), d1 (deleted folder); never Sync Issues
 
 
 async def test_mail_in_a_folder_created_meanwhile_is_found(mailbox: Mailbox, fake: FakeGraph) -> None:

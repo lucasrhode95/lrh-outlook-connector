@@ -150,15 +150,15 @@ function folderItem(id, name, depth, unread) {
 
 // ------------------------------------------------------------------ list and search
 
-// Deleted Items, Junk and Sync Issues are left out unless the toggle is on, or the user is inside one
+// Deleted Items and Junk are left out unless the toggle is on, or the user is inside one
 // of them (the server always lists a folder asked for by name; threads, counts and exports follow this).
 function includeDeleted() {
   return $("opt-deleted").checked || (state.mode === "list" && insideLeftOutFolder(state.folder));
 }
 
-// Deleted Items, Junk Email, Sync Issues, or a folder inside one of them (a folder deleted in
-// Outlook moves into Deleted Items), the same rule as the server's.
-const LEFT_OUT_FOLDERS = ["deleteditems", "junkemail", "syncissues", "conflicts", "localfailures", "serverfailures"];
+// Deleted Items, Junk Email, or a folder inside one of them (a folder deleted in Outlook moves into
+// Deleted Items), the same rule as the server's.
+const LEFT_OUT_FOLDERS = ["deleteditems", "junkemail"];
 function insideLeftOutFolder(id) {
   const seen = new Set();
   for (let folder = state.folders.get(id); folder && !seen.has(folder.id); folder = state.folders.get(folder.parent_id)) {
@@ -286,8 +286,7 @@ async function loadAttachmentNames(request = state.listRequest) {
 function showCoverage(coverage) {
   const parts = [];
   const excluded = coverage.excluded || {};
-  const notShown = (excluded.deleted_or_junk || 0) + (excluded.sync_issues || 0);
-  if (notShown) parts.push(`${notShown} in Deleted / Junk / Sync Issues not shown`);
+  if (excluded.deleted_or_junk) parts.push(`${excluded.deleted_or_junk} in Deleted / Junk not shown`);
   if (excluded.meeting_mail) parts.push(`${excluded.meeting_mail} meeting messages not shown`);
   $("coverage").textContent = parts.join(" · ");
   $("coverage").title = (coverage.notes || []).join("\n");

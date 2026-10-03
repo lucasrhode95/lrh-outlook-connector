@@ -47,9 +47,9 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
-- Scope, the same for every tool: Deleted Items, Junk Email and Sync Issues (Outlook's own \
-conflict copies) are left out unless include_deleted_items=true (a folder you name is always \
-included; subfolders count with their parent). include_sent_items=false also leaves out Sent \
+- Scope, the same for every tool: Deleted Items and Junk Email are left out unless \
+include_deleted_items=true (a folder you name is always included; subfolders count with their \
+parent). include_sent_items=false also leaves out Sent \
 Items, Drafts and Outbox: use it for "the latest mail I received", which includes mail that rules \
 filed into other folders. Both flags point the same way: true shows more mail, false filters more. \
 coverage.excluded counts what was left out.
@@ -123,10 +123,7 @@ MessageIds = Annotated[
 
 IncludeDeleted = Annotated[
     bool,
-    Field(
-        description="Include Deleted Items, Junk Email and Sync Issues "
-        "(a folder you name is always included)."
-    ),
+    Field(description="Include Deleted Items and Junk Email (a folder you name is always included)."),
 ]
 IncludeMeetings = Annotated[
     bool,

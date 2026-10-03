@@ -4,13 +4,14 @@ Remote first: every call asks Outlook (Graph). The local store caches the folder
 message data is kept locally, so a message deleted on the server is gone here too.
 
 Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
-- Deleted Items, Junk Email and Sync Issues (Outlook's own conflict and failure copies) are left out
-  unless ``include_deleted_items`` (a folder asked for by name is always included).
+- Deleted Items and Junk Email are left out unless ``include_deleted_items`` (a folder asked for by
+  name is always included).
   Sent Items, Drafts and Outbox are included unless ``include_sent_items`` is false. List and
   search also leave out meeting mail (invitations, replies to them, cancellations) when
   ``include_meeting_mail`` is false: a conversation that is only meeting traffic disappears, one
   with real replies shows through them. Every flag points the same way: true shows more mail.
-- Hidden folders, and items outside the mail folders (e.g. Teams meeting records), are out of reach:
+- Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
+  and items outside the mail folders (e.g. Teams meeting records) are out of reach:
   never listed, searched, counted, threaded or exported, and list_folders does not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.
@@ -49,7 +50,7 @@ log = logging.getLogger(__name__)
 
 FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
-SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")
+SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")  # out of reach
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
 FILTERED_PAGES = 10  # server pages scanned at most for one filtered page
 MAX_SIZE_LOOKUPS = 200
@@ -140,7 +141,7 @@ class Mailbox:
 
         Hidden folders are not listed here: ``finish`` always leaves them out.
         """
-        left_out = set() if include_deleted_items else {"deleted_or_junk", "sync_issues"}
+        left_out = set() if include_deleted_items else {"deleted_or_junk"}
         if not include_sent_items:
             left_out.add("outgoing")
         categories = folder_categories(await self.folder_map())
@@ -567,14 +568,13 @@ def _detail(items: list[MessageSummary], detail: Detail) -> list[MessageSummary]
 def folder_categories(folders: dict[str, Folder]) -> dict[str, str]:
     """Folder id -> category, judged from the folder and its parents (a folder deleted in Outlook
     moves into Deleted Items with its mail; Sync Issues has subfolders):
-    "sync_issues" > "hidden" > "deleted_or_junk" > "outgoing". Folders without one are absent."""
+    "hidden" (also Sync Issues, which Graph does not mark hidden) > "deleted_or_junk" > "outgoing".
+    Folders without one are absent."""
     out: dict[str, str] = {}
     for folder in folders.values():
         chain = _ancestry(folder, folders)
         aliases = {f.well_known for f in chain if f.well_known}
-        if aliases & set(SYNC_ISSUES_FOLDERS):
-            out[folder.id] = "sync_issues"
-        elif any(f.hidden for f in chain):
+        if aliases & set(SYNC_ISSUES_FOLDERS) or any(f.hidden for f in chain):
             out[folder.id] = "hidden"
         elif aliases & set(DELETED_OR_JUNK_FOLDERS):
             out[folder.id] = "deleted_or_junk"
