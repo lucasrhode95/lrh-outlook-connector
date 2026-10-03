@@ -280,8 +280,16 @@ async def test_renewal_applies_to_one_request_only(fake: FakeGraph) -> None:
 
 
 async def test_search_returns_the_same_permanent_ids_as_listings(fake: FakeGraph) -> None:
-    # Graph's $search ignores the immutable-id preference; the reader reads the ids back.
+    # Graph's $search ignores the immutable-id preference; one translateExchangeIds call fixes a page.
     reader = reader_for(fake)
     hits, _ = await reader.search(query="relatório", folder_id=None, page_size=25, page=None)
     listed, _ = await reader.list_messages(folder_id=None, since=None, until=None, page_size=25, page=None)
-    assert {m.id for m in hits} <= {m.id for m in listed} and not any(m.id.startswith("rest.") for m in hits)
+    assert hits and {m.id for m in hits} <= {m.id for m in listed}
+    assert not any(m.id.startswith("rest.") for m in hits)
+    assert fake.calls.count("POST /v1.0/me/translateExchangeIds") == 1
+
+
+async def test_search_keeps_its_ids_when_translation_fails(fake: FakeGraph) -> None:
+    fake.fail[r"/me/translateExchangeIds"] = 500
+    hits, _ = await reader_for(fake).search(query="relatório", folder_id=None, page_size=25, page=None)
+    assert hits and all(m.id.startswith("rest.") for m in hits)  # the search itself still works

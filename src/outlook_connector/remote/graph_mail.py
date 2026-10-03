@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
-from outlook_connector.domain.errors import Failure, NotFound
+from outlook_connector.domain.errors import ConnectorError, Failure, NotFound
 from outlook_connector.domain.models import Attachment, Folder, Message, MessageSummary, UserProfile
 from outlook_connector.remote import graph_mapping as mapping
 from outlook_connector.remote.graph import (
@@ -136,20 +136,33 @@ class GraphMailReader:
 
     async def _immutable(self, found: list[MessageSummary]) -> list[MessageSummary]:
         """$search ignores ``Prefer: IdType="ImmutableId"`` (live 2026-10-03) and returns regular ids,
-        which change when a message moves. Read each hit's id back (a GET honours the header), so
-        search gives the same ids as every other call. A hit gone meanwhile is dropped; one whose
-        lookup failed keeps its search id."""
-        requests = {str(i): relative(f"/me/messages/{m.id}", {"$select": "id"}) for i, m in enumerate(found)}
-        responses = await self._graph.batch(requests) if requests else {}
-        out = []
-        for index, message in enumerate(found):
-            response = responses[str(index)]
-            if response.status == 404:
-                continue
-            if response.ok and isinstance(response.body.get("id"), str):
-                message.id = response.body["id"]
-            out.append(message)
-        return out
+        which change when a message moves; a GET by such an id returns it unchanged. One
+        ``translateExchangeIds`` call per page turns them into the immutable ids every other call
+        uses (live 2026-10-04). Graph rejects the whole call if an input is already immutable, so a
+        failed translation keeps the search ids rather than failing the search."""
+        if not found:
+            return found
+        try:
+            data = await self._graph.post(
+                "/me/translateExchangeIds",
+                {
+                    "inputIds": [m.id for m in found],
+                    "sourceIdType": "restId",
+                    "targetIdType": "restImmutableEntryId",
+                },
+            )
+        except ConnectorError:
+            return found
+        targets = {
+            v["sourceId"]: v["targetId"]
+            for v in data.get("value", [])
+            if isinstance(v, dict)
+            and isinstance(v.get("sourceId"), str)
+            and isinstance(v.get("targetId"), str)
+        }
+        for message in found:
+            message.id = targets.get(message.id, message.id)
+        return found
 
     @_named("listing a conversation")
     async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
