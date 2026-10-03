@@ -33,7 +33,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 | A3 | "Explain what the Teams 'Analytics Chat' is talking about." The agent reads Teams, decides it needs more context, searches email and reads attachments. | Teams MCP + this MCP side by side in the client. `search_messages`, `get_thread`, attachment resources. **No cross-repo integration needed.** | MVP |
 | A4 | "Delete all marketing email from last week." | `list_messages`/`search_messages` → `move_messages(target=deleteditems)` | Mutations |
 | A5 | "Move inbound items to their project folders (National Grid, Naturgy, RIE…). If unsure, don't move; list them for me." | `list_folders`, `list_messages`, `get_message`; the agent classifies, then calls `move_messages` per target and reports the unsure items in chat | Mutations |
-| A6 | Agent marks messages read/unread, flags them or sets categories as part of triage. | `set_read_state`, `set_flag`, `set_categories` | Mutations |
+| A6 | Agent marks messages read/unread or flags them as part of triage. | `set_read_state`, `set_flag` | Mutations |
 | A7 | Agent sends an email on explicit request. | `send_email` | Send |
 
 ### Manual (local UI)
@@ -187,16 +187,17 @@ Listed in priority order:
 1. **Move to folder**, including Archive and project folders.
 2. **Move to Deleted Items.** This is the only "delete". No purge.
 3. **Mark read/unread.**
-4. **Flag and categorize.**
+4. **Flag** (follow-up flag). Categories are parked: not needed (decided 2026-10-03).
 
 Requirements:
 
 - **Authorization:** the user's MCP client allow/deny prompt is the safeguard for mutations. There is no server-side plan or confirmation token. To keep that prompt meaningful:
   - Write tools take **explicit message IDs** and an explicit target. There is no "move everything matching a query" on the server.
-  - They are never auto-approved by annotation: `readOnlyHint=false`. `destructiveHint=true` for move and delete, `false` for read-state, flag and categories.
-- **Per-item results:** each tool returns a result per item (moved / already there / not found / failed). Partial failure is reported, never hidden. Moves are not retried blindly. On an ambiguous result, re-read the item's folder.
+  - They are never auto-approved by annotation: `readOnlyHint=false`. `destructiveHint=true` for move and delete, `false` for read state and flag.
+- **Per-item results:** each tool returns a result per item: `done`, `unchanged` (already so; nothing sent), `not_found`, `failed` (with Outlook's code) or `unknown`. Partial failure is reported, never hidden. Nothing is retried. On an ambiguous result, the items are read back: `done` where the change is visible, `unknown` elsewhere.
+- **Delete** moves to Deleted Items; messages already in Deleted Items are left alone, so nothing is ever deleted permanently. **Read state** also works per conversation (every message in scope).
 - **Folder targets** are resolved through `list_folders`. Creating folders is out of scope until requested.
-- **Local consistency:** after a successful mutation, update the local store (folder, read state, flags, categories).
+- **Local consistency:** changed messages are dropped from the summary cache, so the next listing caches their new state.
 
 ## 12. Phases
 
@@ -204,7 +205,7 @@ Requirements:
 |---|---|
 | **MVP (read)** | Auth (read client), folders, `list_messages`, `get_thread`, `get_message`, attachment resources, online search, export (§10), local UI, MCP read surface |
 | **Send** | Write-client sign-in, `send_email` with safeguards |
-| **Mutations** | move → delete → read state → flag/categories |
+| **Mutations** | move → delete → read state → flag |
 | **Parked** | Branch-aware threads (§10.3): rely on Exchange conversations for now |
 
 ## 13. Operational rules

@@ -276,3 +276,21 @@ class SendResult(Compact):
     status: SendStatus  # "unknown": no clear answer and no copy found in Sent Items yet
     detail: str
     sent_item_id: str | None = None  # the Sent Items copy, when it was looked for and found
+
+
+MAX_MUTATION_ITEMS = 100
+MutationStatus = Literal["done", "unchanged", "not_found", "failed", "unknown"]
+
+
+class ItemResult(Compact):
+    id: str
+    status: MutationStatus  # unchanged: already so, nothing sent; unknown: no clear answer, not confirmed
+    detail: str | None = None
+
+
+class MutationResult(Compact):
+    """One result per message, in request order. Partial failure is reported, never hidden."""
+
+    action: str
+    results: list[ItemResult]
+    counts: dict[str, int] = Field(default_factory=dict)  # MutationStatus -> messages

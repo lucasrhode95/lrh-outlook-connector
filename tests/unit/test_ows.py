@@ -133,3 +133,42 @@ async def test_anchor_mailbox_is_the_write_account(fake: FakeGraph) -> None:
     fake.handle_ows = spy  # type: ignore[method-assign]
     await writer_for(fake).send(proposal())
     assert headers == ["AAD-SMTP:me@example.com"]
+
+
+# ---------------------------------------------------------------- mutations
+
+
+async def test_update_item_reports_each_message(fake: FakeGraph) -> None:
+    writer = writer_for(fake)
+    assert await writer.set_read(["m5", "gone"], True) == {"m5": None, "gone": "ErrorItemNotFound"}
+    assert fake.messages["m5"].is_read
+    assert await writer.set_flag(["m1"], True) == {"m1": None} and fake.messages["m1"].flagged
+    (change,) = fake.ows_calls[0][1]["ItemChanges"][:1]
+    assert change["ItemId"]["Id"] == "m5" and fake.ows_calls[0][1]["ConflictResolution"] == "AlwaysOverwrite"
+
+
+async def test_move_to_a_well_known_or_any_folder(fake: FakeGraph) -> None:
+    from outlook_connector.remote.ports import FolderTarget
+
+    writer = writer_for(fake)
+    assert await writer.move(["m1"], FolderTarget("f-archive", "archive")) == {"m1": None}
+    assert fake.messages["m1"].folder == "f-archive"
+    assert fake.ows_calls[-1][1]["ToFolderId"]["BaseFolderId"]["__type"] == "DistinguishedFolderId:#Exchange"
+    assert await writer.move(["m1"], FolderTarget("f-rie")) == {"m1": None}
+    assert fake.messages["m1"].folder == "f-rie"
+    assert fake.ows_calls[-1][1]["ToFolderId"]["BaseFolderId"] == {
+        "__type": "FolderId:#Exchange",
+        "Id": "f/rie",
+    }
+
+
+async def test_delete_only_moves_to_deleted_items(fake: FakeGraph) -> None:
+    assert await writer_for(fake).delete(["m5", "gone"]) == {"m5": None, "gone": "ErrorItemNotFound"}
+    assert fake.messages["m5"].folder == "f-deleted"
+    assert fake.ows_calls[0][1]["DeleteType"] == "MoveToDeletedItems"
+
+
+async def test_mismatched_item_results_are_an_error(fake: FakeGraph) -> None:
+    fake.ows_next = [{"ResponseClass": "Success", "ResponseCode": "NoError"}]  # one result for two
+    with pytest.raises(WriteOutcomeUnknown, match="1 item results for 2 messages"):
+        await writer_for(fake).set_read(["m1", "m5"], True)

@@ -179,6 +179,11 @@ class Store:
             rows = db.execute(sql, args).fetchall()
         return [MessageSummary.model_validate_json(r[0]) for r in rows]
 
+    def drop(self, ids: Iterable[str]) -> None:
+        """Forget cached summaries (they changed on the server; the next listing caches them again)."""
+        with self._tx() as db:
+            db.executemany("DELETE FROM messages WHERE id = ?", [(i,) for i in ids])
+
     def forget(
         self, *, folder_id: str | None, since: datetime | None, until: datetime | None, keep: set[str]
     ) -> None:
