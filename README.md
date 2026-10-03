@@ -28,7 +28,7 @@ outlook-connector status        # offline: account, profiles, cache location
 outlook-connector status --check  # also refreshes each token (only read is required)
 ```
 
-Tokens are stored encrypted (DPAPI on Windows, Keychain on macOS, libsecret on Linux) under the user data directory. If encryption is unavailable, the connector refuses to store tokens.
+Tokens are stored encrypted (DPAPI on Windows, Keychain on macOS, libsecret on Linux) in the data directory (`%USERPROFILE%\.lrh-outlook-connector` on Windows; `OUTLOOK_CONNECTOR_HOME` overrides it). If encryption is unavailable, the connector refuses to store tokens.
 
 For development only, `--unsecure` uses a separate **plaintext** cache file in the same directory, and prints a warning each time.
 
@@ -100,7 +100,7 @@ everything, or one per message; attachments optional). "export this view" export
 folder and date range. Deleted Items, Junk and Sync Issues are left out unless you tick
 "Deleted / Junk" (they are always shown inside those folders). Hidden folders are not listed.
 
-Exports and downloaded attachments go to the data directory (`%LOCALAPPDATA%\lrh-outlook-connector`)
+Exports and downloaded attachments go to the data directory (`%USERPROFILE%\.lrh-outlook-connector`)
 and are removed after a week. The local store there keeps only the folder cache and the summaries of
 listed messages (for the instant preview). Mail deleted on the server is gone here too.
 
