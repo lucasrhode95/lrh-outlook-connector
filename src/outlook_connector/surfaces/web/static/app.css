@@ -45,6 +45,15 @@ input[type=checkbox] { accent-color: var(--accent); }
 .segmented span { display: block; padding: 3px 10px; border-radius: 5px; font-size: 13px; color: var(--muted); }
 .segmented input:checked + span { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
 
+/* High-contrast (forced colors) mode replaces our colors and drops shadows, which would make a switch
+   look the same on and off and hide the chosen segment: use the native checkbox and a system-color
+   outline there instead. */
+@media (forced-colors: active) {
+  .switch input { appearance: auto; width: auto; height: auto; background: none; }
+  .switch input::after { content: none; }
+  .segmented input:checked + span { outline: 2px solid Highlight; outline-offset: -2px; }
+}
+
 .topbar { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line);
   background: var(--panel); flex-wrap: wrap; }
 .brand { margin-right: 8px; }
