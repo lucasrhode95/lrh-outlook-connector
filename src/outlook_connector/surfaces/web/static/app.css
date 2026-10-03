@@ -130,7 +130,7 @@ input[type=checkbox] { accent-color: var(--accent); }
   stroke-linejoin: round; }
 .icon.flagged { color: var(--danger); }
 .toggle { color: var(--muted); user-select: none; display: flex; justify-content: center; padding-top: 2px; }
-.count { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 9px; padding: 0 6px;
+.thread-count { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 9px; padding: 0 6px;
   margin-left: 6px; font-weight: 400; }
 .messages { padding-left: 24px; }
 .kind { display: inline-block; font-size: 11px; font-weight: 600; padding: 0 6px; border-radius: 4px; margin-right: 6px;
@@ -155,7 +155,12 @@ input[type=checkbox] { accent-color: var(--accent); }
 .badge.copy { background: none; border: 1px solid var(--line); color: var(--muted); }
 .msg-row.matched { box-shadow: inset 3px 0 0 var(--accent); }
 .attachment { margin: 0 6px 2px 0; padding: 0 6px; font: inherit; font-size: 12px; cursor: pointer; }
-.list-head #coverage { margin-left: auto; }
+/* the list header wraps: title and switches first, what was left out on its own line */
+.list-head { flex-wrap: wrap; row-gap: 4px; justify-content: flex-start; column-gap: 14px; }
+.list-head #list-title { margin-right: auto; font-weight: 600; }
+.list-head #coverage { order: 10; flex-basis: 100%; font-size: 12px; }
+.list-head #coverage:empty { display: none; }
+.switch { white-space: nowrap; }
 .more { margin: 10px 12px; }
 
 .reader { border-left: 1px solid var(--line); background: var(--panel); padding: 10px 0; }

@@ -61,8 +61,10 @@ Every tool follows the same scope rules: Deleted Items, Junk Email and Sync Issu
 Outlook files when two versions of an item collide while syncing) are left out unless
 `include_deleted_items=true` (a folder you name is always included; a subfolder counts with its
 parent, so a folder you deleted in Outlook counts as Deleted Items). `include_sent_items=false`
-also leaves out Sent Items, Drafts and Outbox (included by default). Both flags point the same way:
-true shows more mail, false filters more. `coverage.excluded` counts what was left out. Copies of one
+also leaves out Sent Items, Drafts and Outbox (included by default), and
+`include_meeting_mail=false` leaves out invitations, RSVPs and cancellations in list, search and
+range exports (a conversation with real replies still shows through them). Every flag points the
+same way: true shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off. `coverage.excluded` counts what was left out. Copies of one
 message (mail sent to yourself or to a list you are on) are shown once, with `also_in` naming the
 other folders.
 

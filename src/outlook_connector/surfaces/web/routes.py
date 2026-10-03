@@ -143,6 +143,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             limit=_int(request, "limit", 100),
             cursor=request.query_params.get("cursor") or None,
             include_deleted_items=_flag(request, "include_deleted_items"),
+            include_meeting_mail=_flag(request, "include_meeting_mail", True),
         )
         return _json(page)
 
@@ -155,6 +156,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             limit=_int(request, "limit", 50),
             cursor=request.query_params.get("cursor") or None,
             include_deleted_items=_flag(request, "include_deleted_items"),
+            include_meeting_mail=_flag(request, "include_meeting_mail", True),
         )
         return _json(result)
 

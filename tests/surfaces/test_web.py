@@ -10,7 +10,7 @@ from starlette.testclient import TestClient
 
 from outlook_connector.bootstrap import AppContext
 from outlook_connector.surfaces.web.routes import Activity, create_app
-from tests.fakes.graph_fake import FakeGraph, sample_mailbox
+from tests.fakes.graph_fake import FakeGraph, FakeMessage, sample_mailbox
 from tests.surfaces.test_mcp import FakeTokens
 
 TOKEN = "session-token-for-tests"
@@ -61,6 +61,17 @@ def test_attachment_names_for_the_list(client: TestClient) -> None:
         client.post("/api/attachments", json={"message_ids": [f"x{i}" for i in range(201)]}).status_code
         == 400
     )
+
+
+def test_meeting_mail_switch_reaches_the_list(client: TestClient, fake: FakeGraph) -> None:
+    fake.add(FakeMessage("inv", "Sync", "f-inbox", "2026-10-02T09:00:00Z", conversation="c-inv",
+                         meeting={"meetingMessageType": "meetingRequest"}))  # fmt: skip
+    shown = client.get("/api/messages", params={"folder": "inbox"}).json()
+    assert "inv" in [m["id"] for m in shown["items"]]
+    hidden = client.get("/api/messages", params={"folder": "inbox", "include_meeting_mail": "false"}).json()
+    assert "inv" not in [m["id"] for m in hidden["items"]] and hidden["coverage"]["excluded"] == {
+        "meeting_mail": 1
+    }
 
 
 def test_api_requires_the_session_token(client: TestClient) -> None:

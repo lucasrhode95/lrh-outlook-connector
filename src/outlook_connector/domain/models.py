@@ -17,12 +17,13 @@ ExportFormat = Literal["txt", "jsonl"]
 Detail = Literal["compact", "full"]
 
 # Why messages were left out of a result (Coverage.excluded, ExportArtifact.messages_excluded keys).
-ExclusionReason = Literal["deleted_or_junk", "sync_issues", "outgoing", "hidden"]
+ExclusionReason = Literal["deleted_or_junk", "sync_issues", "outgoing", "hidden", "meeting_mail"]
 EXCLUSION_TEXT: dict[str, str] = {
     "deleted_or_junk": "in Deleted Items or Junk Email (include_deleted_items=false)",
     "sync_issues": "in Sync Issues, Outlook's conflict and failure copies (include_deleted_items=false)",
     "outgoing": "in Sent Items, Drafts or Outbox (include_sent_items=false)",
     "hidden": "in hidden folders or outside the mail folders (out of reach)",
+    "meeting_mail": "meeting invitations, replies and cancellations (include_meeting_mail=false)",
 }
 
 
@@ -235,6 +236,7 @@ class ExportRequest(BaseModel):
     until: datetime | None = None
     folder: str | None = None  # path, alias or id; None = whole mailbox
     include_sent_items: bool = True  # false: leave out Sent Items, Drafts and Outbox (range only)
+    include_meeting_mail: bool = True  # false: leave out invitations, RSVPs, cancellations (range only)
     limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
     format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
     include_attachments: bool = False
@@ -244,7 +246,13 @@ class ExportRequest(BaseModel):
 
     @property
     def by_range(self) -> bool:
-        return bool(self.since or self.until or self.folder or not self.include_sent_items)
+        return bool(
+            self.since
+            or self.until
+            or self.folder
+            or not self.include_sent_items
+            or not self.include_meeting_mail
+        )
 
 
 class ExportArtifact(Compact):
