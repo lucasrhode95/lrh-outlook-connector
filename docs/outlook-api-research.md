@@ -173,7 +173,41 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
   - `CreateAttachmentFromLocalFile` uploads draft attachments (BROWSER). It is relevant only if send-with-attachments is added.
   - The B2 route `/messageservice/ows/…` returned 500 and is not usable.
   - `/outlookgatewayb2/graphql` is Outlook's internal GraphQL, not Microsoft Graph.
-- **Inbox rules (2026-10-04, read attempts only, nothing changed):** the read sign-in (Graph) has no `MailboxSettings.*` scope, so Graph's `messageRules` is out of reach. The write sign-in's Outlook token carries `MailboxSettings.ReadWrite`. Over OWS, `GetInboxRules` (the EWS name) returned `OwaOperationNotSupportedException`; `GetInboxRule` (the name Outlook Web's settings use) exists but returned `NullReferenceException` with an empty request body, so its request format is unknown. Next step: capture what Outlook Web sends when its rules page loads (BROWSER), then probe reads before any write.
+- **Inbox rules (2026-10-04, read attempts only, nothing changed):** the read sign-in (Graph) has no `MailboxSettings.*` scope, so Graph's `messageRules` is out of reach. The write sign-in's Outlook token carries `MailboxSettings.ReadWrite`. Over OWS, `GetInboxRules` (the EWS name) returned `OwaOperationNotSupportedException`; `GetInboxRule` (the name Outlook Web's settings use) exists but returned `NullReferenceException` with an empty request body, because the rule actions use a different envelope (captured 2026-10-04, §4.4).
+
+### 4.4 Inbox rules (captured 2026-10-04 in Outlook on the web; owner's throwaway rule only)
+
+The owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. Not yet replayed by the connector.
+
+**A different envelope from item actions (§4.1–4.2).** The rule actions send the request object itself, with no `…JsonRequest` wrapper and no `Body`:
+
+```json
+{"__type": "GetInboxRuleRequest:#Exchange",
+ "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": "V2018_01_08",
+            "TimeZoneContext": {"__type": "TimeZoneContext:#Exchange",
+                                "TimeZoneDefinition": {"__type": "TimeZoneDefinitionType:#Exchange", "Id": "<Windows time zone>"}}},
+ "UseServerRulesLoader": true}
+```
+
+This explains the 2026-10-04 `NullReferenceException`: the connector's `Ows.call` wraps every body in `{"__type": "<Action>JsonRequest", "Header", "Body"}`. The answer is also different: no `ResponseMessages`/`Items`, but `WasSuccessful` (bool), `ErrorCode` (0 on success), `ErrorMessage`, `UserPrompt`, `IsUserError`. Same transport otherwise: `?action=<Action>&app=Mail`, `Action` header, the payload in `X-OWA-UrlPostData` when short (the reorder call, being long, went in the body), `X-AnchorMailbox`, bearer token.
+
+| Action | Request (besides `__type` and `Header`) | Answer |
+|---|---|---|
+| `GetInboxRule` | `UseServerRulesLoader: true` | `InboxRuleCollection.InboxRules`: every rule, in priority order (`Priority` 1 = first) |
+| `NewInboxRule` | `InboxRule`: `Name` and only the conditions and actions used, e.g. `From: [{"__type": "PeopleIdentity:#Exchange", "DisplayName", "SmtpAddress", "RoutingType": "SMTP"}]`, `SubjectContainsWords: [..]`, `MoveToFolder: {"DisplayName", "RawIdentity": <folder id>}`, `MarkAsRead: true`, `StopProcessingRules: true` | `InboxRule`: the created rule (all fields, `Identity`, `Priority` 1: a new rule goes first) |
+| `SetInboxRule` | `InboxRule` with `Identity: {"DisplayName": <rule name>, "RawIdentity": <rule id>}` and the fields being set; `Force: false` | `WasSuccessful` … |
+| `DisableInboxRule` / `RemoveInboxRule` | `Identity: {"DisplayName": <rule id>, "RawIdentity": <rule id>}` | `WasSuccessful` … |
+| `SetInboxAndSweepRules` | `EnableDisableInboxRules`: one `{"__type": "EnableDisableInboxRuleRequest:#Exchange", "Header", "Identity", "IsEnabled"}` per rule, **every rule, in the new order** | `WasSuccessful` … |
+
+Observed semantics:
+
+- **Rule id:** `<mailbox GUID>\<20-digit number>`, stable across edits.
+- **Edit is partial:** the `SetInboxRule` request carried `Name`, `From`, `SubjectContainsWords`, `StopProcessingRules` and `Identity`, but not `MoveToFolder` or `MarkAsRead`; the rule read back afterwards still had both. Fields left out are kept. (How to *clear* a condition is not yet known.)
+- **Order:** reordering sends `SetInboxAndSweepRules` with all rules in the new order; there is no `Priority` field in the request. It also carries each rule's `IsEnabled`, so the same call can enable or disable rules.
+- **Enable:** not captured. Turning the rule back on in the UI sent `DisableInboxRule` again and the rule stayed disabled (read back `Enabled: false`). `EnableInboxRule` probably exists (it does in Exchange's cmdlets); `SetInboxAndSweepRules` with `IsEnabled: true` is the proven alternative.
+- **Folders:** `MoveToFolder.RawIdentity` is a 120-character base64 folder id with `=` padding; whether it equals the Graph folder id (or its OWS form, §7) is not yet checked.
+- **A rule has 90 fields** (conditions, `ExceptIf…` exceptions, actions, `Description` texts, `InError`, `SupportedByTask`, `RuleProvider`). The owner's 8 rules use only `MoveToFolder` (8), `SentTo` (6), `SubjectContainsWords` (5), `From` (1), `SubjectOrBodyContainsWords` (1), all with `StopProcessingRules`, all enabled, none in error.
+- Outlook also calls `GetMailboxByIdentity` after each change and `/ows/v1.0/OutlookOptions/MailForwardingNotification` on the rules page; neither is needed to manage rules.
 
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
