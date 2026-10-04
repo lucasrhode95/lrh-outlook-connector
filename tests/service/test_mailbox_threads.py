@@ -10,6 +10,7 @@ from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
+from outlook_connector.service import cursors
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads, base_subject
 from outlook_connector.store.db import Store
@@ -492,3 +493,92 @@ async def test_items_outside_the_mail_folders_refresh_the_folder_list_once(
     await mailbox.list_messages()
     await mailbox.search("budget")
     assert fake.calls.count("GET /v1.0/me/mailFolders") == walks  # remembered as outside: no new refresh
+
+
+# ---------------------------------------------------------------- per-folder listing (H7)
+
+
+def _junk_heavy(fake: FakeGraph) -> None:
+    """Interleaved mail in four folders, and Junk Email holding most of the mailbox."""
+    for day in range(1, 9):
+        folder = ("f-inbox", "f-archive", "f-sent", "f-proj")[day % 4]
+        fake.add(
+            FakeMessage(
+                f"n{day}", f"Note {day}", folder, f"2026-10-0{day}T09:00:00Z", conversation=f"c-n{day}"
+            )
+        )
+    for index in range(40):
+        fake.add(
+            FakeMessage(f"j{index}", "Buy now", "f-junk", f"2026-10-0{index % 9 + 1}T10:{index:02d}:00Z")
+        )
+
+
+async def _all_pages(mailbox: Mailbox, **options: object) -> tuple[list[str], list[str]]:
+    ids: list[str] = []
+    notes: list[str] = []
+    cursor = None
+    while True:
+        page = await mailbox.list_messages(limit=3, cursor=cursor, **options)  # type: ignore[arg-type]
+        ids += [m.id for m in page.items]
+        notes += page.coverage.notes
+        cursor = page.cursor
+        if cursor is None:
+            assert page.coverage.complete
+            return ids, notes
+
+
+async def test_a_junk_heavy_mailbox_is_listed_folder_by_folder(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _junk_heavy(fake)
+    fake.calls.clear()
+    ids, notes = await _all_pages(mailbox)
+    assert not any(c == "GET /v1.0/me/messages" or "f-junk" in c for c in fake.calls)  # never read
+    assert any(
+        n.startswith("Listed folder by folder: folders this listing leaves out hold 77%") for n in notes
+    )
+    assert "Junk Email: 41" in notes[0]
+    # exactly what the whole-mailbox listing returns, in the same order
+    monkeypatch.setattr("outlook_connector.service.mailbox.PER_FOLDER_SHARE", 2.0)
+    whole, whole_notes = await _all_pages(mailbox)
+    assert ids == whole and len(ids) == 12 and ids[:3] == ["n8", "n7", "n6"]
+    assert not any(n.startswith("Listed folder by folder") for n in whole_notes)
+
+
+async def test_a_per_folder_cursor_keeps_each_folders_position(mailbox: Mailbox, fake: FakeGraph) -> None:
+    _junk_heavy(fake)
+    page = await mailbox.list_messages(limit=3)
+    assert [m.id for m in page.items] == ["n8", "n7", "n6"] and page.cursor
+    state = cursors.decode(page.cursor, "list_messages")
+    assert state["link"] is None
+    assert state["offsets"] == {"f-inbox": 1, "f-sent": 1, "f-archive": 0, "f-proj": 1, "f-rie": 0}
+
+
+async def test_a_per_folder_listing_reads_only_folders_with_mail_in_the_window(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    fake.calls.clear()
+    page = await mailbox.list_messages(since=datetime(2026, 10, 7, tzinfo=UTC), limit=10)
+    assert [m.id for m in page.items] == ["n8", "n7"] and page.coverage.complete and page.cursor is None
+    read = {
+        c.split("/")[4] for c in fake.calls if c.startswith("GET /v1.0/me/mailFolders/") and "messages" in c
+    }
+    assert read == {"f-inbox", "f-proj"}  # n8 in Inbox, n7 in Projects; the others have none since then
+
+
+async def test_a_mostly_clean_mailbox_keeps_the_whole_mailbox_listing(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    fake.calls.clear()
+    page = await mailbox.list_messages(limit=10)
+    assert "GET /v1.0/me/messages" in fake.calls  # Junk holds 1 of 5 messages
+    assert not any(n.startswith("Listed folder by folder") for n in page.coverage.notes)
+
+
+async def test_a_named_folder_is_never_listed_folder_by_folder(mailbox: Mailbox, fake: FakeGraph) -> None:
+    _junk_heavy(fake)
+    fake.calls.clear()
+    page = await mailbox.list_messages(folder="inbox", limit=10)
+    assert [m.id for m in page.items] == ["n8", "n4", "m5", "m1"]
+    assert fake.calls.count("GET /v1.0/me/mailFolders/f-inbox/messages") == 1
