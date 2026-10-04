@@ -108,7 +108,11 @@ class Transport:
         retry: bool | None = None,
         write: bool = False,
     ) -> httpx.Response:
-        """Send a request and return a successful response, or raise a domain error."""
+        """Send a request and return a successful response, or raise a domain error.
+
+        Assumes (not re-checked here): ``url`` is built by ``remote/`` (Graph or OWS); the host allowlist
+        below is the one guard every URL passes.
+        """
         _check_host(url)
         retry = False if write else (method.upper() == "GET") if retry is None else retry
         attempts = self._max_attempts if retry else 1
@@ -197,7 +201,11 @@ class Transport:
 
         Retried like any GET: throttling (429/503, after Retry-After), a gateway error, or a
         connection that fails or drops mid-download starts the download again from scratch. What
-        still fails is a domain error, never a raw HTTP client exception."""
+        still fails is a domain error, never a raw HTTP client exception.
+
+        Assumes (not re-checked here): ``url`` is built by ``remote/``; the host allowlist is checked as
+        for ``request``.
+        """
         _check_host(url)
         renewal: dict[str, Any] | None = None
         renewed = False

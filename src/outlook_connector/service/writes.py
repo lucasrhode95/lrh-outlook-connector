@@ -67,7 +67,12 @@ class Writes:
     # ---------------------------------------------------------------- proposal
 
     async def propose(self, message: OutgoingMessage) -> EmailProposal:
-        """Exactly what would be sent, validated, with its confirmation code. Changes nothing."""
+        """Exactly what would be sent, validated, with its confirmation code. Changes nothing.
+
+        Entry point and the only validator of an outgoing message: addresses, recipient count and
+        duplicates, subject, body, reply defaults. ``create_draft``, ``send`` and the writer trust what it
+        returns.
+        """
         me = (self.account.username or "").lower()
         to, cc, bcc = (
             _addresses(message.to, "to"),
@@ -116,7 +121,11 @@ class Writes:
     # ---------------------------------------------------------------- draft
 
     async def create_draft(self, message: OutgoingMessage) -> DraftResult:
-        """Save the message (or reply) into Drafts. Nothing is sent."""
+        """Save the message (or reply) into Drafts. Nothing is sent.
+
+        Entry point: validates through ``propose`` and checks the account itself; the writer trusts the
+        proposal.
+        """
         proposal = await self.propose(message)
         self.check_account()
         draft_id = await self.writer.create_draft(proposal)
@@ -138,6 +147,11 @@ class Writes:
     # ---------------------------------------------------------------- send
 
     async def send(self, message: OutgoingMessage, user_confirmation: str) -> SendResult:
+        """Send a message the user confirmed with its code; once, never retried.
+
+        Entry point: validates through ``propose``, compares the code and checks the account;
+        ``_send_reply`` and the writer trust the proposal.
+        """
         proposal = await self.propose(message)
         if user_confirmation.strip().upper() != proposal.confirmation:
             raise InvalidRequest(
@@ -170,7 +184,11 @@ class Writes:
         return SendResult(status="sent", detail="Sent; a copy is kept in Sent Items.")
 
     async def _send_reply(self, proposal: EmailProposal, original_id: str) -> None:
-        """Save the reply as a draft, check it against the original, send exactly that draft."""
+        """Save the reply as a draft, check it against the original, send exactly that draft.
+
+        Assumes (not re-checked here): ``proposal`` comes from ``propose`` in this call, the confirmation
+        code matched and the account was checked (``send``).
+        """
         try:
             draft_id = await self.writer.create_draft(proposal)
         except WriteOutcomeUnknown:
@@ -191,7 +209,11 @@ class Writes:
         await self.writer.send_draft(draft_id, proposal.subject)
 
     async def _reply_problem(self, draft_id: str, original_id: str) -> str | None:
-        """Why the reply draft does not carry the original as received, or None when it does."""
+        """Why the reply draft does not carry the original as received, or None when it does.
+
+        Assumes (not re-checked here): ``draft_id`` is a reply draft this call just saved and
+        ``original_id`` the message it replies to.
+        """
         reader = self.mailbox.reader
         texts = await reader.get_messages([original_id, draft_id])
         pages = await reader.get_messages([original_id, draft_id], body_format="html")
@@ -218,7 +240,10 @@ class Writes:
         return None
 
     async def _inline_hashes(self, message_id: str, attachments: list[Attachment]) -> list[str]:
-        """SHA-256 of each inline image's bytes (downloaded to a temporary folder, then removed)."""
+        """SHA-256 of each inline image's bytes (downloaded to a temporary folder, then removed).
+
+        Assumes (not re-checked here): ``attachments`` is the listing of ``message_id``.
+        """
         out = []
         with tempfile.TemporaryDirectory(prefix="outlook-reply-check-") as folder:
             for index, attachment in enumerate(a for a in attachments if a.is_inline and a.kind == "file"):
@@ -236,7 +261,11 @@ class Writes:
             )
 
     async def _find_sent(self, proposal: EmailProposal, *, since: datetime) -> MessageSummary | None:
-        """The proposal's copy in Sent Items: same subject and exactly the same To, Cc and Bcc."""
+        """The proposal's copy in Sent Items: same subject and exactly the same To, Cc and Bcc.
+
+        Assumes (not re-checked here): ``proposal`` comes from ``propose`` (validated, recipients de-
+        duplicated).
+        """
         sent = await self.mailbox.resolve_folder("sentitems")
         items, _ = await self.mailbox.reader.list_messages(
             folder_id=sent.id, since=since, until=None, page_size=50, page=None
@@ -259,7 +288,11 @@ class Writes:
 def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[list[str], list[str]]:
     """Outlook's reply recipients: the sender (the original recipients when you sent it); with
     reply-all also the original To (in To) and Cc (in Cc). You are left out, except when nobody
-    else is left: a reply to mail you sent only to yourself goes back to you."""
+    else is left: a reply to mail you sent only to yourself goes back to you.
+
+    Assumes (not re-checked here): ``original`` was read from the server and ``me`` is the signed-in
+    address, lower case.
+    """
 
     def plain(recipients: list[Recipient]) -> list[str]:
         return [r.address for r in recipients if r.address and r.address.lower() != me]
@@ -309,6 +342,9 @@ def _flat(text: str | None) -> str:
 
 
 def _addresses(values: list[str], field: str) -> list[str]:
+    """The addresses of one field, validated and de-duplicated (ignoring case). Callers need not de-duplicate
+    again.
+    """
     out = []
     for value in values:
         address = value.strip()

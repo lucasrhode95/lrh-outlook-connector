@@ -159,7 +159,13 @@ def _created_id(items: list[dict[str, Any]]) -> str | None:
 
 
 class OwsMailWriter:
-    """Implements ``MailWriter`` over OWS."""
+    """Implements ``MailWriter`` over OWS.
+
+    Assumes (not re-checked here): proposals come from ``Writes.propose`` (addresses, subject and body
+    validated), message ids are Graph immutable ids from this connector, folder targets were resolved by
+    the service, and the write account was checked (``Writes.check_account``). Nothing is re-validated
+    here; every call is sent once.
+    """
 
     def __init__(self, ows: Ows) -> None:
         self._ows = ows
@@ -294,6 +300,8 @@ def _create(message: EmailProposal, disposition: str) -> dict[str, Any]:
     quoted original; recipients and subject are passed explicitly, so the result matches the
     proposal. A reply's own text goes in an HTML body, so the quoted original keeps its formatting
     and inline images (live 2026-10-04). New messages stay plain text (W7).
+
+    Assumes (not re-checked here): ``message`` comes from ``Writes.propose``.
     """
     recipients = {
         "ToRecipients": [_address(a) for a in message.to],

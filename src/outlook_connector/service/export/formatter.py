@@ -77,6 +77,9 @@ def render_file(
 
     ``notes`` (what the export left out or could not fetch) go in the header. Every message carries
     its ids, which get_message/get_thread accept, so an export can be traced back to its source.
+
+    Assumes (not re-checked here): every item carries its body text, or the error block in ``text`` with
+    ``export_error`` set (the orchestrator builds them).
     """
     dates = [m.message.received_at or m.message.sent_at for m in items]
     known = [d for d in dates if d]
@@ -101,7 +104,11 @@ def render_file(
 
 
 def jsonl_record(item: RenderedMessage, *, body_kind: str) -> str:
-    """One JSON line per message: source ids, dates, people and the body, for agents and trackers."""
+    """One JSON line per message: source ids, dates, people and the body, for agents and trackers.
+
+    Assumes (not re-checked here): ``item`` was built by the orchestrator (``text`` holds the body unless
+    ``export_error`` is set).
+    """
     m = item.message
 
     def person(r: Recipient | None) -> dict[str, str | None] | None:

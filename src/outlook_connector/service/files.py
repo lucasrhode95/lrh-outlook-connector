@@ -26,6 +26,11 @@ class Files:
         self.mailbox = mailbox
 
     async def download_attachment(self, message_id: str, attachment_id: str) -> SavedFile:
+        """Save one attachment as a local file.
+
+        Entry point: the attachment is looked up on the message (unknown ids raise NotFound; cloud
+        attachments are refused) before anything is downloaded.
+        """
         attachments = await self.mailbox.attachments(message_id)
         attachment = next((a for a in attachments if a.id == attachment_id), None)
         if attachment is None:
@@ -48,6 +53,11 @@ class Files:
 
     async def save_mime(self, message_id: str) -> SavedFile:
         # The subject names the file: a summary read (no body, no attachment list) is enough.
+        """Save the original message (MIME) as a local .eml named after its subject.
+
+        Entry point: the message id is taken as given; a message that is not on the server raises
+        NotFound.
+        """
         found = await self.mailbox.reader.get_summaries([message_id])
         if message_id in found.failed:
             raise Upstream(found.failed[message_id])

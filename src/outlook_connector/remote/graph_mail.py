@@ -67,6 +67,13 @@ def _named(name: str) -> Callable[[F], F]:
 
 
 class GraphMailReader:
+    """Implements ``MailReader`` over Microsoft Graph.
+
+    Assumes (not re-checked here): ids, folder ids, page sizes and windows come from the service, which
+    validated them or took them from this connector's own results. This class maps Graph's answers; it
+    applies no scope rules (the service does).
+    """
+
     def __init__(self, graph: Graph) -> None:
         self._graph = graph
 
