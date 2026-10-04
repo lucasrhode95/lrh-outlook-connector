@@ -99,6 +99,7 @@ class FakeGraph:
     throttle_next: int = 0  # respond 429 to this many upcoming top-level requests
     throttle_items: int = 0  # respond 429 to this many upcoming $batch sub-requests
     reject_tokens: int = 0  # respond 401 (token rejected) to this many upcoming top-level requests
+    drop_downloads: int = 0  # the connection drops (read timeout) on this many upcoming $value downloads
     claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
     fail: dict[str, int] = field(default_factory=dict)  # path regex -> HTTP status to answer instead
     batch_sizes: list[int] = field(default_factory=list)
@@ -158,6 +159,9 @@ class FakeGraph:
             return httpx.Response(
                 429, headers={"retry-after": "0"}, json={"error": {"code": "TooManyRequests"}}
             )
+        if self.drop_downloads and request.url.path.endswith("/$value"):
+            self.drop_downloads -= 1
+            raise httpx.ReadTimeout("Injected read timeout.", request=request)
         if request.url.host == "outlook.cloud.microsoft":
             return self.handle_ows(request)
         assert request.headers.get("authorization", "").startswith("Bearer "), "missing bearer token"

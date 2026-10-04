@@ -193,32 +193,53 @@ class Transport:
     async def download(
         self, url: str, dest: BinaryIO, *, profile: str, headers: dict[str, str] | None = None, max_bytes: int
     ) -> tuple[str | None, int]:
-        """Stream a GET response body into ``dest``. Returns (content type, size)."""
+        """Stream a GET response body into ``dest``. Returns (content type, size).
+
+        Retried like any GET: throttling (429/503, after Retry-After), a gateway error, or a
+        connection that fails or drops mid-download starts the download again from scratch. What
+        still fails is a domain error, never a raw HTTP client exception."""
         _check_host(url)
         renewal: dict[str, Any] | None = None
         renewed = False
+        attempt = 0
         while True:
+            attempt += 1
             request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
             renewal = None
-            async with self._limit, self._client.stream("GET", url, headers=request_headers) as response:
-                if response.status_code == 401:
-                    await response.aread()
-                    if not renewed:
-                        renewed, renewal = True, _renewal(response)
-                        continue
-                    raise self._sign_in_required(profile, response)
-                if not response.is_success:
-                    await response.aread()
-                    raise _error_for(response)
-                dest.seek(0)
-                dest.truncate()
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > max_bytes:
-                        raise InvalidRequest(f"Download exceeds the {max_bytes // (1024 * 1024)} MiB limit.")
-                    dest.write(chunk)
-                return response.headers.get("content-type"), size
+            try:
+                async with self._limit, self._client.stream("GET", url, headers=request_headers) as response:
+                    if response.status_code == 401:
+                        await response.aread()
+                        if not renewed:
+                            renewed, renewal = True, _renewal(response)
+                            attempt -= 1
+                            continue
+                        raise self._sign_in_required(profile, response)
+                    if response.status_code in RETRY_STATUSES and attempt < self._max_attempts:
+                        await response.aread()
+                        wait = _retry_after(response, attempt)
+                    elif not response.is_success:
+                        await response.aread()
+                        raise _error_for(response)
+                    else:
+                        dest.seek(0)
+                        dest.truncate()
+                        size = 0
+                        async for chunk in response.aiter_bytes():
+                            size += len(chunk)
+                            if size > max_bytes:
+                                raise InvalidRequest(
+                                    f"Download exceeds the {max_bytes // (1024 * 1024)} MiB limit."
+                                )
+                            dest.write(chunk)
+                        return response.headers.get("content-type"), size
+            except httpx.HTTPError as exc:
+                if attempt >= self._max_attempts:
+                    connect = isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout)
+                    what = "Could not reach" if connect else "No complete response from"
+                    raise _no_response(f"{what} {urlsplit(url).hostname} ({type(exc).__name__}).") from None
+                wait = float(min(2**attempt, 20))
+            await self._sleep(wait)  # outside the concurrency limit, like request()
 
 
 def _no_response(text: str) -> Upstream:

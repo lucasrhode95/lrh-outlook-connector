@@ -168,7 +168,7 @@ lrh-outlook-connector/
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
 - `search(query)`: `$search`, field-scoped queries passed through. `$search` returns regular ids, so each page's ids are converted with one `POST /me/translateExchangeIds` call into the immutable ids every other call uses (if that call fails, the page keeps its search ids rather than failing).
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`, for the inline images of every message of an export at once: one `$batch` item per image, 20 per batch across messages).
-- `download_attachment(id, att_id)` and `download_mime(id)` stream to a file.
+- `download_attachment(id, att_id)` and `download_mime(id)` stream to a file. They are retried like other GETs (429/503 after `Retry-After`, gateway errors, a connection that fails or drops mid-download), each time from scratch; what still fails is a domain error (`Upstream` with no status for a lost connection), so an export marks that one attachment instead of failing.
 - Every operation is named for error messages ("While listing attachments: …").
 
 **`graph_mapping.py`:** maps every Graph shape to `domain.models`. Unknown fields are ignored. Missing optional fields become `None`.
