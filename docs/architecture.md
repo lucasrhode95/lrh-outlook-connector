@@ -12,7 +12,7 @@ This document describes how the application is built: processes, layers, modules
 ## 1. Principles
 
 1. **Remote first.** Outlook's servers do the work: listing, filtering, search, conversation grouping. The app keeps locally only what the server cannot give back.
-2. **No always-on service.** Every entry point is a short-lived process started on demand. Several may run at once.
+2. **No always-on service.** Every entry point is a short-lived local process started on demand, for one user. Several may run at once, and weeks may pass between runs. It is not designed to be hosted as a long-running MCP or HTTP server (§2).
 3. **One domain implementation, thin surfaces.** The UI and MCP call the same service. Neither reimplements domain decisions.
 4. **Protocol knowledge stays at the edge.** Only the `remote/` package knows URLs, Graph/OWS JSON, ID formats and paging. The service works with domain models.
 5. **Documented first, gaps filled.** Use Graph for every capability it can serve. OWS (Outlook Web's private JSON RPC) fills only the gaps. For this tenant those gaps are all writes, because every Graph mail write/send scope is denied to the usable clients (research §2). The split is tenant-specific and swappable (§6).
@@ -30,6 +30,14 @@ There is no daemon. Three entry points, all short-lived:
 | `outlook-connector auth [read\|write] [--unsecure]` | One-shot device-code sign-in | You, rarely | core + auth |
 
 `outlook-connector status` (offline) shows the signed-in account, which clients have tokens, and the store location.
+
+Consequences of short-lived processes (decided; see AGENTS.md):
+
+- **Nothing in memory is relied on across sessions.** A continuation travels in the result: cursors carry the remote link or per-folder positions and the original options.
+- **Local caches are used only while fresh.** A process often starts after days or weeks idle, so the cache it finds may be very old. The folder cache is used while younger than 10 minutes and otherwise refreshed before the call continues; a stale-while-revalidate design was dropped on 2026-10-04 because the refresh only helped the next process while the current call used a weeks-old folder tree (H7).
+- **No background work outlives a call:** no schedulers, sync loops or warm-up tasks. The UI's idle timer only stops the process.
+- **Concurrent processes share the local files:** the store uses WAL and short transactions, the token cache a cross-process lock, output files an exclusive create.
+- **Not a hosted service:** one user, localhost only (the UI binds 127.0.0.1 with a per-run session token), no multi-user auth or remote access.
 
 **Consequences:**
 
