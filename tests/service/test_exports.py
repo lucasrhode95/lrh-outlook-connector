@@ -81,6 +81,15 @@ async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
     assert "> First report" in Path(artifact.path).read_text(encoding="utf-8")
 
 
+async def test_a_download_that_times_out_is_marked_not_fatal(exports: Exports, fake: FakeGraph) -> None:
+    fake.drop_downloads = 100  # every download attempt loses its connection (read timeout)
+    artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
+    assert artifact.export_errors == {"downloading an attachment": 2}  # numbers.xlsx, image001.png
+    text = Path(artifact.path).read_text(encoding="utf-8")  # no file was downloaded: a flat TXT
+    assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
+    assert "  Likely: Microsoft service or network problem\n" in text
+
+
 async def test_combine_all_is_one_txt_with_sections(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel", "c-lunch"], combine="all"))
     text = Path(artifact.path).read_text(encoding="utf-8")
