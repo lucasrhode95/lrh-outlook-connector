@@ -348,6 +348,8 @@ class FakeGraph:
         ):
             folder = m[1] or m[2]
             folder = self.aliases.get(folder, folder) if folder else None
+            if folder and not any(f["id"] == folder for f in self.folders):
+                return 404, {"error": {"code": "ErrorItemNotFound", "message": "Folder not found."}}, None
             return 200, self.list_messages(folder, params, path, text_body), None
         if m := re.fullmatch(r"/me/messages/([^/]+)", path):
             msg = self.messages.get(m[1].removeprefix(REST_PREFIX))  # either id form is readable
