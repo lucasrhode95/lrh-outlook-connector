@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -310,24 +312,70 @@ def test_base_subject_strips_reply_and_forward_prefixes() -> None:
     assert base_subject("RE: FW: Enc: Relatório") == "Relatório"
 
 
-async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_background(
-    mailbox: Mailbox, fake: FakeGraph
+def _new_process_after_days(fake: FakeGraph, tmp_path: Path) -> Mailbox:
+    """A new connector process on the same local store, whose folder cache is three days old."""
+    with sqlite3.connect(tmp_path / "m.sqlite3") as db:
+        db.execute("UPDATE meta SET value = ? WHERE key = 'folders_at'", (str(time.time() - 3 * 86400),))
+    transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
+    return Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
+
+
+async def test_a_fresh_folder_cache_is_used_without_asking_the_server(
+    mailbox: Mailbox, fake: FakeGraph, tmp_path: Path
 ) -> None:
-    import asyncio
+    await mailbox.folders()  # fills the cache
+    transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
+    other = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))  # a new process
+    fake.calls.clear()
+    assert {f.id for f in await other.folders()} >= {"f-inbox", "f-rie"} and fake.calls == []
 
-    from outlook_connector.service import mailbox as mailbox_module
 
+async def test_a_stale_folder_cache_is_never_used(mailbox: Mailbox, fake: FakeGraph, tmp_path: Path) -> None:
     await mailbox.folders()  # fills the cache
     fake.add_folder("f-new", "New folder")
-    mailbox_module.FOLDER_TTL_SECONDS, saved = -1, mailbox_module.FOLDER_TTL_SECONDS  # everything is stale
-    try:
-        served = await mailbox.folders()
-        assert "f-new" not in {f.id for f in served}  # answered from the cache, without waiting
-        assert mailbox._folder_refresh is not None
-        await asyncio.wait_for(asyncio.shield(mailbox._folder_refresh), timeout=5)
-    finally:
-        mailbox_module.FOLDER_TTL_SECONDS = saved
-    assert "f-new" in {f.id for f in (await mailbox.folders())}
+    later = _new_process_after_days(fake, tmp_path)
+    assert "f-new" in {f.id for f in await later.folders()}  # waited for the server
+
+
+async def test_mail_in_a_folder_created_while_the_cache_was_stale_is_listed_folder_by_folder(
+    mailbox: Mailbox, fake: FakeGraph, tmp_path: Path
+) -> None:
+    _junk_heavy(fake)
+    await mailbox.folders()  # cached days ago, before the folder below existed
+    fake.add_folder("f-invoices", "Invoices", parent="f-inbox")  # e.g. a new rule files mail there
+    fake.add(FakeMessage("inv1", "Invoice 42", "f-invoices", "2026-10-09T09:00:00Z", conversation="c-inv"))
+    page = await _new_process_after_days(fake, tmp_path).list_messages(limit=5)
+    assert any(n.startswith("Listed folder by folder") for n in page.coverage.notes)
+    assert page.items[0].id == "inv1" and page.items[0].folder == "Inbox/Invoices"
+
+
+async def test_a_folder_deleted_during_a_per_folder_listing_does_not_fail_it(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    first = await mailbox.list_messages(limit=3)
+    assert [m.id for m in first.items] == ["n8", "n7", "n6"]
+    fake.folders = [f for f in fake.folders if f["id"] != "f-archive"]  # deleted and emptied in Outlook
+    for mid in [m for m, msg in fake.messages.items() if msg.folder == "f-archive"]:
+        del fake.messages[mid]
+    rest, cursor = [], first.cursor
+    while cursor:
+        page = await mailbox.list_messages(cursor=cursor)
+        rest += [m.id for m in page.items]
+        cursor = page.cursor
+    assert rest == ["n4", "n3", "n2", "m5", "m3", "m2", "m1"]  # n5 and n1 were in Archive
+
+
+async def test_a_folder_that_answers_not_found_mid_listing_is_dropped(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    await mailbox.folders()  # the folder list still has Archive below
+    fake.folders = [f for f in fake.folders if f["id"] != "f-archive"]
+    fake.calls.clear()
+    page = await mailbox.list_messages(limit=20)
+    assert "n5" not in {m.id for m in page.items} and page.coverage.complete
+    assert fake.calls.count("GET /v1.0/me/mailFolders") == 1  # the folder list was refreshed once
 
 
 async def test_thread_marks_missing_bodies_with_the_export_error_block(

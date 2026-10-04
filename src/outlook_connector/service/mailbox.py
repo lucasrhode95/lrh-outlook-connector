@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
+import time
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
@@ -45,8 +45,6 @@ from outlook_connector.domain.models import (
 from outlook_connector.remote.ports import MailReader
 from outlook_connector.service import cursors
 from outlook_connector.store.db import Store
-
-log = logging.getLogger(__name__)
 
 FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
@@ -75,7 +73,8 @@ class Mailbox:
         self.reader = reader
         self.store = store
         self._folders: dict[str, Folder] | None = None
-        self._folder_refresh: asyncio.Task[list[Folder]] | None = None
+        self._folders_at = 0.0  # time.monotonic() when _folders was last loaded
+        self._folder_lock = asyncio.Lock()  # one folder refresh at a time per process
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
         self._profile: UserProfile | None = None
         self._photo: tuple[bytes | None] | None = None  # (photo or None,) once looked up
@@ -83,35 +82,40 @@ class Mailbox:
     # ---------------------------------------------------------------- folders
 
     async def folders(self, *, refresh: bool = False) -> list[Folder]:
-        """The visible folders: cached right away, a stale cache refreshed in the background
-        (stale-while-revalidate). Hidden folders are out of reach and not listed.
+        """The visible folders (hidden folders are out of reach and not listed).
 
-        Only an empty cache or ``refresh=True`` waits for the server.
+        The cached list is used only while it is fresh (younger than FOLDER_TTL_SECONDS, whichever
+        process saved it); an older or empty cache, or ``refresh=True``, waits for the server (a
+        full refresh takes under a second). Processes are short-lived and often start after days
+        idle, so a stale list is never used: it would miss folders created meanwhile.
         """
-        cached, age = self.store.folders()
-        if refresh or not cached:
-            cached = await self._refresh_folders()
-        elif (age is None or age > FOLDER_TTL_SECONDS) and self._folder_refresh is None:
-            self._folder_refresh = asyncio.create_task(self._refresh_folders())
-            self._folder_refresh.add_done_callback(self._folder_refresh_done)
-        self._folders = {f.id: f for f in cached}
-        categories = folder_categories(self._folders)
+        async with self._folder_lock:
+            cached, age = self.store.folders()
+            if refresh or not cached or age is None or age > FOLDER_TTL_SECONDS:
+                cached = await self._fetch_folders()
+            else:
+                self._keep(cached)
+        categories = folder_categories(self._folders or {})
         visible = [f for f in cached if categories.get(f.id) != "hidden"]
         return sorted(visible, key=lambda f: f.path.lower())
 
     async def _refresh_folders(self) -> list[Folder]:
+        async with self._folder_lock:
+            return await self._fetch_folders()
+
+    async def _fetch_folders(self) -> list[Folder]:
         fresh = _with_paths(await self.reader.list_folders())
         self.store.save_folders(fresh)
-        self._folders = {f.id: f for f in fresh}
+        self._keep(fresh)
         return fresh
 
-    def _folder_refresh_done(self, task: asyncio.Task[list[Folder]]) -> None:
-        self._folder_refresh = None
-        if not task.cancelled() and task.exception() is not None:
-            log.warning("Background folder refresh failed: %s", type(task.exception()).__name__)
+    def _keep(self, folders: list[Folder]) -> None:
+        self._folders = {f.id: f for f in folders}
+        self._folders_at = time.monotonic()
 
     async def folder_map(self) -> dict[str, Folder]:
-        if self._folders is None:
+        """The folders by id, fresh: reloaded once FOLDER_TTL_SECONDS old, also within a process."""
+        if self._folders is None or time.monotonic() - self._folders_at > FOLDER_TTL_SECONDS:
             await self.folders()
         assert self._folders is not None
         return self._folders
@@ -245,6 +249,11 @@ class Mailbox:
         hidden = set() if folder_id else (await self.reach(()))[1]
         if state:
             link, offsets = state.get("link"), state.get("offsets")
+            if offsets:  # keep only folders still there and still in scope (a folder may be deleted)
+                folders = await self.folder_map()
+                offsets = {
+                    f: n for f, n in offsets.items() if f in folders and f not in skip and f not in hidden
+                }
         elif not folder_id:
             share, note = await self._left_out_share(set(skip) | hidden)
             if share >= PER_FOLDER_SHARE:
@@ -353,11 +362,18 @@ class Mailbox:
         more = dict.fromkeys(offsets, True)
         chunk = dict.fromkeys(offsets, max(MIN_FOLDER_CHUNK, -(-limit // max(len(offsets), 1))))
 
+        gone: set[str] = set()
+
         async def fill(fid: str) -> None:
             size = min(chunk[fid], limit)
-            page, link = await self.reader.list_messages(
-                folder_id=fid, since=since, until=until, page_size=size, page=None, skip=read[fid]
-            )
+            try:
+                page, link = await self.reader.list_messages(
+                    folder_id=fid, since=since, until=until, page_size=size, page=None, skip=read[fid]
+                )
+            except NotFound:  # the folder was deleted meanwhile: its mail is gone or in Deleted Items
+                gone.add(fid)
+                more[fid] = False
+                return
             buffers[fid] += page
             read[fid] += len(page)
             more[fid] = bool(link and page)
@@ -375,6 +391,8 @@ class Mailbox:
             taken.append(buffers[newest].pop(0))
             positions[newest] += 1
         left = {fid: positions[fid] for fid in positions if buffers[fid] or more[fid]}
+        if gone:
+            await self._refresh_folders()  # so the rest of the call sees the folder tree as it is now
         return taken, left
 
     async def _count(
