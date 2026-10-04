@@ -26,7 +26,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound
+from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
 from outlook_connector.domain.models import (
     Attachment,
     BodyKind,
@@ -53,6 +53,8 @@ DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
 SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")  # out of reach
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
 FILTERED_PAGES = 10  # server pages scanned at most for one filtered page
+PER_FOLDER_SHARE = 2 / 3  # list folder by folder when left-out folders hold this share of the mailbox
+MIN_FOLDER_CHUNK = 10  # messages read at a time from one folder in a per-folder listing
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
 GONE = "deleted on the server"
@@ -237,27 +239,41 @@ class Mailbox:
             )
         )
 
-        link = state["link"] if state else None
-        fetched: list[MessageSummary] = []
-        drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
+        notes: list[str] = []
+        link: str | None = None
+        offsets: dict[str, int] | None = None  # per-folder listing: folder id -> messages returned
+        hidden = set() if folder_id else (await self.reach(()))[1]
+        if state:
+            link, offsets = state.get("link"), state.get("offsets")
+        elif not folder_id:
+            share, note = await self._left_out_share(set(skip) | hidden)
+            if share >= PER_FOLDER_SHARE:
+                offsets = await self._folders_with_mail(set(skip) | hidden, since, until)
+                notes.append(note)
+        if offsets is not None:
+            fetched, offsets = await self._merged_folders(offsets, since, until, limit)
+            complete = not offsets
+            filtered = not include_meeting_mail
+        else:
+            fetched = []
+            drop = set(skip) | hidden
 
-        def kept(m: MessageSummary) -> bool:
-            return m.folder_id not in drop and (include_meeting_mail or m.meeting is None)
+            def kept(m: MessageSummary) -> bool:
+                return m.folder_id not in drop and (include_meeting_mail or m.meeting is None)
 
-        filtered = bool(drop) or not include_meeting_mail
-        for _ in range(FILTERED_PAGES if filtered else 1):
-            page, link = await self.reader.list_messages(
-                folder_id=folder_id, since=since, until=until, page_size=limit, page=link
-            )
-            fetched += page
-            if not link or any(kept(m) for m in page):
-                break  # a page that exclusions empty entirely is skipped, within bounds
-        complete = link is None
+            filtered = bool(drop) or not include_meeting_mail
+            for _ in range(FILTERED_PAGES if filtered else 1):
+                page, link = await self.reader.list_messages(
+                    folder_id=folder_id, since=since, until=until, page_size=limit, page=link
+                )
+                fetched += page
+                if not link or any(kept(m) for m in page):
+                    break  # a page that exclusions empty entirely is skipped, within bounds
+            complete = link is None
         items, excluded = await self.finish(fetched, skip)
         items = _without_meetings(items, excluded) if not include_meeting_mail else items
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
-        notes: list[str] = []
         if filtered and not complete:
             notes.append("Filters apply after paging, so a page can hold fewer than limit messages.")
         total = None
@@ -268,10 +284,11 @@ class Mailbox:
                     "server_total counts the server's messages in scope (copies counted separately)."
                 )
         next_cursor = None
-        if link:
+        if not complete:
             next_cursor = cursors.encode(
                 "list_messages",
                 link=link,
+                offsets=offsets,
                 folder_id=folder_id,
                 since=_iso(since),
                 until=_iso(until),
@@ -290,6 +307,75 @@ class Mailbox:
                 notes=notes,
             ),
         )
+
+    async def _left_out_share(self, left_out: set[str]) -> tuple[float, str]:
+        """The share of the mailbox's messages in folders a mailbox-wide listing leaves out, from
+        the cached folder counts (no request), and the note that explains a per-folder listing."""
+        folders = await self.folder_map()
+        total = sum(f.total or 0 for f in folders.values())
+        out = sorted(
+            (f for fid, f in folders.items() if fid in left_out and f.total), key=lambda f: -(f.total or 0)
+        )
+        share = sum(f.total or 0 for f in out) / total if total else 0.0
+        biggest = ", ".join(f"{f.path}: {f.total:,}" for f in out[:3])
+        note = (
+            f"Listed folder by folder: folders this listing leaves out hold {share:.0%} of the mailbox "
+            f"({biggest}), which makes a whole-mailbox listing slow. Emptying Junk Email or Deleted Items "
+            "makes it faster."
+        )
+        return share, note
+
+    async def _folders_with_mail(
+        self, left_out: set[str], since: datetime | None, until: datetime | None
+    ) -> dict[str, int]:
+        """The in-scope folders to list, each from its newest message: those with mail in the window
+        (one batch of counts), or every in-scope folder with messages if counting fails."""
+        folders = await self.folder_map()
+        in_scope = [fid for fid in folders if fid not in left_out]
+        try:
+            counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
+        except ConnectorError:
+            counts = None
+        if counts is None:
+            return {fid: 0 for fid in in_scope if folders[fid].total}
+        return {fid: 0 for fid in in_scope if counts.get(fid)}
+
+    async def _merged_folders(
+        self, offsets: dict[str, int], since: datetime | None, until: datetime | None, limit: int
+    ) -> tuple[list[MessageSummary], dict[str, int]]:
+        """The newest ``limit`` messages across the folders, merged newest first, and each folder's
+        new position (folders with nothing left are dropped). Each folder is read from its position
+        in small chunks that grow as the merge takes from it, so little is read and not used; the
+        folders that need more are read in parallel (the transport keeps Exchange's limit of 4)."""
+        positions = dict(offsets)
+        read = dict(offsets)  # how far each folder has been read
+        buffers: dict[str, list[MessageSummary]] = {fid: [] for fid in offsets}
+        more = dict.fromkeys(offsets, True)
+        chunk = dict.fromkeys(offsets, max(MIN_FOLDER_CHUNK, -(-limit // max(len(offsets), 1))))
+
+        async def fill(fid: str) -> None:
+            size = min(chunk[fid], limit)
+            page, link = await self.reader.list_messages(
+                folder_id=fid, since=since, until=until, page_size=size, page=None, skip=read[fid]
+            )
+            buffers[fid] += page
+            read[fid] += len(page)
+            more[fid] = bool(link and page)
+            chunk[fid] = size * 2
+
+        taken: list[MessageSummary] = []
+        while len(taken) < limit:
+            empty = [fid for fid in buffers if not buffers[fid] and more[fid]]
+            if empty:
+                await asyncio.gather(*(fill(fid) for fid in empty))
+            heads = [fid for fid in buffers if buffers[fid]]
+            if not heads:
+                break
+            newest = max(heads, key=lambda fid: _stamp(buffers[fid][0]))
+            taken.append(buffers[newest].pop(0))
+            positions[newest] += 1
+        left = {fid: positions[fid] for fid in positions if buffers[fid] or more[fid]}
+        return taken, left
 
     async def _count(
         self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
@@ -634,6 +720,11 @@ def _within(m: MessageSummary, since: datetime | None, until: datetime | None) -
     if stamp is None:
         return since is None and until is None
     return (since is None or stamp >= since) and (until is None or stamp <= until)
+
+
+def _stamp(m: MessageSummary) -> float:
+    stamp = m.received_at or m.sent_at
+    return stamp.timestamp() if stamp else float("-inf")
 
 
 def _iso(value: datetime | None) -> str | None:

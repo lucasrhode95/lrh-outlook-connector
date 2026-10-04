@@ -327,16 +327,22 @@ class FakeGraph:
         if m := re.fullmatch(r"/me/mailFolders", path):
             return (
                 200,
-                self.paged([f for f in self.folders if f["parentFolderId"] == "root"], path, params),
+                self.paged(
+                    [self.folder_json(f) for f in self.folders if f["parentFolderId"] == "root"], path, params
+                ),
                 None,
             )
         if m := re.fullmatch(r"/me/mailFolders/([^/]+)/childFolders", path):
-            kids = [f for f in self.folders if f["parentFolderId"] == m[1]]
+            kids = [self.folder_json(f) for f in self.folders if f["parentFolderId"] == m[1]]
             return 200, self.paged(kids, path, params), None
         if m := re.fullmatch(r"/me/mailFolders/([^/]+)", path):
             fid = self.aliases.get(m[1], m[1])
             match = [f for f in self.folders if f["id"] == fid]
-            return (200, match[0], None) if match else (404, {"error": {"code": "ErrorItemNotFound"}}, None)
+            return (
+                (200, self.folder_json(match[0]), None)
+                if match
+                else (404, {"error": {"code": "ErrorItemNotFound"}}, None)
+            )
         if m := re.fullmatch(
             r"(?:/me/mailFolders/([^/]+))?/me/messages|/me/mailFolders/([^/]+)/messages", path
         ):
@@ -370,6 +376,10 @@ class FakeGraph:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
             return 200, None, f"Subject: {msg.subject}\r\n\r\n{msg.text}".encode()
         return 400, {"error": {"code": "UnsupportedByFake", "message": path}}, None
+
+    def folder_json(self, f: dict[str, Any]) -> dict[str, Any]:
+        """A folder with its current message count (Graph's totalItemCount)."""
+        return {**f, "totalItemCount": sum(1 for m in self.messages.values() if m.folder == f["id"])}
 
     def attachment_json(self, a: FakeAttachment) -> dict[str, Any]:
         return {

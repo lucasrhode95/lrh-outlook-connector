@@ -44,8 +44,10 @@ class MailReader(Protocol):
         until: datetime | None,
         page_size: int,
         page: str | None,
+        skip: int = 0,
     ) -> tuple[list[MessageSummary], str | None]:
-        """One page of messages, newest first. ``page`` is an opaque continuation from a previous call."""
+        """One page of messages, newest first. ``page`` is an opaque continuation from a previous
+        call; without one, ``skip`` leaves out that many of the newest messages first."""
         ...
 
     async def search(

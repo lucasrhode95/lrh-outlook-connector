@@ -484,3 +484,15 @@ async def test_copies_on_different_pages_are_exported_once_naming_both_folders(
     artifact = await exports.export(ExportRequest(since=datetime(2026, 10, 1, tzinfo=UTC), format="jsonl"))
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
     assert [(r["id"], r["also_in"]) for r in records] == [("r9", ["Sent Items"])]
+
+
+async def test_a_range_export_of_a_junk_heavy_mailbox_never_reads_junk(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    from tests.service.test_mailbox_threads import _junk_heavy
+
+    _junk_heavy(fake)
+    fake.calls.clear()
+    artifact = await exports.export(ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), format="jsonl"))
+    assert artifact.message_count == 12  # m1-m3, m5 and n1-n8; m4 and the 40 junk messages left out
+    assert not any(c == "GET /v1.0/me/messages" or "f-junk" in c for c in fake.calls)
