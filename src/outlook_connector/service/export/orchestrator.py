@@ -71,6 +71,12 @@ class Exports:
         self.reader = threads.mailbox.reader
 
     async def export(self, request: ExportRequest) -> ExportArtifact:
+        """Export a selection to one local file (requirements v4 §10).
+
+        Entry point: ``request`` is an ExportRequest (its fields validated by the model); this method
+        checks that something is selected and, through ``_select``, the message limit. The steps after
+        ``_select`` trust the selection and do not re-check it.
+        """
         if not request.conversation_ids and not request.message_ids and not request.by_range:
             raise InvalidRequest(
                 "Select at least one conversation or message, or a range "
@@ -119,6 +125,10 @@ class Exports:
     # ---------------------------------------------------------------- selection
 
     async def _select(self, request: ExportRequest) -> Selection:
+        """Conversations, the range and messages selected by id, copies merged, within ``request.limit``.
+
+        Assumes (not re-checked here): ``request`` was validated by ``export``.
+        """
         selected: dict[str, MessageSummary] = {}
         excluded: dict[str, int] = defaultdict(int)
         for conversation_id in dict.fromkeys(request.conversation_ids):
@@ -148,7 +158,11 @@ class Exports:
     ) -> None:
         """Every message in the window, page by page, with the listing's scope rules. Copies on
         different pages are all kept here, so the final merge sees them and names every folder in
-        ``also_in``."""
+        ``also_in``.
+
+        Assumes (not re-checked here): ``request`` was validated by ``export``; ``list_messages``
+        validates the window.
+        """
         cursor: str | None = None
         while True:
             page = await self.mailbox.list_messages(
@@ -172,7 +186,11 @@ class Exports:
                 return
 
     async def _fetch(self, message_ids: list[str]) -> dict[str, Message]:
-        """Messages selected by id, read from the server in batches; their bodies are reused."""
+        """Messages selected by id, read from the server in batches; their bodies are reused.
+
+        Assumes (not re-checked here): ``message_ids`` are unique and not already selected (``_select``
+        removes those).
+        """
         if not message_ids:
             return {}
         fetched = await self.reader.get_messages(message_ids)
@@ -202,7 +220,11 @@ class Exports:
         """Attachments per message, and why listing failed for others. ``skip``: messages without
         a body (deleted on the server, or not fetched). Graph reports hasAttachments=false when a
         message has only inline attachments, so when files are exported (inline images included)
-        every message is asked, in batches."""
+        every message is asked, in batches.
+
+        Assumes (not re-checked here): ``summaries`` is the final selection from ``_select``, and ``skip``
+        the messages without a body from ``Threads.bodies``.
+        """
         wanted = [m.id for m in summaries if m.id not in skip and (inline or m.has_attachments)]
         if not wanted:
             return {}, {}
@@ -219,6 +241,12 @@ class Exports:
         request: ExportRequest,
         workdir: Path,
     ) -> dict[str, Downloaded]:
+        """Download the attachments the policy wants, each to its own file in ``workdir``; a failed download
+        becomes an ExportError.
+
+        Assumes (not re-checked here): ``summaries`` is the final selection and ``found`` the attachment
+        listing from ``_attachments`` for it.
+        """
         inline_ids = {
             mid: [a.id for a in items if a.is_inline and a.kind == "file"] for mid, items in found.items()
         }
@@ -265,6 +293,11 @@ class Exports:
         selection: Selection,
         summary: str | None,
     ) -> list[TextFile]:
+        """The text files: one per group (per thread, all, none), TXT or JSONL.
+
+        Assumes (not re-checked here): ``fetched`` covers every summary (each has a body or an entry in
+        ``missing``), and ``downloads`` comes from ``_download`` for the same selection.
+        """
         notes = [
             f"Left out: {count} message(s) {EXCLUSION_TEXT[key]}."
             for key, count in selection.excluded.items()
@@ -300,7 +333,11 @@ class Exports:
         names: set[str],
         stored: dict[str, str],
     ) -> RenderedMessage:
-        """One message's text, attachment lines (TXT) and attachment records (JSONL)."""
+        """One message's text, attachment lines (TXT) and attachment records (JSONL).
+
+        Assumes (not re-checked here): the message has a body in ``fetched.bodies`` or an error in
+        ``fetched.missing`` (``Threads.bodies`` guarantees one of the two).
+        """
         lines: list[str] = []
         blocks: list[str] = []
         records: list[dict[str, Any]] = []

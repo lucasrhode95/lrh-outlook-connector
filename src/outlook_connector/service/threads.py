@@ -50,7 +50,11 @@ class Threads:
         self, conversation_id: str, *, include_deleted_items: bool = False
     ) -> tuple[list[MessageSummary], dict[str, int], bool]:
         """All messages of the conversation, oldest first, what was left out by folder, and whether
-        the server listing was truncated (more than MAX_CONVERSATION messages)."""
+        the server listing was truncated (more than MAX_CONVERSATION messages).
+
+        Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
+        results); an unknown one raises NotFound.
+        """
         remote, truncated = await self.mailbox.reader.conversation(conversation_id)
         if not remote:
             raise NotFound(f"No conversation {conversation_id} on the server.")
@@ -68,6 +72,11 @@ class Threads:
         max_chars: int = 40000,
         cursor: str | None = None,
     ) -> Thread:
+        """A whole conversation across folders, oldest first, with bounded bodies and a cursor.
+
+        Entry point: the authoritative check of ``max_chars`` and the cursor (the web routes pass them
+        through unchecked).
+        """
         start = 0
         if cursor:  # the cursor carries the original selection, so a continuation never drifts
             state = cursors.decode(cursor, "get_thread")
@@ -157,6 +166,9 @@ class Threads:
 
         ``known``: messages already fetched with bodies, used as they are. Returns (bodies by id,
         the error for each message without a body): every summary is in exactly one of the two.
+
+        Assumes (not re-checked here): ``summaries`` is the caller's final selection (in scope, copies
+        merged), and ``known`` messages were fetched as text bodies.
         """
         known = {s.id: known[s.id] for s in summaries if known and s.id in known}
         wanted = [s.id for s in summaries if s.id not in known]

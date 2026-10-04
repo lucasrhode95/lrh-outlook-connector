@@ -27,6 +27,11 @@ MAX_NAME = 120
 
 
 def wanted(attachment: Attachment, *, content_id: str | None, body_html: str | None) -> bool:
+    """Whether the export includes this attachment.
+
+    Assumes (not re-checked here): ``content_id`` and ``body_html`` belong to the attachment's message
+    (the orchestrator looks them up).
+    """
     if attachment.kind == "item":
         return True
     if attachment.kind != "file":

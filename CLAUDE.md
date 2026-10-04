@@ -23,6 +23,14 @@ This is not a hosted or long-running server. Every entry point is a short-lived 
 - Shared local files (store, token cache, output folders) must tolerate concurrent processes: short transactions, cross-process locks, exclusive file creation.
 - Do not add multi-user, remote-access or always-on concerns (auth for other users, network listeners beyond localhost, process supervision) unless the user asks.
 
+## Validate once
+
+Check an input once, at the entry point that receives it (the service method a surface calls, or the
+one that reads it from the server), and let the routines it calls trust it. Do not re-check what a caller
+already guarantees. Write the contract in the docstring: an entry point says what it validates
+("Entry point: ..."), and an internal routine says what it assumes ("Assumes (not re-checked here): ...").
+When you add a caller to a routine that assumes sanitized input, make sure the new caller provides it.
+
 ## Checks: run all four before every commit, and fix what they report
 
 ```bash

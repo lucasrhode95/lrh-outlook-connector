@@ -100,7 +100,11 @@ class Mutations:
     # ---------------------------------------------------------------- shared flow
 
     async def _conversation(self, conversation_id: str, *, include_deleted_items: bool) -> list[str]:
-        """Every message of the conversation in scope (all copies, not merged)."""
+        """Every message of the conversation in scope (all copies, not merged).
+
+        Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
+        results).
+        """
         items, _ = await self.mailbox.reader.conversation(conversation_id)
         skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in items)
@@ -119,6 +123,12 @@ class Mutations:
         *,
         prepare: Callable[[], Awaitable[None]] | None = None,
     ) -> MutationResult:
+        """Read state, send the change once per chunk, report a result per message.
+
+        Entry point for every mutation: validates the ids (at least one, at most MAX_MUTATION_ITEMS,
+        duplicates dropped), checks the account, and classifies each message before anything is sent. The
+        writer trusts the chunks it is given.
+        """
         ids = list(dict.fromkeys(message_ids))
         if not ids:
             raise InvalidRequest("Name at least one message id.")
@@ -162,7 +172,10 @@ class Mutations:
         return MutationResult(action=action, results=ordered, counts=dict(Counter(r.status for r in ordered)))
 
     async def _recheck(self, chunk: list[str], already: Wanted, reason: str) -> dict[str, ItemResult]:
-        """After an unclear answer: done where the change is visible, unknown elsewhere."""
+        """After an unclear answer: done where the change is visible, unknown elsewhere.
+
+        Assumes (not re-checked here): ``chunk`` is one ``_apply`` already sent, with no clear answer.
+        """
         after = await self.mailbox.reader.get_summaries(chunk)
         out = {}
         for mid in chunk:

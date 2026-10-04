@@ -182,6 +182,9 @@ class Mailbox:
         """Apply folder exclusions, fill folder paths and merge copies. Returns (items, excluded counts).
 
         Items in hidden folders or outside the mail folders are always left out ("hidden").
+
+        Assumes (not re-checked here): ``skip`` comes from ``exclusions()`` for the same scope as the
+        items.
         """
         items = list(items)
         folders, hidden = await self.reach(m.folder_id for m in items)
@@ -221,6 +224,9 @@ class Mailbox:
 
         ``skip_returned_copies``: drop copies of a message an earlier page already returned. A caller
         that merges every page at the end (the export) turns it off to keep each copy's folder.
+
+        Entry point: the authoritative check of its arguments (limit, window, folder, cursor); the web
+        routes pass them through unchecked, and the helpers below trust them.
         """
         if not 1 <= limit <= 200:
             raise InvalidRequest("limit must be between 1 and 200.")
@@ -319,7 +325,11 @@ class Mailbox:
 
     async def _left_out_share(self, left_out: set[str]) -> tuple[float, str]:
         """The share of the mailbox's messages in folders a mailbox-wide listing leaves out, from
-        the cached folder counts (no request), and the note that explains a per-folder listing."""
+        the cached folder counts (no request), and the note that explains a per-folder listing.
+
+        Assumes (not re-checked here): ``left_out`` is the caller's complete set of left-out folder ids
+        (the scope's exclusions plus hidden folders).
+        """
         folders = await self.folder_map()
         total = sum(f.total or 0 for f in folders.values())
         out = sorted(
@@ -338,7 +348,11 @@ class Mailbox:
         self, left_out: set[str], since: datetime | None, until: datetime | None
     ) -> dict[str, int]:
         """The in-scope folders to list, each from its newest message: those with mail in the window
-        (one batch of counts), or every in-scope folder with messages if counting fails."""
+        (one batch of counts), or every in-scope folder with messages if counting fails.
+
+        Assumes (not re-checked here): ``left_out`` is the caller's complete set of left-out folder ids,
+        and the window was validated by ``list_messages``.
+        """
         folders = await self.folder_map()
         in_scope = [fid for fid in folders if fid not in left_out]
         try:
@@ -355,7 +369,12 @@ class Mailbox:
         """The newest ``limit`` messages across the folders, merged newest first, and each folder's
         new position (folders with nothing left are dropped). Each folder is read from its position
         in small chunks that grow as the merge takes from it, so little is read and not used; the
-        folders that need more are read in parallel (the transport keeps Exchange's limit of 4)."""
+        folders that need more are read in parallel (the transport keeps Exchange's limit of 4).
+
+        Assumes (not re-checked here): ``offsets`` holds only in-scope folders (``list_messages`` drops
+        left-out, hidden and deleted ones), and ``limit`` and the window were validated by
+        ``list_messages``.
+        """
         positions = dict(offsets)
         read = dict(offsets)  # how far each folder has been read
         buffers: dict[str, list[MessageSummary]] = {fid: [] for fid in offsets}
@@ -398,7 +417,11 @@ class Mailbox:
     async def _count(
         self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
     ) -> int | None:
-        """The server's count for the scope: the named folder, or every reachable folder not left out."""
+        """The server's count for the scope: the named folder, or every reachable folder not left out.
+
+        Assumes (not re-checked here): ``folder_id`` was resolved and ``skip`` built by ``list_messages``
+        for the same scope.
+        """
         if folder_id:
             in_scope = [folder_id]
         else:
@@ -417,6 +440,9 @@ class Mailbox:
 
         One batched server listing of folders and Internet ids per conversation (copies counted
         once).
+
+        Entry point: validates its own arguments (at most MAX_SIZE_LOOKUPS conversations, duplicates
+        dropped).
         """
         ids = list(dict.fromkeys(conversation_ids))
         if len(ids) > MAX_SIZE_LOOKUPS:
@@ -475,7 +501,10 @@ class Mailbox:
 
     async def attachments_many(self, message_ids: list[str]) -> dict[str, list[Attachment]]:
         """Attachments of many messages at once (batched), for the list's file chips. Messages whose
-        listing failed are left out: the chips are a convenience."""
+        listing failed are left out: the chips are a convenience.
+
+        Entry point: validates its own arguments (at most MAX_SIZE_LOOKUPS messages, duplicates dropped).
+        """
         ids = list(dict.fromkeys(message_ids))
         if len(ids) > MAX_SIZE_LOOKUPS:
             raise InvalidRequest(f"At most {MAX_SIZE_LOOKUPS} messages per request.")
@@ -485,6 +514,11 @@ class Mailbox:
     async def get_message(
         self, message_id: str, *, body: BodyKind = "unique", offset: int = 0, max_chars: int = 20000
     ) -> MessageContent:
+        """One message's body with offset continuation, and its attachment metadata.
+
+        Entry point: the authoritative check of ``offset`` and ``max_chars`` (the web routes pass them
+        through unchecked). The id is taken as given (ids come from this connector's own results).
+        """
         if offset < 0 or not 1 <= max_chars <= 200_000:
             raise InvalidRequest("offset must be >= 0 and max_chars between 1 and 200000.")
         message = await self.message(message_id, body=body)
@@ -516,6 +550,11 @@ class Mailbox:
         include_meeting_mail: bool = True,
         detail: Detail = "full",
     ) -> SearchResult:
+        """Server-side search, hits grouped by conversation (requirements v4 §9).
+
+        Entry point: the authoritative check of its arguments (query, limit, folder, cursor); the web
+        routes pass them through unchecked.
+        """
         if not query.strip():
             raise InvalidRequest("query must not be empty.")
         if not 1 <= limit <= 100:
