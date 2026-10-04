@@ -444,6 +444,20 @@ async def test_downloads_never_share_a_file(exports: Exports) -> None:
     assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()
 
 
+async def test_save_mime_names_the_file_after_the_subject_from_one_light_read(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    files = Files(exports.mailbox)
+    fake.calls.clear()
+    saved = await files.save_mime("m3")
+    assert saved.name == "RE_ Relatório BE semanal.eml"
+    assert Path(saved.path).read_bytes().startswith(b"Subject:")
+    # one summary read (in a $batch) and the download: no body, no attachment listing
+    assert fake.calls == ["POST /v1.0/$batch", "GET /v1.0/me/messages/m3/$value"]
+    with pytest.raises(NotFound):
+        await files.save_mime("gone")
+
+
 async def test_identical_attachment_files_are_stored_once(exports: Exports, fake: FakeGraph) -> None:
     for mid, day in (("sig1", "01"), ("sig2", "02")):
         fake.add(
