@@ -199,6 +199,24 @@ async def test_attachment_content_ids_and_downloads(fake: FakeGraph, tmp_path: P
     assert await reader.download_mime("m1", tmp_path / "m1.eml") > 0
 
 
+async def test_downloads_are_retried_after_throttling_and_dropped_connections(
+    fake: FakeGraph, tmp_path: Path
+) -> None:
+    reader = reader_for(fake)
+    fake.throttle_next = 2
+    assert await reader.download_attachment("m3", "a1", tmp_path / "a.xlsx") == len(b"xlsx-bytes")
+    fake.drop_downloads = 2
+    assert await reader.download_attachment("m3", "a1", tmp_path / "b.xlsx") == len(b"xlsx-bytes")
+    assert (tmp_path / "b.xlsx").read_bytes() == b"xlsx-bytes"
+
+
+async def test_a_download_that_keeps_timing_out_is_a_domain_error(fake: FakeGraph, tmp_path: Path) -> None:
+    fake.drop_downloads = 100
+    with pytest.raises(Upstream, match="No complete response") as raised:
+        await reader_for(fake).download_attachment("m3", "a1", tmp_path / "a.xlsx")
+    assert raised.value.failure == Failure(status=None, message=str(raised.value))
+
+
 async def test_throttling_is_retried(fake: FakeGraph) -> None:
     fake.throttle_next = 2
     folders = await reader_for(fake).list_folders()

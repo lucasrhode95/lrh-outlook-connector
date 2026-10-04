@@ -104,6 +104,7 @@ class GraphMailReader:
         until: datetime | None,
         page_size: int,
         page: str | None,
+        skip: int = 0,
     ) -> tuple[list[MessageSummary], str | None]:
         if page:
             items, link = await self._graph.page(page)
@@ -114,6 +115,7 @@ class GraphMailReader:
                 "$top": page_size,
                 "$orderby": "receivedDateTime desc",
                 "$filter": _window(since, until),
+                "$skip": skip or None,
             }
             items, link = await self._graph.page(path, params)
         return [mapping.summary(i) for i in items], link

@@ -99,6 +99,7 @@ class FakeGraph:
     throttle_next: int = 0  # respond 429 to this many upcoming top-level requests
     throttle_items: int = 0  # respond 429 to this many upcoming $batch sub-requests
     reject_tokens: int = 0  # respond 401 (token rejected) to this many upcoming top-level requests
+    drop_downloads: int = 0  # the connection drops (read timeout) on this many upcoming $value downloads
     claims_challenge: str | None = None  # base64 claims sent with those 401s (CAE)
     fail: dict[str, int] = field(default_factory=dict)  # path regex -> HTTP status to answer instead
     batch_sizes: list[int] = field(default_factory=list)
@@ -158,6 +159,9 @@ class FakeGraph:
             return httpx.Response(
                 429, headers={"retry-after": "0"}, json={"error": {"code": "TooManyRequests"}}
             )
+        if self.drop_downloads and request.url.path.endswith("/$value"):
+            self.drop_downloads -= 1
+            raise httpx.ReadTimeout("Injected read timeout.", request=request)
         if request.url.host == "outlook.cloud.microsoft":
             return self.handle_ows(request)
         assert request.headers.get("authorization", "").startswith("Bearer "), "missing bearer token"
@@ -323,21 +327,29 @@ class FakeGraph:
         if m := re.fullmatch(r"/me/mailFolders", path):
             return (
                 200,
-                self.paged([f for f in self.folders if f["parentFolderId"] == "root"], path, params),
+                self.paged(
+                    [self.folder_json(f) for f in self.folders if f["parentFolderId"] == "root"], path, params
+                ),
                 None,
             )
         if m := re.fullmatch(r"/me/mailFolders/([^/]+)/childFolders", path):
-            kids = [f for f in self.folders if f["parentFolderId"] == m[1]]
+            kids = [self.folder_json(f) for f in self.folders if f["parentFolderId"] == m[1]]
             return 200, self.paged(kids, path, params), None
         if m := re.fullmatch(r"/me/mailFolders/([^/]+)", path):
             fid = self.aliases.get(m[1], m[1])
             match = [f for f in self.folders if f["id"] == fid]
-            return (200, match[0], None) if match else (404, {"error": {"code": "ErrorItemNotFound"}}, None)
+            return (
+                (200, self.folder_json(match[0]), None)
+                if match
+                else (404, {"error": {"code": "ErrorItemNotFound"}}, None)
+            )
         if m := re.fullmatch(
             r"(?:/me/mailFolders/([^/]+))?/me/messages|/me/mailFolders/([^/]+)/messages", path
         ):
             folder = m[1] or m[2]
             folder = self.aliases.get(folder, folder) if folder else None
+            if folder and not any(f["id"] == folder for f in self.folders):
+                return 404, {"error": {"code": "ErrorItemNotFound", "message": "Folder not found."}}, None
             return 200, self.list_messages(folder, params, path, text_body), None
         if m := re.fullmatch(r"/me/messages/([^/]+)", path):
             msg = self.messages.get(m[1].removeprefix(REST_PREFIX))  # either id form is readable
@@ -366,6 +378,10 @@ class FakeGraph:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
             return 200, None, f"Subject: {msg.subject}\r\n\r\n{msg.text}".encode()
         return 400, {"error": {"code": "UnsupportedByFake", "message": path}}, None
+
+    def folder_json(self, f: dict[str, Any]) -> dict[str, Any]:
+        """A folder with its current message count (Graph's totalItemCount)."""
+        return {**f, "totalItemCount": sum(1 for m in self.messages.values() if m.folder == f["id"])}
 
     def attachment_json(self, a: FakeAttachment) -> dict[str, Any]:
         return {

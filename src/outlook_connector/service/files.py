@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound
+from outlook_connector.domain.errors import InvalidRequest, NotFound, Upstream
 from outlook_connector.service.export.attachments import safe_name
 from outlook_connector.service.localfiles import claim, kept_dir
 from outlook_connector.service.mailbox import Mailbox
@@ -47,7 +47,14 @@ class Files:
         return SavedFile(path=str(target), name=target.name, content_type=content_type, size=size)
 
     async def save_mime(self, message_id: str) -> SavedFile:
-        subject = (await self.mailbox.message(message_id)).subject
+        # The subject names the file: a summary read (no body, no attachment list) is enough.
+        found = await self.mailbox.reader.get_summaries([message_id])
+        if message_id in found.failed:
+            raise Upstream(found.failed[message_id])
+        summary = found.summaries.get(message_id)
+        if summary is None:
+            raise NotFound(f"Message {message_id} is not on the server.")
+        subject = summary.subject
         target = claim(kept_dir("downloads"), safe_name(subject, fallback="message") + ".eml")
         try:
             size = await self.mailbox.reader.download_mime(message_id, target)
