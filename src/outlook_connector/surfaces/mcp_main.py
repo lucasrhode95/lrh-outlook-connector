@@ -69,7 +69,9 @@ names the folders of the other copies.
 without quoted history by default; a body that could not be fetched sets export_error on its \
 message, and body_errors counts them. get_message reads one message with offset/max_chars continuation.
 - Always read `coverage` before treating results as complete; follow `cursor` for more. \
-list_messages(include_total=true) gives the server's count for the window, to plan large reads.
+list_messages(include_total=true) gives the server's count for the window, to plan large reads. \
+When Junk Email and Deleted Items hold most of the mailbox, a mailbox-wide list_messages reads folder \
+by folder (full pages, a bit slower) and coverage.notes says so: pass that note on to the user.
 - Mail deleted on the server is gone: nothing is kept locally.
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.

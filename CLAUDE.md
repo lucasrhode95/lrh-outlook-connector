@@ -13,6 +13,16 @@ A local connector for one user's Exchange Online mailbox: an MCP server for agen
 
 Layers: `surfaces/` (MCP, web) → `service/` (every domain decision) → `remote/` (Graph, OWS; the only code that knows wire formats and ids) and `store/` (SQLite). The service depends on the ports in `remote/ports.py`, never on a concrete adapter.
 
+## Process lifetime: short-lived, local, single user
+
+This is not a hosted or long-running server. Every entry point is a short-lived local process for one user: the MCP server lives for one agent session (stdio), the web UI until it is closed or idle (127.0.0.1 only), `auth` for one sign-in. Weeks can pass between runs, and several processes may run at once against the same local store and token cache. Design for that:
+
+- Assume nothing in memory survives between calls of different sessions; anything a later call needs travels in the result (cursors are self-contained) or comes from the server.
+- Never serve a stale local cache to the call that needs it. A cache may be weeks old when a process starts; it is used only while fresh (the folder cache: 10 minutes), otherwise the call waits for a refresh. No stale-while-revalidate, no background refresh that only helps a later process.
+- No background work that outlives the call: no schedulers, sync loops, watchers or warm-up tasks.
+- Shared local files (store, token cache, output folders) must tolerate concurrent processes: short transactions, cross-process locks, exclusive file creation.
+- Do not add multi-user, remote-access or always-on concerns (auth for other users, network listeners beyond localhost, process supervision) unless the user asks.
+
 ## Checks: run all four before every commit, and fix what they report
 
 ```bash

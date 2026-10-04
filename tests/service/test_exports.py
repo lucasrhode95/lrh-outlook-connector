@@ -81,6 +81,15 @@ async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
     assert "> First report" in Path(artifact.path).read_text(encoding="utf-8")
 
 
+async def test_a_download_that_times_out_is_marked_not_fatal(exports: Exports, fake: FakeGraph) -> None:
+    fake.drop_downloads = 100  # every download attempt loses its connection (read timeout)
+    artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
+    assert artifact.export_errors == {"downloading an attachment": 2}  # numbers.xlsx, image001.png
+    text = Path(artifact.path).read_text(encoding="utf-8")  # no file was downloaded: a flat TXT
+    assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
+    assert "  Likely: Microsoft service or network problem\n" in text
+
+
 async def test_combine_all_is_one_txt_with_sections(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel", "c-lunch"], combine="all"))
     text = Path(artifact.path).read_text(encoding="utf-8")
@@ -435,6 +444,20 @@ async def test_downloads_never_share_a_file(exports: Exports) -> None:
     assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()
 
 
+async def test_save_mime_names_the_file_after_the_subject_from_one_light_read(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    files = Files(exports.mailbox)
+    fake.calls.clear()
+    saved = await files.save_mime("m3")
+    assert saved.name == "RE_ Relatório BE semanal.eml"
+    assert Path(saved.path).read_bytes().startswith(b"Subject:")
+    # one summary read (in a $batch) and the download: no body, no attachment listing
+    assert fake.calls == ["POST /v1.0/$batch", "GET /v1.0/me/messages/m3/$value"]
+    with pytest.raises(NotFound):
+        await files.save_mime("gone")
+
+
 async def test_identical_attachment_files_are_stored_once(exports: Exports, fake: FakeGraph) -> None:
     for mid, day in (("sig1", "01"), ("sig2", "02")):
         fake.add(
@@ -461,3 +484,15 @@ async def test_copies_on_different_pages_are_exported_once_naming_both_folders(
     artifact = await exports.export(ExportRequest(since=datetime(2026, 10, 1, tzinfo=UTC), format="jsonl"))
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
     assert [(r["id"], r["also_in"]) for r in records] == [("r9", ["Sent Items"])]
+
+
+async def test_a_range_export_of_a_junk_heavy_mailbox_never_reads_junk(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    from tests.service.test_mailbox_threads import _junk_heavy
+
+    _junk_heavy(fake)
+    fake.calls.clear()
+    artifact = await exports.export(ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), format="jsonl"))
+    assert artifact.message_count == 12  # m1-m3, m5 and n1-n8; m4 and the 40 junk messages left out
+    assert not any(c == "GET /v1.0/me/messages" or "f-junk" in c for c in fake.calls)

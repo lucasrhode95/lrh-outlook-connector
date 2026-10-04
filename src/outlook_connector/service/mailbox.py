@@ -21,12 +21,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
+import time
 from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound
+from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
 from outlook_connector.domain.models import (
     Attachment,
     BodyKind,
@@ -46,13 +46,13 @@ from outlook_connector.remote.ports import MailReader
 from outlook_connector.service import cursors
 from outlook_connector.store.db import Store
 
-log = logging.getLogger(__name__)
-
 FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
 SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailures")  # out of reach
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
 FILTERED_PAGES = 10  # server pages scanned at most for one filtered page
+PER_FOLDER_SHARE = 2 / 3  # list folder by folder when left-out folders hold this share of the mailbox
+MIN_FOLDER_CHUNK = 10  # messages read at a time from one folder in a per-folder listing
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
 GONE = "deleted on the server"
@@ -73,7 +73,8 @@ class Mailbox:
         self.reader = reader
         self.store = store
         self._folders: dict[str, Folder] | None = None
-        self._folder_refresh: asyncio.Task[list[Folder]] | None = None
+        self._folders_at = 0.0  # time.monotonic() when _folders was last loaded
+        self._folder_lock = asyncio.Lock()  # one folder refresh at a time per process
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
         self._profile: UserProfile | None = None
         self._photo: tuple[bytes | None] | None = None  # (photo or None,) once looked up
@@ -81,35 +82,40 @@ class Mailbox:
     # ---------------------------------------------------------------- folders
 
     async def folders(self, *, refresh: bool = False) -> list[Folder]:
-        """The visible folders: cached right away, a stale cache refreshed in the background
-        (stale-while-revalidate). Hidden folders are out of reach and not listed.
+        """The visible folders (hidden folders are out of reach and not listed).
 
-        Only an empty cache or ``refresh=True`` waits for the server.
+        The cached list is used only while it is fresh (younger than FOLDER_TTL_SECONDS, whichever
+        process saved it); an older or empty cache, or ``refresh=True``, waits for the server (a
+        full refresh takes under a second). Processes are short-lived and often start after days
+        idle, so a stale list is never used: it would miss folders created meanwhile.
         """
-        cached, age = self.store.folders()
-        if refresh or not cached:
-            cached = await self._refresh_folders()
-        elif (age is None or age > FOLDER_TTL_SECONDS) and self._folder_refresh is None:
-            self._folder_refresh = asyncio.create_task(self._refresh_folders())
-            self._folder_refresh.add_done_callback(self._folder_refresh_done)
-        self._folders = {f.id: f for f in cached}
-        categories = folder_categories(self._folders)
+        async with self._folder_lock:
+            cached, age = self.store.folders()
+            if refresh or not cached or age is None or age > FOLDER_TTL_SECONDS:
+                cached = await self._fetch_folders()
+            else:
+                self._keep(cached)
+        categories = folder_categories(self._folders or {})
         visible = [f for f in cached if categories.get(f.id) != "hidden"]
         return sorted(visible, key=lambda f: f.path.lower())
 
     async def _refresh_folders(self) -> list[Folder]:
+        async with self._folder_lock:
+            return await self._fetch_folders()
+
+    async def _fetch_folders(self) -> list[Folder]:
         fresh = _with_paths(await self.reader.list_folders())
         self.store.save_folders(fresh)
-        self._folders = {f.id: f for f in fresh}
+        self._keep(fresh)
         return fresh
 
-    def _folder_refresh_done(self, task: asyncio.Task[list[Folder]]) -> None:
-        self._folder_refresh = None
-        if not task.cancelled() and task.exception() is not None:
-            log.warning("Background folder refresh failed: %s", type(task.exception()).__name__)
+    def _keep(self, folders: list[Folder]) -> None:
+        self._folders = {f.id: f for f in folders}
+        self._folders_at = time.monotonic()
 
     async def folder_map(self) -> dict[str, Folder]:
-        if self._folders is None:
+        """The folders by id, fresh: reloaded once FOLDER_TTL_SECONDS old, also within a process."""
+        if self._folders is None or time.monotonic() - self._folders_at > FOLDER_TTL_SECONDS:
             await self.folders()
         assert self._folders is not None
         return self._folders
@@ -237,27 +243,46 @@ class Mailbox:
             )
         )
 
-        link = state["link"] if state else None
-        fetched: list[MessageSummary] = []
-        drop = set(skip) | (set() if folder_id else (await self.reach(()))[1])
+        notes: list[str] = []
+        link: str | None = None
+        offsets: dict[str, int] | None = None  # per-folder listing: folder id -> messages returned
+        hidden = set() if folder_id else (await self.reach(()))[1]
+        if state:
+            link, offsets = state.get("link"), state.get("offsets")
+            if offsets:  # keep only folders still there and still in scope (a folder may be deleted)
+                folders = await self.folder_map()
+                offsets = {
+                    f: n for f, n in offsets.items() if f in folders and f not in skip and f not in hidden
+                }
+        elif not folder_id:
+            share, note = await self._left_out_share(set(skip) | hidden)
+            if share >= PER_FOLDER_SHARE:
+                offsets = await self._folders_with_mail(set(skip) | hidden, since, until)
+                notes.append(note)
+        if offsets is not None:
+            fetched, offsets = await self._merged_folders(offsets, since, until, limit)
+            complete = not offsets
+            filtered = not include_meeting_mail
+        else:
+            fetched = []
+            drop = set(skip) | hidden
 
-        def kept(m: MessageSummary) -> bool:
-            return m.folder_id not in drop and (include_meeting_mail or m.meeting is None)
+            def kept(m: MessageSummary) -> bool:
+                return m.folder_id not in drop and (include_meeting_mail or m.meeting is None)
 
-        filtered = bool(drop) or not include_meeting_mail
-        for _ in range(FILTERED_PAGES if filtered else 1):
-            page, link = await self.reader.list_messages(
-                folder_id=folder_id, since=since, until=until, page_size=limit, page=link
-            )
-            fetched += page
-            if not link or any(kept(m) for m in page):
-                break  # a page that exclusions empty entirely is skipped, within bounds
-        complete = link is None
+            filtered = bool(drop) or not include_meeting_mail
+            for _ in range(FILTERED_PAGES if filtered else 1):
+                page, link = await self.reader.list_messages(
+                    folder_id=folder_id, since=since, until=until, page_size=limit, page=link
+                )
+                fetched += page
+                if not link or any(kept(m) for m in page):
+                    break  # a page that exclusions empty entirely is skipped, within bounds
+            complete = link is None
         items, excluded = await self.finish(fetched, skip)
         items = _without_meetings(items, excluded) if not include_meeting_mail else items
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
-        notes: list[str] = []
         if filtered and not complete:
             notes.append("Filters apply after paging, so a page can hold fewer than limit messages.")
         total = None
@@ -268,10 +293,11 @@ class Mailbox:
                     "server_total counts the server's messages in scope (copies counted separately)."
                 )
         next_cursor = None
-        if link:
+        if not complete:
             next_cursor = cursors.encode(
                 "list_messages",
                 link=link,
+                offsets=offsets,
                 folder_id=folder_id,
                 since=_iso(since),
                 until=_iso(until),
@@ -290,6 +316,84 @@ class Mailbox:
                 notes=notes,
             ),
         )
+
+    async def _left_out_share(self, left_out: set[str]) -> tuple[float, str]:
+        """The share of the mailbox's messages in folders a mailbox-wide listing leaves out, from
+        the cached folder counts (no request), and the note that explains a per-folder listing."""
+        folders = await self.folder_map()
+        total = sum(f.total or 0 for f in folders.values())
+        out = sorted(
+            (f for fid, f in folders.items() if fid in left_out and f.total), key=lambda f: -(f.total or 0)
+        )
+        share = sum(f.total or 0 for f in out) / total if total else 0.0
+        biggest = ", ".join(f"{f.path}: {f.total:,}" for f in out[:3])
+        note = (
+            f"Listed folder by folder: folders this listing leaves out hold {share:.0%} of the mailbox "
+            f"({biggest}), which makes a whole-mailbox listing slow. Emptying Junk Email or Deleted Items "
+            "makes it faster."
+        )
+        return share, note
+
+    async def _folders_with_mail(
+        self, left_out: set[str], since: datetime | None, until: datetime | None
+    ) -> dict[str, int]:
+        """The in-scope folders to list, each from its newest message: those with mail in the window
+        (one batch of counts), or every in-scope folder with messages if counting fails."""
+        folders = await self.folder_map()
+        in_scope = [fid for fid in folders if fid not in left_out]
+        try:
+            counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
+        except ConnectorError:
+            counts = None
+        if counts is None:
+            return {fid: 0 for fid in in_scope if folders[fid].total}
+        return {fid: 0 for fid in in_scope if counts.get(fid)}
+
+    async def _merged_folders(
+        self, offsets: dict[str, int], since: datetime | None, until: datetime | None, limit: int
+    ) -> tuple[list[MessageSummary], dict[str, int]]:
+        """The newest ``limit`` messages across the folders, merged newest first, and each folder's
+        new position (folders with nothing left are dropped). Each folder is read from its position
+        in small chunks that grow as the merge takes from it, so little is read and not used; the
+        folders that need more are read in parallel (the transport keeps Exchange's limit of 4)."""
+        positions = dict(offsets)
+        read = dict(offsets)  # how far each folder has been read
+        buffers: dict[str, list[MessageSummary]] = {fid: [] for fid in offsets}
+        more = dict.fromkeys(offsets, True)
+        chunk = dict.fromkeys(offsets, max(MIN_FOLDER_CHUNK, -(-limit // max(len(offsets), 1))))
+
+        gone: set[str] = set()
+
+        async def fill(fid: str) -> None:
+            size = min(chunk[fid], limit)
+            try:
+                page, link = await self.reader.list_messages(
+                    folder_id=fid, since=since, until=until, page_size=size, page=None, skip=read[fid]
+                )
+            except NotFound:  # the folder was deleted meanwhile: its mail is gone or in Deleted Items
+                gone.add(fid)
+                more[fid] = False
+                return
+            buffers[fid] += page
+            read[fid] += len(page)
+            more[fid] = bool(link and page)
+            chunk[fid] = size * 2
+
+        taken: list[MessageSummary] = []
+        while len(taken) < limit:
+            empty = [fid for fid in buffers if not buffers[fid] and more[fid]]
+            if empty:
+                await asyncio.gather(*(fill(fid) for fid in empty))
+            heads = [fid for fid in buffers if buffers[fid]]
+            if not heads:
+                break
+            newest = max(heads, key=lambda fid: _stamp(buffers[fid][0]))
+            taken.append(buffers[newest].pop(0))
+            positions[newest] += 1
+        left = {fid: positions[fid] for fid in positions if buffers[fid] or more[fid]}
+        if gone:
+            await self._refresh_folders()  # so the rest of the call sees the folder tree as it is now
+        return taken, left
 
     async def _count(
         self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
@@ -634,6 +738,11 @@ def _within(m: MessageSummary, since: datetime | None, until: datetime | None) -
     if stamp is None:
         return since is None and until is None
     return (since is None or stamp >= since) and (until is None or stamp <= until)
+
+
+def _stamp(m: MessageSummary) -> float:
+    stamp = m.received_at or m.sent_at
+    return stamp.timestamp() if stamp else float("-inf")
 
 
 def _iso(value: datetime | None) -> str | None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sqlite3
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,6 +12,7 @@ from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
+from outlook_connector.service import cursors
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.threads import Threads, base_subject
 from outlook_connector.store.db import Store
@@ -309,24 +312,70 @@ def test_base_subject_strips_reply_and_forward_prefixes() -> None:
     assert base_subject("RE: FW: Enc: Relatório") == "Relatório"
 
 
-async def test_stale_folder_cache_is_served_immediately_and_refreshed_in_background(
-    mailbox: Mailbox, fake: FakeGraph
+def _new_process_after_days(fake: FakeGraph, tmp_path: Path) -> Mailbox:
+    """A new connector process on the same local store, whose folder cache is three days old."""
+    with sqlite3.connect(tmp_path / "m.sqlite3") as db:
+        db.execute("UPDATE meta SET value = ? WHERE key = 'folders_at'", (str(time.time() - 3 * 86400),))
+    transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
+    return Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
+
+
+async def test_a_fresh_folder_cache_is_used_without_asking_the_server(
+    mailbox: Mailbox, fake: FakeGraph, tmp_path: Path
 ) -> None:
-    import asyncio
+    await mailbox.folders()  # fills the cache
+    transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
+    other = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))  # a new process
+    fake.calls.clear()
+    assert {f.id for f in await other.folders()} >= {"f-inbox", "f-rie"} and fake.calls == []
 
-    from outlook_connector.service import mailbox as mailbox_module
 
+async def test_a_stale_folder_cache_is_never_used(mailbox: Mailbox, fake: FakeGraph, tmp_path: Path) -> None:
     await mailbox.folders()  # fills the cache
     fake.add_folder("f-new", "New folder")
-    mailbox_module.FOLDER_TTL_SECONDS, saved = -1, mailbox_module.FOLDER_TTL_SECONDS  # everything is stale
-    try:
-        served = await mailbox.folders()
-        assert "f-new" not in {f.id for f in served}  # answered from the cache, without waiting
-        assert mailbox._folder_refresh is not None
-        await asyncio.wait_for(asyncio.shield(mailbox._folder_refresh), timeout=5)
-    finally:
-        mailbox_module.FOLDER_TTL_SECONDS = saved
-    assert "f-new" in {f.id for f in (await mailbox.folders())}
+    later = _new_process_after_days(fake, tmp_path)
+    assert "f-new" in {f.id for f in await later.folders()}  # waited for the server
+
+
+async def test_mail_in_a_folder_created_while_the_cache_was_stale_is_listed_folder_by_folder(
+    mailbox: Mailbox, fake: FakeGraph, tmp_path: Path
+) -> None:
+    _junk_heavy(fake)
+    await mailbox.folders()  # cached days ago, before the folder below existed
+    fake.add_folder("f-invoices", "Invoices", parent="f-inbox")  # e.g. a new rule files mail there
+    fake.add(FakeMessage("inv1", "Invoice 42", "f-invoices", "2026-10-09T09:00:00Z", conversation="c-inv"))
+    page = await _new_process_after_days(fake, tmp_path).list_messages(limit=5)
+    assert any(n.startswith("Listed folder by folder") for n in page.coverage.notes)
+    assert page.items[0].id == "inv1" and page.items[0].folder == "Inbox/Invoices"
+
+
+async def test_a_folder_deleted_during_a_per_folder_listing_does_not_fail_it(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    first = await mailbox.list_messages(limit=3)
+    assert [m.id for m in first.items] == ["n8", "n7", "n6"]
+    fake.folders = [f for f in fake.folders if f["id"] != "f-archive"]  # deleted and emptied in Outlook
+    for mid in [m for m, msg in fake.messages.items() if msg.folder == "f-archive"]:
+        del fake.messages[mid]
+    rest, cursor = [], first.cursor
+    while cursor:
+        page = await mailbox.list_messages(cursor=cursor)
+        rest += [m.id for m in page.items]
+        cursor = page.cursor
+    assert rest == ["n4", "n3", "n2", "m5", "m3", "m2", "m1"]  # n5 and n1 were in Archive
+
+
+async def test_a_folder_that_answers_not_found_mid_listing_is_dropped(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    await mailbox.folders()  # the folder list still has Archive below
+    fake.folders = [f for f in fake.folders if f["id"] != "f-archive"]
+    fake.calls.clear()
+    page = await mailbox.list_messages(limit=20)
+    assert "n5" not in {m.id for m in page.items} and page.coverage.complete
+    assert fake.calls.count("GET /v1.0/me/mailFolders") == 1  # the folder list was refreshed once
 
 
 async def test_thread_marks_missing_bodies_with_the_export_error_block(
@@ -492,3 +541,92 @@ async def test_items_outside_the_mail_folders_refresh_the_folder_list_once(
     await mailbox.list_messages()
     await mailbox.search("budget")
     assert fake.calls.count("GET /v1.0/me/mailFolders") == walks  # remembered as outside: no new refresh
+
+
+# ---------------------------------------------------------------- per-folder listing (H7)
+
+
+def _junk_heavy(fake: FakeGraph) -> None:
+    """Interleaved mail in four folders, and Junk Email holding most of the mailbox."""
+    for day in range(1, 9):
+        folder = ("f-inbox", "f-archive", "f-sent", "f-proj")[day % 4]
+        fake.add(
+            FakeMessage(
+                f"n{day}", f"Note {day}", folder, f"2026-10-0{day}T09:00:00Z", conversation=f"c-n{day}"
+            )
+        )
+    for index in range(40):
+        fake.add(
+            FakeMessage(f"j{index}", "Buy now", "f-junk", f"2026-10-0{index % 9 + 1}T10:{index:02d}:00Z")
+        )
+
+
+async def _all_pages(mailbox: Mailbox, **options: object) -> tuple[list[str], list[str]]:
+    ids: list[str] = []
+    notes: list[str] = []
+    cursor = None
+    while True:
+        page = await mailbox.list_messages(limit=3, cursor=cursor, **options)  # type: ignore[arg-type]
+        ids += [m.id for m in page.items]
+        notes += page.coverage.notes
+        cursor = page.cursor
+        if cursor is None:
+            assert page.coverage.complete
+            return ids, notes
+
+
+async def test_a_junk_heavy_mailbox_is_listed_folder_by_folder(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _junk_heavy(fake)
+    fake.calls.clear()
+    ids, notes = await _all_pages(mailbox)
+    assert not any(c == "GET /v1.0/me/messages" or "f-junk" in c for c in fake.calls)  # never read
+    assert any(
+        n.startswith("Listed folder by folder: folders this listing leaves out hold 77%") for n in notes
+    )
+    assert "Junk Email: 41" in notes[0]
+    # exactly what the whole-mailbox listing returns, in the same order
+    monkeypatch.setattr("outlook_connector.service.mailbox.PER_FOLDER_SHARE", 2.0)
+    whole, whole_notes = await _all_pages(mailbox)
+    assert ids == whole and len(ids) == 12 and ids[:3] == ["n8", "n7", "n6"]
+    assert not any(n.startswith("Listed folder by folder") for n in whole_notes)
+
+
+async def test_a_per_folder_cursor_keeps_each_folders_position(mailbox: Mailbox, fake: FakeGraph) -> None:
+    _junk_heavy(fake)
+    page = await mailbox.list_messages(limit=3)
+    assert [m.id for m in page.items] == ["n8", "n7", "n6"] and page.cursor
+    state = cursors.decode(page.cursor, "list_messages")
+    assert state["link"] is None
+    assert state["offsets"] == {"f-inbox": 1, "f-sent": 1, "f-archive": 0, "f-proj": 1, "f-rie": 0}
+
+
+async def test_a_per_folder_listing_reads_only_folders_with_mail_in_the_window(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    fake.calls.clear()
+    page = await mailbox.list_messages(since=datetime(2026, 10, 7, tzinfo=UTC), limit=10)
+    assert [m.id for m in page.items] == ["n8", "n7"] and page.coverage.complete and page.cursor is None
+    read = {
+        c.split("/")[4] for c in fake.calls if c.startswith("GET /v1.0/me/mailFolders/") and "messages" in c
+    }
+    assert read == {"f-inbox", "f-proj"}  # n8 in Inbox, n7 in Projects; the others have none since then
+
+
+async def test_a_mostly_clean_mailbox_keeps_the_whole_mailbox_listing(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    fake.calls.clear()
+    page = await mailbox.list_messages(limit=10)
+    assert "GET /v1.0/me/messages" in fake.calls  # Junk holds 1 of 5 messages
+    assert not any(n.startswith("Listed folder by folder") for n in page.coverage.notes)
+
+
+async def test_a_named_folder_is_never_listed_folder_by_folder(mailbox: Mailbox, fake: FakeGraph) -> None:
+    _junk_heavy(fake)
+    fake.calls.clear()
+    page = await mailbox.list_messages(folder="inbox", limit=10)
+    assert [m.id for m in page.items] == ["n8", "n4", "m5", "m1"]
+    assert fake.calls.count("GET /v1.0/me/mailFolders/f-inbox/messages") == 1

@@ -12,7 +12,7 @@ This document describes how the application is built: processes, layers, modules
 ## 1. Principles
 
 1. **Remote first.** Outlook's servers do the work: listing, filtering, search, conversation grouping. The app keeps locally only what the server cannot give back.
-2. **No always-on service.** Every entry point is a short-lived process started on demand. Several may run at once.
+2. **No always-on service.** Every entry point is a short-lived local process started on demand, for one user. Several may run at once, and weeks may pass between runs. It is not designed to be hosted as a long-running MCP or HTTP server (§2).
 3. **One domain implementation, thin surfaces.** The UI and MCP call the same service. Neither reimplements domain decisions.
 4. **Protocol knowledge stays at the edge.** Only the `remote/` package knows URLs, Graph/OWS JSON, ID formats and paging. The service works with domain models.
 5. **Documented first, gaps filled.** Use Graph for every capability it can serve. OWS (Outlook Web's private JSON RPC) fills only the gaps. For this tenant those gaps are all writes, because every Graph mail write/send scope is denied to the usable clients (research §2). The split is tenant-specific and swappable (§6).
@@ -31,13 +31,21 @@ There is no daemon. Three entry points, all short-lived:
 
 `outlook-connector status` (offline) shows the signed-in account, which clients have tokens, and the store location.
 
+Consequences of short-lived processes (decided; see AGENTS.md):
+
+- **Nothing in memory is relied on across sessions.** A continuation travels in the result: cursors carry the remote link or per-folder positions and the original options.
+- **Local caches are used only while fresh.** A process often starts after days or weeks idle, so the cache it finds may be very old. The folder cache is used while younger than 10 minutes and otherwise refreshed before the call continues; a stale-while-revalidate design was dropped on 2026-10-04 because the refresh only helped the next process while the current call used a weeks-old folder tree (H7).
+- **No background work outlives a call:** no schedulers, sync loops or warm-up tasks. The UI's idle timer only stops the process.
+- **Concurrent processes share the local files:** the store uses WAL and short transactions, the token cache a cross-process lock, output files an exclusive create.
+- **Not a hosted service:** one user, localhost only (the UI binds 127.0.0.1 with a per-run session token), no multi-user auth or remote access.
+
 **Consequences:**
 
 - **Concurrency is cross-process.** Two agent sessions and the UI may run at the same time. The shared resources are the **token cache** (MSAL file cache with `msal-extensions` cross-process locking) and the **SQLite store** (WAL mode, `busy_timeout`, short write transactions, a connection per operation).
 - **Startup cost matters**, because every agent session pays it.
   - Nothing runs at startup: no sync, no folder walk, no token refresh before the first call.
   - The web stack (Starlette, uvicorn) is imported only by `ui`, never by `mcp`.
-  - Folders are shown from the cache immediately, and a stale cache (older than 10 minutes) refreshes in the background. Messages are always listed from the server (no local message cache; removed 2026-10-04).
+  - Folders come from the cache while it is younger than 10 minutes; an older cache waits for a refresh (under a second). Messages are always listed from the server (no local message cache; removed 2026-10-04).
   - Each process builds its MSAL clients once and keeps access tokens in memory until shortly before expiry (rebuilding the client costs a network round trip).
 - **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote `nextLink` or offset plus the original selection). They survive a client restart.
 - **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue and no progress reporting. An export holds at most 2,000 messages; it fetches bodies in bounded `$batch` rounds and finishes with per-message gaps marked rather than failing as a whole (§5.8).
@@ -161,14 +169,14 @@ lrh-outlook-connector/
 
 **`graph_mail.py`** implements `MailReader`. Operations:
 - `list_folders()` with hidden folders included (the service needs them to tell what is out of reach). Folder delta is researched (S2) but not used: the folder cache is refreshed in full.
-- `list_messages(folder | mailbox, since, until, page_size, page)`.
+- `list_messages(folder | mailbox, since, until, page_size, page, skip)`: `skip` starts a folder listing past its newest messages (per-folder listing, below).
 - `get_message(id, body_format)` and `get_messages(ids)` (batched; per-item failures returned).
 - `conversation(conversation_id)`, which returns all folders, leaves sorting to the caller (`$orderby` is rejected with this filter) and reports truncation past 1,000 messages.
 - `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
 - `search(query)`: `$search`, field-scoped queries passed through. `$search` returns regular ids, so each page's ids are converted with one `POST /me/translateExchangeIds` call into the immutable ids every other call uses (if that call fails, the page keeps its search ids rather than failing).
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`, for the inline images of every message of an export at once: one `$batch` item per image, 20 per batch across messages).
-- `download_attachment(id, att_id)` and `download_mime(id)` stream to a file.
+- `download_attachment(id, att_id)` and `download_mime(id)` stream to a file. They are retried like other GETs (429/503 after `Retry-After`, gateway errors, a connection that fails or drops mid-download), each time from scratch; what still fails is a domain error (`Upstream` with no status for a lost connection), so an export marks that one attachment instead of failing.
 - Every operation is named for error messages ("While listing attachments: …").
 
 **`graph_mapping.py`:** maps every Graph shape to `domain.models`. Unknown fields are ignored. Missing optional fields become `None`.
@@ -206,10 +214,10 @@ lrh-outlook-connector/
 ### 5.8 `service/`
 
 **`mailbox.py`:**
-- `list_folders` answers from the cache immediately (stale-while-revalidate: older than 10 minutes triggers a background refresh); only an empty cache or `refresh=true` waits for Graph, whose folder levels are fetched in parallel.
+- `list_folders` and every scope decision use the folder cache only while it is younger than 10 minutes (whichever process saved it; within a long process the map is reloaded at the same age). An older or empty cache, or `refresh=true`, waits for Graph, whose folder levels are fetched in parallel (under a second). Decided 2026-10-04: processes are short-lived and often start after days idle, so the former stale-while-revalidate served a weeks-old tree to the call that needed it, which missed folders created meanwhile (fatal for the per-folder listing below). One refresh at a time per process.
 - **Scope rules, shared by list, search, threads, sizes and export:** each folder gets a category from itself and its parents (`folder_categories`): `hidden` (also Sync Issues) > `deleted_or_junk` > `outgoing`. Deleted Items and Junk Email (with their subfolders; a folder deleted in Outlook sits inside Deleted Items) are left out unless `include_deleted_items` (a folder named in the request is always included); Sent Items, Drafts and Outbox are left out when `include_sent_items` is false; list, search and range exports also leave out meeting mail (invitations, RSVPs, cancellations; `excluded.meeting_mail`) when `include_meeting_mail` is false, per message, so a conversation that is only meeting traffic disappears and one with real replies shows through them, while threads stay whole (every flag: true shows more mail, false filters more); `coverage.excluded` counts what was left out, per reason.
 - **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in `SkypeSpacesData/TeamsMeetings`), are always dropped (`excluded.hidden`): from lists, search, threads, conversation sizes, totals and exports. `list_folders` omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues and its subfolders (classic Outlook's conflict and failure copies) are out of reach too, recognized by their well-known names since Graph does not always mark them hidden (decided 2026-10-04). **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a received copy; `also_in` names the other folders.
-- `list_messages(selection, include_sent_items, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. Folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
+- `list_messages(selection, include_sent_items, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. A mailbox-wide scope (no `folder`) is listed one of two ways, chosen on every first page (H7, decided 2026-10-04): when the folders the scope leaves out (Junk Email, Deleted Items and their subfolders, hidden folders, and Sent Items, Drafts and Outbox with `include_sent_items=false`) hold at least two thirds of the mailbox's messages (`PER_FOLDER_SHARE`, from the cached folder counts, no request), it lists **folder by folder**: one `$count` batch picks the in-scope folders with mail in the window, each is read newest first from its position in small chunks that grow as the merge takes from it (folders that need more are read in parallel, within the transport's limit of 4), and the merge returns the newest `limit`. The cursor carries each folder's position (`offsets`, folder id → messages returned), and `coverage.notes` says the listing was per folder and why. Otherwise it lists `/me/messages` and the folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). Both return the same messages in the same order; a cursor keeps the method its first page chose. Folder views (a named `folder`) are always one listing. `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
 - `get_message(id, offset, max_chars, body)` returns a bounded body with continuation; a message deleted on the server is `NotFound`.
 - `search(query, since?, until?, folder?, include_sent_items, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`.
 - `conversation_sizes(conversation_ids)` counts each conversation's messages the way `get_thread` lists them (copies once), for the UI and search hits.
