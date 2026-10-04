@@ -177,7 +177,7 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
 
 ### 4.4 Inbox rules (captured 2026-10-04 in Outlook on the web; owner's throwaway rule only)
 
-The owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. Not yet replayed by the connector.
+Two captures (2026-10-04). In the first, the owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. In the second, two more throwaway rules: Sent to, Subject includes, Move to Archive; disabled, re-enabled, conditions cleared, moved to a user folder, renamed, deleted. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. Not yet replayed by the connector.
 
 **A different envelope from item actions (§4.1–4.2).** The rule actions send the request object itself, with no `…JsonRequest` wrapper and no `Body`:
 
@@ -201,11 +201,12 @@ This explains the 2026-10-04 `NullReferenceException`: the connector's `Ows.call
 
 Observed semantics:
 
-- **Rule id:** `<mailbox GUID>\<20-digit number>`, stable across edits.
-- **Edit is partial:** the `SetInboxRule` request carried `Name`, `From`, `SubjectContainsWords`, `StopProcessingRules` and `Identity`, but not `MoveToFolder` or `MarkAsRead`; the rule read back afterwards still had both. Fields left out are kept. (How to *clear* a condition is not yet known.)
+- **Rule id:** `<mailbox GUID>\<20-digit number>`, stable across edits, including a rename (`SetInboxRule` with a new `Name`, `Identity.DisplayName` set to the new name, the same `RawIdentity`).
+- **Edit is partial:** the `SetInboxRule` request carried `Name`, `From`, `SubjectContainsWords`, `StopProcessingRules` and `Identity`, but not `MoveToFolder` or `MarkAsRead`; the rule read back afterwards still had both. Fields left out are kept. **A field sent as `null` is cleared** (second capture: `SubjectContainsWords: null` and later `SubjectOrBodyContainsWords: null` each removed that condition, read back as null). Outlook always resends `Name`, the sender/recipient condition, `StopProcessingRules` and `Identity`, plus the fields that changed.
 - **Order:** reordering sends `SetInboxAndSweepRules` with all rules in the new order; there is no `Priority` field in the request. It also carries each rule's `IsEnabled`, so the same call can enable or disable rules.
-- **Enable:** not captured. Turning the rule back on in the UI sent `DisableInboxRule` again and the rule stayed disabled (read back `Enabled: false`). `EnableInboxRule` probably exists (it does in Exchange's cmdlets); `SetInboxAndSweepRules` with `IsEnabled: true` is the proven alternative.
-- **Folders:** `MoveToFolder.RawIdentity` is a 120-character base64 folder id with `=` padding; whether it equals the Graph folder id (or its OWS form, §7) is not yet checked.
+- **Enable:** `EnableInboxRule`, the same shape as `DisableInboxRule` (`Identity` only); read back `Enabled: true` (second capture). Outlook's toggle sometimes sends `DisableInboxRule` twice in a row (both captures); harmless, the rule stays disabled.
+- **Folders:** in requests, `MoveToFolder.RawIdentity` is a base64 folder id starting `AQMk` (116–120 characters; Archive and a user folder), the same family as the regular ids `$search` returns (H12); whether it equals the Graph folder id that `list_folders` returns, as is or in its OWS form (§7), is not yet checked. In answers, `MoveToFolder.RawIdentity` is a different form: `<organisation path>/<mailbox GUID>:\<folder name>` (136–140 characters, the folder's own name only, e.g. `:\Archive`), so reading a rule's target folder means matching by name (ambiguous when two folders share a name) or by `DisplayName`.
+- **Other conditions and flags (second capture):** `SentTo` has the same `PeopleIdentity` shape as `From` (read back with `Address` and `AddressOrigin` added). `NewInboxRule` from the UI also carried `DisplayAlert: "Default"` or `PlaySound: "Default"` depending on the options shown; neither is needed.
 - **A rule has 90 fields** (conditions, `ExceptIf…` exceptions, actions, `Description` texts, `InError`, `SupportedByTask`, `RuleProvider`). The owner's 8 rules use only `MoveToFolder` (8), `SentTo` (6), `SubjectContainsWords` (5), `From` (1), `SubjectOrBodyContainsWords` (1), all with `StopProcessingRules`, all enabled, none in error.
 - Outlook also calls `GetMailboxByIdentity` after each change and `/ows/v1.0/OutlookOptions/MailForwardingNotification` on the rules page; neither is needed to manage rules.
 
