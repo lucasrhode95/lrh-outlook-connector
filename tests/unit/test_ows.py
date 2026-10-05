@@ -172,3 +172,36 @@ async def test_mismatched_item_results_are_an_error(fake: FakeGraph) -> None:
     fake.ows_next = [{"ResponseClass": "Success", "ResponseCode": "NoError"}]  # one result for two
     with pytest.raises(WriteOutcomeUnknown, match="1 item results for 2 messages"):
         await writer_for(fake).set_read(["m1", "m5"], True)
+
+
+def ows_for(fake: FakeGraph) -> Ows:
+    tokens = StaticTokens()
+    return Ows(
+        Transport(tokens, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep), tokens
+    )
+
+
+async def test_bare_request_posts_the_request_object_itself(fake: FakeGraph) -> None:
+    fake.ows_next = [{"WasSuccessful": True, "ErrorCode": 0, "InboxRuleCollection": {"InboxRules": []}}]
+    answer = await ows_for(fake).call_request("GetInboxRule", {"UseServerRulesLoader": True}, time_zone="UTC")
+    assert answer["InboxRuleCollection"] == {"InboxRules": []}
+    action, sent = fake.ows_calls[0]
+    assert action == "GetInboxRule" and sent["__type"] == "GetInboxRuleRequest:#Exchange"
+    assert "Body" not in sent and sent["UseServerRulesLoader"] is True
+    assert sent["Header"]["TimeZoneContext"]["TimeZoneDefinition"]["Id"] == "UTC"
+    await ows_for(fake).call_request("EnableInboxRule", {"Identity": {"RawIdentity": "r"}})
+    assert "TimeZoneContext" not in fake.ows_calls[1][1]["Header"]
+
+
+async def test_bare_request_failures(fake: FakeGraph) -> None:
+    ows = ows_for(fake)
+    fake.ows_next = [{"WasSuccessful": False, "ErrorCode": 5, "ErrorMessage": "no such rule"}]
+    with pytest.raises(Upstream, match="no such rule"):
+        await ows.call_request("RemoveInboxRule", {"Identity": {"RawIdentity": "r"}})
+    fake.ows_next = [{"Body": {}}]
+    with pytest.raises(WriteOutcomeUnknown):
+        await ows.call_request("RemoveInboxRule", {"Identity": {"RawIdentity": "r"}})
+    fake.ows_next = ["no-answer"]
+    with pytest.raises(WriteOutcomeUnknown):
+        await ows.call_request("RemoveInboxRule", {"Identity": {"RawIdentity": "r"}})
+    assert len(fake.ows_calls) == 3  # each sent once, never retried

@@ -1,6 +1,6 @@
 # Outlook API research
 
-**Evidence dates:** 2026-10-01 (first standalone probes) · 2026-10-02 (browser capture review, probe suite)  
+**Evidence dates:** 2026-10-01 (first standalone probes) · 2026-10-02 (browser capture review, probe suite) · 2026-10-04 (inbox-rule replay, H7 live check, read-only probes)  
 **Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md)
 
 This is the single record of what Microsoft's APIs allow and how they behave for this tenant (Landis+Gyr, one user mailbox). It keeps evidence and conclusions only. How to re-run the probes and take captures is in `research/README.md`.
@@ -53,11 +53,13 @@ Every call sent `Prefer: IdType="ImmutableId"`.
 | `/me/messages?$filter=conversationId eq '…'` | 200, across all folders (§3.4) |
 | `$search` (`subject:`, `from:`, `to:`, body, `attachment:`, `received:`) | 200. Field terms must be quoted. **Ignores `Prefer: IdType="ImmutableId"`** (live 2026-10-03): hits carry the regular id (`AQMk…`), not the immutable one (`AAkALg…`) that listings return; a GET by a regular id returns it unchanged (the header does not convert it; live 2026-10-03), but `POST /me/translateExchangeIds` (`restId` → `restImmutableEntryId`) does, with the read sign-in. Outlook Web accepted the regular id as a reply target. |
 | `POST /search/query` (message entity) | 200. Gives a server `total`. |
-| Attachments: list, item (`$select` must not include `@odata.type`), `$value`, `$select=microsoft.graph.fileAttachment/contentId` | 200 |
+| Attachments: list, item (`$select` must not include `@odata.type`), `$value`, `$select=microsoft.graph.fileAttachment/contentId` | 200. The cast also works on the list: `/me/messages/{id}/attachments?$select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId` returns each file attachment's `contentId` in one request (live 2026-10-04, §3.5). |
+| `/me/mailFolders/{id}/messages?$count=true&$top=1&$select=receivedDateTime&$orderby=receivedDateTime desc&$filter=receivedDateTime ge …` in one `$batch`, `ConsistencyLevel: eventual` | 200 for 16 of 16 folders in one request (0.9 s): each sub-response carries `@odata.count` and, when the count is not 0, the newest message's `receivedDateTime` (5 of 5). One batch gives each folder's count and newest date (live 2026-10-04, H30). |
+| `$filter` by message type, for counts without meeting mail | **400** (live 2026-10-04, H28): `not isof('microsoft.graph.eventMessage')` → `ErrorInvalidUrlQueryFilter`; `meetingMessageType eq 'none'` → property not found on `microsoft.graph.message`. Same with a `receivedDateTime` window added. A `$count` cannot leave out meeting mail. |
 | `/me/mailFolders/delta`, `/me/mailFolders/{id}/messages/delta` (`odata.maxpagesize`) | 200, `deltaLink`, no-change replay returns 0 |
 | `/me/translateExchangeIds` | 200. Converts the regular ids `$search` returns (`AQMk…` and `AAMk…`) into immutable ids (live 2026-10-03, read sign-in); the results equal the ids listings return (3 of 3, live 2026-10-04). An input that is already immutable fails the whole call (HTTP 400 `InvalidArgument`, expected `EntryId`). Not needed for OWS (§4.2). |
 
-**Sign-in (live 2026-10-03):** `auth write` asked for its own device code right after `auth read`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The read token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`); the write token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
+**Sign-in (live 2026-10-03):** `auth write` asked for its own device code right after `auth read`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The read token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`; re-checked 2026-10-04: `Content.Process.User`, `Family.Read`, `FileStorageContainer.Selected`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Read.Shared`, `People.Read`, `People.Read.All`, `Presence.Read.All`, `ProtectionScopes.Compute.User`, `Sites.ReadWrite.All`, `User.Read`, `User.Read.All`, `User.ReadBasic.All`, `UserAuthenticationMethod.ReadWrite`, `email`, `openid`, `profile`; **no `Calendars.*`**, so `/me/calendarView` was not tried, roadmap X10); the write token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
 
 Not tested: shared mailboxes (no target supplied). Online Archive: the account reports `HasArchive=false`, and Graph does not support it.
 
@@ -82,6 +84,18 @@ Not tested: shared mailboxes (no target supplied). Online Archive: the account r
 | No window, 25 per page | 2 of 25, 0.4 s | 25 of 25, 2.6 s, 13 folders |
 
 **Conclusion:** counting first fills every page, and per message delivered it is faster (filtering after paging needs about 8 pages for 100 messages), but each page is slower, most of all without a window. The cursor design across folders is still open (roadmap H7).
+
+**Live check of the built per-folder listing (H7, 2026-10-04, read-only).** Service layer, default scope; Junk, Deleted Items and hidden folders hold 86.1% of the mailbox (threshold 66%). Whole-mailbox forced with `PER_FOLDER_SHARE = 2.0`. Graph requests counted at the transport (`$batch` = 1, its sub-requests in brackets):
+
+| Case | Per folder: time, items, complete, requests | Whole mailbox, first page | Whole mailbox, paged to the same items |
+|---|---|---|---|
+| 25, no window | 3.2 s, 21, no, 15 (+16) | 0.4 s, 5, 1 | 5 pages, 2.5 s |
+| 100, no window | 4.7 s, 96, no, 18 (+16) | 1.0 s, 13, 1 | 6 pages, 7.5 s |
+| 25, last 7 days | 2.1 s, 21, no, 7 (+16) | 0.4 s, 5, 1 | 5 pages, 2.5 s |
+| 100, last 7 days | 2.6 s, 75, yes, 8 (+16) | 0.8 s, 13, 1 | 5 pages, 3.9 s |
+| JSONL range export, last 30 days | 11.1 s, 185 messages, 22 (+214) | | 28.3 s, 185 messages, 20 (+198) |
+
+Both methods return the same message ids in the same order in all four cases (0 positions differ). Pages hold 21 of 25 and 96 of 100 because 4 copies (self-sent mail in Inbox and Sent Items) are folded into `also_in`, the same for both methods. The per-folder note names the left-out share and the biggest folders. A first run measured the same within 0.5 s (export 10.8 s vs 36.6 s).
 
 ### 3.3 Search (`search.py`)
 
@@ -123,6 +137,8 @@ Sample: 25 recent conversations, 192 messages.
 | Sizes | median 11 KB, max 27.5 MB |
 
 **Conclusion:** export non-inline attachments by default. Include inline images only when the rendered body references them.
+
+**Content ids in the listing (2026-10-04, read-only, one message from the last 30 days with an inline image):** `GET /me/messages/{id}/attachments?$select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId` → 200; `contentId` came back on the inline file attachment (1 of 1), alongside `@odata.type`, `@odata.mediaContentType` and the selected fields. One listing request per message gives every image's content id, so the separate per-attachment lookup (`attachment_content_ids`) is unnecessary (roadmap H37, H19).
 
 ### 3.6 Delta around moves and deletes (`delta_moves.py`)
 
@@ -177,7 +193,7 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
 
 ### 4.4 Inbox rules (captured 2026-10-04 in Outlook on the web; owner's throwaway rule only)
 
-Two captures (2026-10-04). In the first, the owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. In the second, two more throwaway rules: Sent to, Subject includes, Move to Archive; disabled, re-enabled, conditions cleared, moved to a user folder, renamed, deleted. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. Not yet replayed by the connector.
+Two captures (2026-10-04). In the first, the owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. In the second, two more throwaway rules: Sent to, Subject includes, Move to Archive; disabled, re-enabled, conditions cleared, moved to a user folder, renamed, deleted. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. **Replayed by the connector on 2026-10-04 (STANDALONE, write token): every action works as captured** (see "Replay" at the end of this section).
 
 **A different envelope from item actions (§4.1–4.2).** The rule actions send the request object itself, with no `…JsonRequest` wrapper and no `Body`:
 
@@ -205,10 +221,21 @@ Observed semantics:
 - **Edit is partial:** the `SetInboxRule` request carried `Name`, `From`, `SubjectContainsWords`, `StopProcessingRules` and `Identity`, but not `MoveToFolder` or `MarkAsRead`; the rule read back afterwards still had both. Fields left out are kept. **A field sent as `null` is cleared** (second capture: `SubjectContainsWords: null` and later `SubjectOrBodyContainsWords: null` each removed that condition, read back as null). Outlook always resends `Name`, the sender/recipient condition, `StopProcessingRules` and `Identity`, plus the fields that changed.
 - **Order:** reordering sends `SetInboxAndSweepRules` with all rules in the new order; there is no `Priority` field in the request. It also carries each rule's `IsEnabled`, so the same call can enable or disable rules.
 - **Enable:** `EnableInboxRule`, the same shape as `DisableInboxRule` (`Identity` only); read back `Enabled: true` (second capture). Outlook's toggle sometimes sends `DisableInboxRule` twice in a row (both captures); harmless, the rule stays disabled.
-- **Folders:** in requests, `MoveToFolder.RawIdentity` is a base64 folder id starting `AQMk` (116–120 characters; Archive and a user folder), the same family as the regular ids `$search` returns (H12); whether it equals the Graph folder id that `list_folders` returns, as is or in its OWS form (§7), is not yet checked. In answers, `MoveToFolder.RawIdentity` is a different form: `<organisation path>/<mailbox GUID>:\<folder name>` (136–140 characters, the folder's own name only, e.g. `:\Archive`), so reading a rule's target folder means matching by name (ambiguous when two folders share a name) or by `DisplayName`.
+- **Folders:** in requests, `MoveToFolder.RawIdentity` is a base64 folder id starting `AQMk` (116–120 characters; Archive and a user folder), the same family as the regular ids `$search` returns (H12); **the Graph folder id that `list_folders` returns is accepted as is** (replay 2026-10-04; in this mailbox all 18 folder ids are `AQMk…` with no `-` or `_`, so their OWS form (§4.2) is the same string and was not a separate case). In answers, `MoveToFolder.RawIdentity` is a different form: `<organisation path>/<mailbox GUID>:\<folder name>` (136–140 characters, the folder's own name only, e.g. `:\Archive`), so reading a rule's target folder means matching by name (ambiguous when two folders share a name) or by `DisplayName`.
 - **Other conditions and flags (second capture):** `SentTo` has the same `PeopleIdentity` shape as `From` (read back with `Address` and `AddressOrigin` added). `NewInboxRule` from the UI also carried `DisplayAlert: "Default"` or `PlaySound: "Default"` depending on the options shown; neither is needed.
 - **A rule has 90 fields** (conditions, `ExceptIf…` exceptions, actions, `Description` texts, `InError`, `SupportedByTask`, `RuleProvider`). The owner's 8 rules use only `MoveToFolder` (8), `SentTo` (6), `SubjectContainsWords` (5), `From` (1), `SubjectOrBodyContainsWords` (1), all with `StopProcessingRules`, all enabled, none in error.
 - Outlook also calls `GetMailboxByIdentity` after each change and `/ows/v1.0/OutlookOptions/MailForwardingNotification` on the rules page; neither is needed to manage rules.
+
+**Replay (2026-10-04, STANDALONE, `Ows.call_request`; one throwaway rule, no other rule touched).** Same URL and headers as the item actions, bearer write token, no cookies.
+
+- `GetInboxRule` with `UseServerRulesLoader: true`: `WasSuccessful: true`, `ErrorCode: 0`; answer keys `ErrorCode`, `ErrorMessage`, `Header`, `InboxRuleCollection`, `IsUserError`, `UserPrompt`, `WasSuccessful`. 8 rules, 90 fields each (`Identity` is `{DisplayName, RawIdentity}`; `Enabled`, `Priority`). **`TimeZoneContext` is not needed:** without it, the same 8 rules in the same order.
+- `NewInboxRule` (`Name`, `SentTo` one `PeopleIdentity`, `SubjectContainsWords`, `MoveToFolder: {DisplayName, RawIdentity: <Graph folder id of Archive>}`, `StopProcessingRules: true`; no `__type` on `InboxRule`): success in 2.3 s; the answer also carries `InboxRule`. Read back: 9 rules, the new one `Priority` 1, enabled, its target folder returned as `…:\<folder name>`.
+- `SetInboxRule` (`Identity`, `Name`, `SentTo`, `StopProcessingRules`, `SubjectContainsWords: null`, `SubjectOrBodyContainsWords: [..]`, `Force: false`): the subject condition cleared, the subject-or-body one set; `MoveToFolder`, `StopProcessingRules` and `SentTo` unchanged.
+- `SetInboxRule` renaming it (`Identity.DisplayName` = new name, same `RawIdentity`): renamed, **id unchanged**, other fields kept.
+- `DisableInboxRule`, then `EnableInboxRule` (`Identity` only): read back `Enabled` false, then true.
+- `SetInboxAndSweepRules` with all 9 rules (each `{__type: EnableDisableInboxRuleRequest, Header, Identity, IsEnabled}`, payload in the body), the test rule last, then first: 0.7–0.8 s each; read back in exactly that order, `Priority` renumbered 1…9, every other rule's relative order and `Enabled` kept.
+- `RemoveInboxRule`: gone. The final list equals the starting one: 8 rules, same ids, order, priorities and enabled states.
+- Every write was sent once and answered `WasSuccessful: true`; no unclear answer, nothing retried.
 
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
@@ -235,6 +262,7 @@ Observed semantics:
 
 - One synthetic self-send to `lucas.rhode@landisgyr.com` (2026-10-01).
 - 2026-10-02, on four user-named Inbox messages: read and flag toggles, a category set and then cleared, a conversation read toggle, a move round trip, and two soft deletes. Two messages remain in Deleted Items. Sent copies were untouched, and nothing was hard-deleted.
+- 2026-10-04 (W9 replay): one throwaway inbox rule (conditions that match no real mail) created, edited, renamed, disabled, enabled, moved last and first, and removed. The rule list ended as it started.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.
 
 ## Sources

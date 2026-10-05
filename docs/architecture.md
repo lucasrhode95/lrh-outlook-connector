@@ -186,6 +186,7 @@ lrh-outlook-connector/
 - Implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
 - The bearer-only OWS envelope and write contracts proven in research §4.1–4.2. Payloads ≤ 2,048 characters go in the `X-OWA-UrlPostData` header. Anchor mailbox, correlation headers.
 - `Ows.call(action, body)` sends one action and returns its item results; an item whose `ResponseClass` is not `Success`/`Warning` raises an error naming its `ResponseCode`. The anchor mailbox is the write token's `upn`.
+- `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Not yet used by a tool (W9).
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `send` (`CreateItem` with `SendAndSaveCopy`), both with the body proven by the self-send. Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;

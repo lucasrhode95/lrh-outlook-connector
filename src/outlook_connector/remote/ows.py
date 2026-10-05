@@ -9,6 +9,8 @@ proven in research §4.1–4.2; anything else is marked where it is used.
 - Every write is sent once. A missing or server-error answer raises ``WriteOutcomeUnknown``.
 - Item results carry ``ResponseClass`` / ``ResponseCode``; anything but success is an error that
   names the code.
+- The inbox-rule actions use a second style (research §4.4, ``Ows.call_request``): the request object
+  is posted as is, and the answer reports ``WasSuccessful`` / ``ErrorCode``.
 """
 
 from __future__ import annotations
@@ -61,7 +63,42 @@ class Ows:
             "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": SERVER_VERSION},
             "Body": {"__type": f"{action}Request:#Exchange", **body},
         }
-        encoded = quote(json.dumps(envelope, separators=(",", ":"), ensure_ascii=False), safe="-_.!~*'()")
+        return _items(await self._post(action, envelope), action, strict=strict)
+
+    async def call_request(
+        self, action: str, fields: dict[str, Any], *, time_zone: str | None = None
+    ) -> dict[str, Any]:
+        """Send one action in the bare-request style of the inbox-rule actions (research §4.4): the
+        request object itself, no ``JsonRequest`` wrapper and no ``Body``. Return the answer, which
+        reports ``WasSuccessful`` / ``ErrorCode`` instead of item results. Sent once, never retried.
+
+        ``time_zone``: a Windows time zone id for ``Header.TimeZoneContext`` (Outlook Web sends one).
+        """
+        header: dict[str, Any] = {
+            "__type": "JsonRequestHeaders:#Exchange",
+            "RequestServerVersion": SERVER_VERSION,
+        }
+        if time_zone:
+            header["TimeZoneContext"] = {
+                "__type": "TimeZoneContext:#Exchange",
+                "TimeZoneDefinition": {"__type": "TimeZoneDefinitionType:#Exchange", "Id": time_zone},
+            }
+        data = await self._post(action, {"__type": f"{action}Request:#Exchange", "Header": header, **fields})
+        if not isinstance(data, dict) or not isinstance(data.get("WasSuccessful"), bool):
+            raise WriteOutcomeUnknown(
+                f"Outlook answered {action} without a success flag, so it is unclear whether the change "
+                "was made; it was not retried. Check the mailbox before trying again."
+            )
+        if not data["WasSuccessful"] or data.get("ErrorCode") not in (0, None):
+            text = re.sub(r"\s+", " ", str(data.get("ErrorMessage") or "")).strip()[:MAX_ERROR_TEXT]
+            raise Upstream(
+                f"Outlook refused {action} (error {data.get('ErrorCode')})" + (f": {text}" if text else ".")
+            )
+        return data
+
+    async def _post(self, action: str, payload: dict[str, Any]) -> Any:
+        """POST one payload to the action, with Outlook Web's headers. Sent once, never retried."""
+        encoded = quote(json.dumps(payload, separators=(",", ":"), ensure_ascii=False), safe="-_.!~*'()")
         claims = self.account()
         upn = claims.get("upn") or claims.get("preferred_username")
         headers = {
@@ -77,15 +114,14 @@ class Ows:
         in_header = len(encoded) <= URL_POST_DATA_LIMIT
         if in_header:
             headers["X-OWA-UrlPostData"] = encoded
-        data = await self._transport.json(
+        return await self._transport.json(
             "POST",
             f"{OWS_URL}?action={action}&app=Mail",
             profile=self._profile,
             headers=headers,
-            json_body=None if in_header else envelope,
+            json_body=None if in_header else payload,
             write=True,
         )
-        return _items(data, action, strict=strict)
 
 
 def _items(data: Any, action: str, *, strict: bool) -> list[dict[str, Any]]:
