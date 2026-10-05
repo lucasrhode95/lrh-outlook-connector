@@ -31,7 +31,7 @@ def _free_port(preferred: int) -> int:
     raise OSError("No free local port.")
 
 
-def run(
+def serve_ui(
     *, unsecure: bool, port: int = DEFAULT_PORT, open_browser: bool = True, idle_minutes: float = 30
 ) -> None:
     port = _free_port(port)

@@ -421,5 +421,6 @@ def build_server(context: AppContext) -> FastMCP:
     return mcp
 
 
-def run(*, unsecure: bool) -> None:
+def serve_mcp(*, unsecure: bool) -> None:
+    """Run the MCP server over stdio until the client closes it."""
     build_server(AppContext(unsecure=unsecure)).run("stdio")
