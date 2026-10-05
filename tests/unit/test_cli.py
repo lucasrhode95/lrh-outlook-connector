@@ -7,6 +7,7 @@ import pytest
 
 from outlook_connector import __main__ as cli
 from outlook_connector import config
+from outlook_connector.auth import tokens
 from outlook_connector.auth.tokens import TokenProvider
 from tests.fakes.msal_fakes import FakeAppFactory, Script, msal_account, seed_cache, token_result
 
@@ -15,8 +16,9 @@ READ = config.OUTLOOK_MOBILE_CLIENT_ID
 
 
 def run(argv: list[str], script: Script) -> int:
-    factory = partial(TokenProvider, app_factory=FakeAppFactory(script))
-    return cli.main(argv, provider_factory=factory)  # type: ignore[arg-type]
+    with pytest.MonkeyPatch.context() as patch:  # the CLI's sign-ins go to a scripted MSAL fake
+        patch.setattr(tokens, "TokenProvider", partial(TokenProvider, app_factory=FakeAppFactory(script)))
+        return cli.main(argv)
 
 
 def test_auth_signs_in_with_device_code(capsys: pytest.CaptureFixture[str]) -> None:

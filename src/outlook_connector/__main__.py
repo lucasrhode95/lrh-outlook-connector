@@ -68,7 +68,7 @@ def _add_unsecure(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main(argv: list[str] | None = None, *, provider_factory: type[TokenProvider] | None = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.unsecure:
         print(
@@ -93,9 +93,9 @@ def main(argv: list[str] | None = None, *, provider_factory: type[TokenProvider]
             )
         return EXIT_OK
     try:
-        if provider_factory is None:
-            from outlook_connector.auth.tokens import TokenProvider as provider_factory
-        provider = provider_factory(unsecure=args.unsecure)
+        from outlook_connector.auth import tokens
+
+        provider = tokens.TokenProvider(unsecure=args.unsecure)
         if args.command == "auth":
             return _auth(provider, args)
         return _status(provider, args)
