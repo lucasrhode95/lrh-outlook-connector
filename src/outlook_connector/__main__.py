@@ -128,7 +128,7 @@ def _mcp(args: argparse.Namespace) -> int:
 
 def _ui(args: argparse.Namespace) -> int:
     """``ui``: the local web UI until Ctrl+C or idle."""
-    from outlook_connector.surfaces.web.main import serve_ui
+    from outlook_connector.surfaces.web.web_main import serve_ui
 
     with contextlib.suppress(KeyboardInterrupt):
         serve_ui(

@@ -119,7 +119,7 @@ lrh-outlook-connector/
 │  └─ surfaces/
 │     ├─ mcp_main.py               # FastMCP (stdio) tools
 │     └─ web/
-│        ├─ main.py                # uvicorn launch + idle shutdown (imported only by `ui`)
+│        ├─ web_main.py            # uvicorn launch + idle shutdown (imported only by `ui`)
 │        ├─ routes.py              # Starlette JSON API, session-token/Host guard, export download
 │        └─ static/                # index.html, app.js (ES module, no build step), app.css
 └─ tests/
