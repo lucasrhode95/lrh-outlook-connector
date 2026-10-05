@@ -38,8 +38,6 @@ _REJECTED = {"invalid_grant", "interaction_required", "login_required", "consent
 _NETWORK_RETRIES = 3
 _MEMO_MARGIN_SECONDS = 300  # reuse an in-memory access token until 5 minutes before it expires
 
-AppFactory = Callable[..., Any]
-
 
 @dataclass(frozen=True)
 class Account:
@@ -105,28 +103,14 @@ class TokenProvider:
         self,
         *,
         unsecure: bool = False,
-        cache_path: Path | None = None,
-        profiles: dict[str, config.TokenProfile] | None = None,
-        authority: str = config.AUTHORITY,
-        app_factory: AppFactory | None = None,
     ) -> None:
         self.unsecure = unsecure
-        self.cache_path = cache_path or config.token_cache_path(unsecure=unsecure)
-        self.profiles = profiles or config.PROFILES
-        self._authority = authority
-        self._app_factory = app_factory or msal.PublicClientApplication
+        self.cache_path = config.token_cache_path(unsecure=unsecure)
         # Per process: building an MSAL app costs a network round trip, so build each once, and keep
         # the current access token in memory instead of re-reading the locked cache on every request.
         self._apps: dict[str, Any] = {}
         self._token_cache: PersistedTokenCache | None = None
         self._memo: dict[str, AccessToken] = {}
-        for profile in self.profiles.values():
-            denied = [s for s in profile.scopes if (profile.client_id, s) in config.DENIED_PAIRS]
-            if denied:
-                raise ConfigurationError(
-                    f"Profile '{profile.name}' requests {denied}, which Microsoft denied for this client "
-                    "(AADSTS65002). See docs/outlook-api-research.md §2."
-                )
 
     # ------------------------------------------------------------------ public API
 
@@ -223,7 +207,7 @@ class TokenProvider:
         accounts = tuple(Account.from_msal(a) for a in cache.search(msal.TokenCache.CredentialType.ACCOUNT))
         now = time.time()
         rows = []
-        for spec in self.profiles.values():
+        for spec in config.PROFILES.values():
             refresh = list(
                 cache.search(
                     msal.TokenCache.CredentialType.REFRESH_TOKEN, query={"client_id": spec.client_id}
@@ -252,18 +236,18 @@ class TokenProvider:
 
     def _profile(self, name: str) -> config.TokenProfile:
         try:
-            return self.profiles[name]
+            return config.PROFILES[name]
         except KeyError:
             raise ConfigurationError(
-                f"Unknown token profile '{name}'. Known: {sorted(self.profiles)}"
+                f"Unknown token profile '{name}'. Known: {sorted(config.PROFILES)}"
             ) from None
 
     def _app(self, spec: config.TokenProfile) -> Any:
         if spec.name not in self._apps:
             if self._token_cache is None:
                 self._token_cache = self._cache()  # re-reads the file when other processes change it
-            self._apps[spec.name] = self._app_factory(
-                spec.client_id, authority=self._authority, token_cache=self._token_cache
+            self._apps[spec.name] = msal.PublicClientApplication(
+                spec.client_id, authority=config.AUTHORITY, token_cache=self._token_cache
             )
         return self._apps[spec.name]
 
