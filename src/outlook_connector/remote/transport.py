@@ -22,11 +22,12 @@ import re
 import time
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextvars import ContextVar
-from typing import Any, BinaryIO, Protocol
+from typing import Any, BinaryIO
 from urllib.parse import urlsplit
 
 import httpx
 
+from outlook_connector.auth.tokens import TokenProvider
 from outlook_connector.domain.errors import (
     AuthenticationRequired,
     ConnectorError,
@@ -59,27 +60,10 @@ def operation(name: str) -> Iterator[None]:
         _operation.reset(token)
 
 
-class _Token(Protocol):
-    @property
-    def value(self) -> str: ...
-
-    def claims(self) -> dict[str, Any]: ...
-
-
-class TokenSource(Protocol):
-    """What the transport and OWS need from the token provider (``auth.tokens.TokenProvider``)."""
-
-    def get_token(
-        self, profile: str, *, force_refresh: bool = False, claims_challenge: str | None = None
-    ) -> _Token: ...
-
-    def sign_in_command(self, profile: str) -> str: ...
-
-
 class Transport:
     def __init__(
         self,
-        tokens: TokenSource,
+        tokens: TokenProvider,
         *,
         client: httpx.AsyncClient | None = None,
         max_concurrency: int = MAX_CONCURRENCY,

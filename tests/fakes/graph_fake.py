@@ -502,7 +502,7 @@ def _dt(value: str) -> datetime:
 
 
 class StaticTokens:
-    """TokenSource stand-in."""
+    """TokenProvider stand-in (the methods Transport and Ows use)."""
 
     class _T:
         value = "test-token"
