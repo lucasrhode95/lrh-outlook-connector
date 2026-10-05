@@ -5,6 +5,8 @@
 
 ![Outlook connector architecture](architecture.svg)
 
+The classes and who calls whom, in more detail: [code map](code-map.svg).
+
 This document describes how the application is built: processes, layers, modules, data, and the main flows. *What* it must do is in v4. *Why* each API choice was made is in the research doc.
 
 ---
