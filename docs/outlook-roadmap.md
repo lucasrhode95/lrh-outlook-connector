@@ -1,122 +1,288 @@
 # Outlook Connector Roadmap
 
-The work register for [Requirements v4](outlook-requirements-v4.md). The build order and the modules each item touches are in [architecture §11](architecture.md). Evidence is in [API research](outlook-api-research.md).
+Current work only. This is a decision and implementation register, not a changelog: completed work and intentionally parked ideas are omitted.
 
-Snapshot **2026-10-04**: the read MVP, drafts and send (W0, W1) and the mailbox changes (W2–W5) are built and passed their live checks (V2, V3). W6 reply history fidelity and H12 search ids are done (2026-10-04). H7's live check passed (2026-10-04). **Open, by priority:** W7 and W8 (HTML for new messages, signatures), W9 (inbox rules), the review findings H17–H21 (2026-10-04; H16 fixed), and the second review's H22–H38 (2026-10-04). H14 was accepted as is (2026-10-04).
+Snapshot **2026-10-05**, against `main`.
 
-**Status terms:** **Done** (exists with tests or evidence) · **Partial** (specific gap remains) · **Pending** · **Parked** (plausible, but no current need).
+- Product requirements: [Requirements v4](outlook-requirements-v4.md)
+- Build/module map: [architecture §11](architecture.md)
+- API evidence: [API research](outlook-api-research.md)
 
-## Research
+## Current priority
 
-| Item | Status | Result |
-|---|---|---|
-| A0 First-party auth | **Done** | Graph reads via Outlook Mobile; OWS writes via One Outlook Web. Graph write/send denied to both clients (research §2). |
-| R1 Catalog sizing | **Done** | Folders only (research §3.2) |
-| R2 Search bake-off | **Done** | Graph `$search` (research §3.3) |
-| R3 Conversation retrieval | **Done** | Works across folders; sort locally (research §3.4) |
-| R4 Thread-header quality | **Parked** | Received mail is fine; own messages would need a fallback. Only needed for E3, which is parked (research §3.4) |
-| R5 OWS write contracts | **Done** | Send, read, flag, categories, conversation read, move, soft delete (research §4.2) |
-| S2 Delta semantics | **Done** | `@removed` → GET by id; moves by id (research §3.6) |
+1. **W7 → W8:** HTML for new messages, then signatures.
+2. **W9:** inbox-rule MCP tools; the API contracts are already proven live.
+3. **Correctness and reliability:** H17–H29 and H33.
+4. **Performance and cleanup:** H30–H38.
 
-## MVP (read)
+Status wording used below:
 
-| Item | Status | Scope |
-|---|---|---|
-| A1 Token provider | **Done** (live: encrypted DPAPI cache, silent refresh) | One centralized provider, named profiles from config, MSAL + encrypted cache, `--unsecure`, cross-process lock, account check (architecture §5.1) |
-| A2 CLI | **Done** | `outlook-connector auth [read\|write] [--unsecure]` and `status` |
-| B1 Graph reader | **Done** | `MailReader` over Graph: folders, list, get, conversation, `$search`, attachments, MIME, `$batch`. Folder delta (S2) is not used: the folder cache refreshes in full. |
-| S1 Store | **Done** | Account-bound SQLite: account binding and folder cache only (no retention since 2026-10-02; the summary cache was removed 2026-10-04, see H11) |
-| S3 Reconciliation | **Removed** (2026-10-02) | Local retention of server-deleted mail was dropped: the lookups after every list page, the per-page merge, the fallbacks and the "deleted on server" labels are gone. (The summary cache itself was removed on 2026-10-04, see H11.) |
-| L1 `list_messages` | **Done** | Folder or mailbox-wide, `since`/`until`, limit, always from the server; shared scope rules (`include_deleted_items`, `include_sent_items`); `include_total`; compact by default for MCP |
-| T1 `get_thread` | **Done** | Conversation across folders, local sort, bounded; the cursor keeps the original selection; truncation past 1,000 messages is reported |
-| L2 `search_messages` | **Done** | Graph `$search`, grouped by conversation with each conversation's message count, exact date bounds, coverage |
-| E1 Export | **Done** | Requirements v4 §10: threads + messages, attachment policy, combine options, one download. Also a range selection (`since`/`until`/`folder`/`include_sent_items`), `limit` up to 2,000, source ids per message, counts of what was left out or unavailable; copies named per message (`also_in`). `format=jsonl` for agents. |
-| M1 MCP surface | **Done** | Read tools, then the write tools (W0, W1, W2–W5); files returned as local paths (architecture §8) |
-| U1 Local UI | **Done** | Thread-grouped list (opens on the Inbox; real conversation sizes, one-message conversations as plain rows; newest message on top; merged copies), search, in-memory filter, selection, export and "export this view", attachment downloads, Deleted/Junk toggle (v4 O3); your display name and profile photo in the header, switches for on/off options and a segmented control for how export files are split (2026-10-04) |
+- **Decided, not built** — behavior is settled; implementation remains.
+- **Pending** — a concrete problem and next fix are known.
+- **Decision needed** — there is still an owner choice to make.
+- **Later** — useful, but not part of the current build sequence.
 
-## Hardening (90-day review and live check, 2026-10-02)
+# Send and mailbox features
 
-| Item | Status | Scope |
-|---|---|---|
-| H1 Safe `$batch` | **Done** | Numbered batch request ids (Graph compares ids case-insensitively). At most 2 batches and 4 requests in flight. Throttled items re-sent in batches of ≤20 after `Retry-After`. Per-item results. (OUTLOOK-02, OUTLOOK-03; likely cause of OUTLOOK-01) |
-| H2 Diagnostics | **Done** | Errors name the operation, status, Graph code and message, request id, and failed batch-item count. Throttling limits stated to clients. (OUTLOOK-01) |
-| H3 Partial exports | **Done** | Unfetchable bodies marked and listed instead of failing the export |
-| H4 Review bugs | **Done** | Retained deleted mail on every page (lists and range exports); `get_thread` coverage; summary column without bodies; 401 renew-then-sign-in (403 is access denied); exact search dates; Junk/Deleted folder views in the UI |
-| H5 Consistency | **Done** | One scope rule set for every tool (`include_deleted_items`, `include_sent_items`, stable `excluded` keys; both flags: true shows more mail, false filters more — `include_sent_items` replaced `received_only` on 2026-10-04); copies of one message merged (`also_in`); JSONL export; compact results; totals; message counts on search hits |
-| H6 Tooling | **Done** | Committed `uv.lock`; pyright (standard mode) clean and in the dev group |
-| V1 Live check | **Done** (2026-10-02) | Real mailbox, read-only. **Exports:** the 240 newest days (1,471 messages, the 1,500-message case) completed as JSONL (260 s), TXT (206 s) and TXT with attachments (718 s, 173 MB, 761 files): no body, listing or download failures, identical files stored once. **`include_total`:** the Inbox count equals the folder total (144); mailbox-wide counts in under 1 s. **Conversation sizes:** 76 conversations in 2.3 s, 40 compared with `get_thread`, no mismatch; search-hit counts match too. **Merged copies:** 500 listed messages, no repeated id or Internet id across pages; self-sent mail shows `also_in: Sent Items`. Findings: H7–H10. |
-| H7 Junk-heavy mailbox-wide listing | **Done** (built 2026-10-04; live check passed 2026-10-04) | Only scopes without a folder are affected (MCP `list_messages`/`export_messages` without `folder`, including `include_sent_items=false`); folder views such as the UI's Inbox are not. Graph lists the whole mailbox newest first, Junk and Deleted Items included, and the connector drops those afterwards. With 16,846 junk messages, pages of 100 kept 11–40 messages, and the 1,471-message export read 13,821 summaries, most of its run time. Graph's `parentFolderId ne` filter excludes them server-side but takes 9–14 s per page (vs ~1 s). **Decided:** count first, then list only the folders that matter: one `$batch` of per-folder counts for the window (`count_messages`, already built and used by `include_total`) picks the in-scope folders with messages, which are then listed in parallel and merged newest first; the cursor carries each folder's continuation. That usually cuts a whole-mailbox page to a handful of folders. Emptying Junk only hides the symptom until it refills. **Measured 2026-10-04 (read-only), 100 per page:** today, the last 7 days, last 30 days and no window each returned 13 of 100 (83 Junk/Deleted dropped) in 1.0–1.3 s. Count-first (one `$count` batch, then the in-scope folders with mail listed in parallel and merged): 7 days 87/87 in 2.7 s from 5 of 16 folders; 30 days 100/100 in 4.1 s from 9; no window 100/100 in 10.7 s from 13; no window at the MCP default of 25: 2/25 in 0.4 s today vs 25/25 in 2.6 s. Full pages, but each page is slower, most with no window. **Was open (settled below):** the cursor design across folders (per-folder offsets re-fetch what a page did not use; carrying fetched items makes cursors large), and whether to use count-first only when a date window is set. **2026-10-04:** owner postponed the decision. **Clarified 2026-10-04:** the approach itself is the one decided: take the folder list (already cached), leave out the unwanted folders (Junk, Deleted Items, hidden; Sent when `include_sent_items=false`), list the remaining folders one by one in parallel, and merge them newest first. The count step only skips folders with no mail in the window, so a page asks 5 folders instead of 16. Why it is not simply faster: `/me/messages` answers a page in one request (~1 s) but most of it is Junk; per folder it takes one request per folder with mail, so a page is full but slower (2.7 s for 7 days, 10.7 s with no window, measured above). **Decided 2026-10-04 (owner):** (1) **The connector chooses the method on every mailbox-wide call; agents are not asked to.** From the cached folder list (no extra request): when the left-out folders (Junk, Deleted Items and their subfolders, hidden folders; Sent, Drafts and Outbox too with `include_sent_items=false`) hold **at least 66% of the mailbox's messages**, list per folder; otherwise list `/me/messages` as today. Both return the same messages in the same order; only speed differs. One constant, to be tuned after the live check. Why 66% and not lower, from the measurements above: whole-mailbox costs ~1.1 s per page, keeping the share not left out; per folder costs 2.7 s (7-day window) to 10.7 s (no window) per full page. At 30% left out, whole-mailbox gives 100 messages in ~1.6 s, still 2–6× faster; per folder breaks even between ~60% (with a window) and ~90% (none). This mailbox (87%) lists per folder. (2) **No override parameter** (no `whole_mailbox`/`per_folder` switch). (3) **The user is told:** the result says which method was used and why, in `coverage.notes`, for the agent to pass on. Example: "Listed folder by folder: Junk Email and Deleted Items hold 87% of this mailbox (16,846 in Junk), which makes whole-mailbox listing slow. Emptying Junk Email makes it faster." (4) **Per-folder listing:** the in-scope folders with mail in the window (one `$count` batch) are listed in parallel, within the connector's existing limit of 4 concurrent requests per mailbox (Exchange's), and merged newest first. (5) **The cursor keeps every folder's position:** a small map of folder id → messages already returned from it; the next page asks each folder for `limit` messages from there (re-reading at most what the previous page fetched but did not use). Example: the MCP default `list_messages(limit=25)` today returns 2 messages and 23 Junk drops; with the change, 25 messages from Inbox, Archive and two project folders, and a cursor like `{Inbox: 18, Archive: 4, Projects: 2, RIE: 1}`. Applies to `list_messages` and range exports without `folder`; folder views (the UI) are unchanged. **Built 2026-10-04:** as decided; each folder is read in small chunks (at least 10, then doubling) that grow as the merge takes from it, so a page reads little it does not use. In per-folder listings `coverage.excluded` no longer counts Junk and Deleted Items messages, since they are never read; the note names their sizes instead. **Folder freshness (2026-10-04):** per-folder listing only reads folders it knows, so a stale folder list would silently miss mail. Example: after two weeks without the connector, "my mail from the last 7 days" would skip `Inbox/Invoices`, created last week for a new rule, and a folder deleted and emptied in Outlook would fail the call (404). Now a folder cache older than 10 minutes is never used (the first call after a break waits about a second for a refresh), a folder that answers 404 mid-listing is dropped and the folder list refreshed once, and a cursor drops folders deleted or moved out of scope since its first page. **Live check (next):** the newest 25 and 100 mailbox-wide, with and without a 7-day window, and a 30-day range export; compare page times and contents with the whole-mailbox listing (`PER_FOLDER_SHARE` above 1 forces it), then tune the 66% if needed. **Live check 2026-10-04 (read-only, service layer, research §3.2):** the default scope leaves out 86.1% of the mailbox, so it lists per folder. Per folder vs whole mailbox (forced with `PER_FOLDER_SHARE = 2.0`), first page: 25 no window 3.2 s / 21 items / 15 requests (+16 batched) vs 0.4 s / 5 items / 1; 100 no window 4.7 s / 96 vs 1.0 s / 13; 25 last 7 days 2.1 s / 21 vs 0.4 s / 5; 100 last 7 days 2.6 s / 75, complete vs 0.8 s / 13. Paging the whole-mailbox listing to the same number of items took 5–6 pages and 2.5–7.5 s in total, and gave **the same ids in the same order in all four cases**. 30-day JSONL range export: 11.1 s vs 28.3 s, 185 messages both ways. Pages hold 21/25 and 96/100 because 4 self-sent copies fold into `also_in` (the same for both methods). Notes: per folder says why and names the biggest left-out folders; whole mailbox says filters apply after paging. **Threshold: keep 66%.** At 86% per folder wins for the same content in every case except 25 messages with no window (3.2 s vs 2.5 s), and wins clearly on exports (2.5×); there is no mailbox between 30% and 86% to tune against. The extra requests with no window (15–18 per page, the busiest folder read in rounds) are H30's to cut. |
-| H8 Mail-only search; hidden items out of reach | **Done** (2026-10-02) | `$search` also returned Teams meeting items from the hidden `SkypeSpacesData/TeamsMeetings` folder (7 of 22 hits for `from:lucas`); `get_thread` said "not found" for them. Now hidden folders, and items outside the mail folders, are out of reach everywhere: never listed, searched, counted, threaded or exported (`coverage.excluded.hidden`), `list_folders` leaves them out and naming one is refused. Search is described as mail only in the MCP instructions, tool descriptions and the UI. An unknown folder id refreshes the folder list once, so a folder created meanwhile is still found. Meeting search stays X10. |
-| H9 Sync Issues in scope | **Superseded** (2026-10-04): out of reach | `Sync Issues` and its subfolders (`Conflicts`, `Local Failures`, `Server Failures`) are created by classic Outlook for Windows, not by Microsoft mail or this app: when two versions of one item collide during sync, Outlook keeps one and files the other in `Conflicts`. The live export held 24 such copies (17 duplicated mail you later deleted, 7 had no other copy). Now treated like Deleted Items and Junk: left out by default (`excluded.sync_issues`), included with `include_deleted_items`, listed and nameable even when Graph marks the folder hidden. Also fixed on the way: subfolders count with their parent, so a folder deleted in Outlook (it moves into Deleted Items with its mail) is left out like Deleted Items. **2026-10-04:** reversed by the owner: Sync Issues and its subfolders are now out of reach like hidden folders (never listed, searched, counted, threaded or exported; `include_deleted_items` no longer covers them). Outlook on the web hides that folder too, and it removed a special case (the `sync_issues` exclusion reason). |
-| H10 Merged-copy count | **Done** (2026-10-02), by removal | The export's `duplicates_merged` counter said 0 while 4 exported messages carried `also_in`: copies were merged while listing, before the export counted. Decided: drop the counter (and the "Merged" header line). The information lives on each message (`also_in`), and the counter could not reconcile counts on its own. Fixed instead: range exports keep copies from different pages until the final merge, so `also_in` names every folder. |
-| H12 Search ids | **Done** (2026-10-04) | `$search` ignores the immutable-id preference and returns regular ids (`AQMk…`), while listings return immutable ones (`AAkALg…`): one message has two ids, and a search id stops working once the message moves (replies and drafts accepted it live). **The first fix failed live:** reading each hit back with a GET returns the id in the form it was asked with. `POST /me/translateExchangeIds` (`restId` → `restImmutableEntryId`, up to 1,000 per call) converted `AQMk…` to `AAkALg…` live with the read sign-in. **Done 2026-10-04:** one `translateExchangeIds` call per search page, read-back removed; the fake now returns an id in the form it was asked with and models the translation. Live: a message found by search had the Inbox listing's id; after a move to Archive it was still readable by that id, then moved back. An already-immutable input fails the whole call, so a failed translation keeps the search ids instead of failing the search. |
-| H13 Data folder outside AppData | **Done** (2026-10-03) | Found in the V2 run: the Claude desktop app is a packaged Windows app, so files it and its MCP servers create under AppData go to a private per-app copy. The terminal's write sign-in was invisible to the MCP server, and exports were not where Explorer looked. The Windows data folder is now `%USERPROFILE%\.lrh-outlook-connector` (`OUTLOOK_CONNECTOR_HOME` still overrides). lrh-teams probably has the same problem. |
-| H14 Conversation actions touch drafts | **Accepted as is** (2026-10-04) | Found in V3: marking a conversation read or unread also changes a reply draft of it in Drafts. Harmless; the owner decided not to add code, tests or options for it. |
-| H11 Simplifications | **Done** (2026-10-02; the summary cache 2026-10-04) | Decided after the V1 review. **Removed:** local retention of server-deleted mail (see S3), `Coverage.source` (it only reported retention), the search total from Microsoft Search (another engine, ignored the folder rules, rarely shown), the export's `messages_unavailable` (the length of `unavailable_message_ids`). **Faster:** inline-image content ids of all exported messages are looked up in shared `$batch`es, 20 per batch, instead of one batch per message. **Kept:** the cross-page copy filter in list and search cursors; it also hides a message Graph repeats when new mail shifts its position-based pages (`$skip`). **Decided 2026-10-04:** the summary cache, MCP `list_messages(refresh=false)` and the UI's instant preview are removed (listing is fast enough without them; the Inbox's first 100 messages took about 3 s live). Exports by message id now read every message from the server and fail clearly, writing nothing, when one cannot be read; `save_message_mime` reads the subject from the server. |
-| H15 Export error format | **Done** (2026-10-04) | Every gap in an export or a thread body is one structured `ExportError` (step, status, code, message, request id, likely cause, `retry`, fix), classified in one place (throttled, service or network, access denied, deleted or moved, unexpected) and rendered the same way everywhere: an `[EXPORT ERROR]` block in TXT and `get_thread`, an `export_error` object in JSONL (`attachments_export_error` for a failed listing). It replaces "(Content unavailable: …)", "[Attachment unavailable: …]", "[Attachments could not be listed: …]" and `body_unavailable`. The export header and result carry one "Export errors: …" summary line (`error_summary`, with `export_errors` per step); the UI shows it after the download. The remote layer reports failures as structured `Failure`s instead of strings. `get_thread` returns the same `ExportError` on each affected message and a `body_errors` count, including errors a retry cannot fix (403, 404), so callers never infer errors from the text. A plain-marker variant and a `continue_on_error` switch were tried and dropped (2026-10-04): hardly simpler, and exports always continue. |
-| H16 Downloads: throttling and dropped connections | **Done** (2026-10-04) | Found in the 2026-10-04 code review. Attachment and `.eml` downloads had none of the handling other reads have: a 429/503 failed at once instead of waiting for `Retry-After`, and a timeout or dropped connection escaped as a raw HTTP client error. The export only expects connector errors, so **one stalled attachment failed the whole export**. Example: a 300-attachment export where attachment 212's connection times out: before, no file and "ReadTimeout" (the UI showed HTTP 500); now the download is retried up to 4 times from scratch, and if it still fails the export completes with `[EXPORT ERROR] The attachment report.pdf could not be downloaded.` (Likely: Microsoft service or network problem). The same applied to `download_attachment`, `save_message_mime` and the reply check's image comparison (W6). Also: `save_message_mime` now reads only the message summary (not the body and attachment list) to name the file. |
-| H17 Mutations hide work already done when a later request fails | **Pending — decided** (2026-10-04) | **What happens:** a change to many messages is sent to Outlook in requests of 20 messages. If request 2 or later gets a clear error, the whole tool call fails, although request 1 was applied. **Example:** `move_messages` with 45 ids to Archive → requests of 20, 20 and 5. Request 1 moves 20 messages. Request 2 is answered HTTP 429 (Outlook throttling; writes are never retried, by design). The tool returns only "Outlook is throttling requests…": the agent tells the user "the move failed", but 20 messages are already in Archive and 25 are where they were. Same when the read-back after an unclear answer fails. **Impact:** the mailbox is fine and repeating is safe (the 20 moved come back `unchanged`), but the report is wrong, and an agent may say nothing changed. **Proposed fix (small):** catch a clear error per request: its messages get `failed` with the error, the messages of the requests not yet sent get `failed` with "not sent: an earlier request failed (throttled)", nothing more is sent, and the call returns its per-message results as usual; a failed read-back gives `unknown`. In the example: 20 `done`, 25 `failed`, `counts = {done: 20, failed: 25}`. **Decided 2026-10-04 (owner):** continue on error rather than stop. A flag `continue_on_error`, **on by default**, on `set_read_state`, `set_flag`, `move_messages` and `delete_messages`: when a request fails clearly, its messages are `failed` with the error and the remaining requests are still sent; with `continue_on_error=false`, nothing more is sent and the rest are `failed` as not sent. Either way the call returns its per-message results and `counts`. A failed read-back after an unclear answer gives `unknown`. In the example (45 ids, request 2 throttled): 25 `done`, 20 `failed` by default. Not built yet. |
-| H18 Reply check that cannot run leaves an unmentioned draft | **Pending — fix proposed** | **What happens:** a reply (sent with `send_email`, or saved with `create_draft`) is first saved as a draft, then read back and compared with the original (W6). If that read-back fails (throttling, network), the tool returns that error and does not say a draft was saved. **Example:** the user confirms a reply while a large export runs in parallel; the draft is saved, Graph answers 429 to the check's reads even after its retries, and `send_email` fails with "…throttling requests…". Nothing was sent (correct), but Drafts now holds "RE: Budget"; if the agent simply tries again, a second draft is saved and sent, and the first stays behind. With `create_draft`, a retry leaves two identical drafts. **How likely:** rare. The check takes a few reads within 1–3 seconds, each retried up to 4 times (downloads too, since H16); it needs a throttled mailbox (a parallel export or many parallel tool calls) or a network outage at that moment. In normal use, well under 1 in 100 replies. The cost is an extra draft, nothing sent wrongly. **Possible fixes:** (a) recommended, small: name the draft in the error: "Not sent: the reply draft could not be checked (throttled). It is in Drafts (id …); send again in a few minutes, or review and send it from Outlook." For `create_draft`, return the draft with `history_intact: null` and `history_problem: "could not be checked: throttled"` instead of an error, so the agent does not save it again. (b) Delete the unchecked draft: one more write, which can itself fail; not worth it. (c) Reuse the left-over draft on the next attempt: needs matching drafts to proposals; too complex for the gain. |
-| H19 Inline images can drop out of an export silently | **Pending — fix proposed** | **What happens:** with `include_attachments`, an inline image is exported only when the body references it (`cid:`), so signature logos are skipped. Deciding that takes two extra reads per message: its HTML body and each image's content id. When either read fails (throttled after retries, service error), the code takes it as "not referenced" and skips the image, with no `[EXPORT ERROR]` and nothing in `error_summary`, although H15 promises every gap is marked. **Example:** a thread where Ana pasted a chart into her message (`<img src="cid:image001.png@01DC…">`). The content-id lookup for `image001.png` is throttled; the export finishes with "no errors", Ana's message is there, and the chart is simply missing from the ZIP. **Proposed fix (small):** when in doubt, include: if the HTML body or an image's content id could not be read, export that message's inline images anyway (the worst case is an extra logo file, and identical files are stored once). The image is never silently lost and no new error kind is needed. |
-| H20 Messages selected by id in a hidden folder vanish without a count | **Pending — fix proposed** | **What happens:** an export by message id applies the scope rules at the end; items in hidden folders (e.g. Teams meeting records) or Sync Issues are out of reach (H8, H9) and are dropped, but that last step's counts are thrown away, so `messages_excluded` does not show them. **Example:** an agent holds the id of a Teams meeting record (from another tool or an old result) and calls `export_messages(message_ids=[budget_mail, meeting_record])`. The file holds one message and nothing says why the second is missing. With only `meeting_record`: "Nothing to export: the selection holds no messages", without the usual "(1 in hidden folders, Sync Issues, or outside the mail folders (out of reach) left out)". **Impact:** small; the connector never hands out such ids itself. **Proposed fix (one line):** add the final merge's counts to `messages_excluded`, so the result reads `messages_excluded: {hidden: 1}` and the empty case names the reason. **Alternative (second review, 2026-10-04; owner's call):** take messages selected by id as given, like `get_message` does (they are already exempt from the Deleted/Junk rule): drop the hidden-folder filter for them instead of counting it. H20 then disappears and `_select` gets simpler; the cost is that an id from a hidden folder, which this connector never hands out, would be exported. |
-| H21 Marking a long conversation read fails with "At most 100 messages" | **Pending — fix proposed** | **What happens:** `set_read_state(conversation_ids=[…])` expands each conversation into all its messages in scope (every copy), then applies the 100-message limit meant for explicit ids. A conversation longer than 1,000 messages is also cut at 1,000 without saying so. **Example:** "mark the nightly build reports as read": one conversation with 130 reports (automated mail with the same subject shares a conversation). The tool refuses with "At most 100 messages per call", though the agent named one conversation; it cannot split a conversation, so it is stuck (it would have to list the 130 ids and send them in two calls). **Proposed fix:** the 100 limit counts explicit `message_ids` only; messages from conversations are added up to the 1,000 a conversation listing returns, still sent 20 per request (H17's handling applies), and the result notes a truncated conversation ("conversation has more than 1,000 messages; the newest… were not changed"). Messages already in the wanted state cost no request (`unchanged`), so a long, mostly read thread is cheap. To keep the result small for a big conversation, the per-message list could be limited to messages that were not `done`/`unchanged`, with `counts` for the rest. |
-| H22 A filter flag alone exports the whole mailbox | **Pending — fix proposed** | Second review, 2026-10-04 (confirmed on the fake). `ExportRequest.by_range` treats `include_meeting_mail=false` or `include_sent_items=false` on its own as "export a range"; with no dates and no folder that range is the entire mailbox. **Example:** `export_messages(conversation_ids=[budget_thread], include_meeting_mail=false)` ("this thread without the invites"): on this mailbox it is refused with "The selection holds more than 2,000 messages… Narrow the date range" although no range was given; a smaller mailbox would be exported whole (the fake: 1 message without the flag, 4 with it). The meeting filter is not even applied to the thread. **Fix:** only `since`, `until` and `folder` start a range; the two flags narrow what is selected, never messages selected by id. |
-| H23 Search crashes on a date without a time zone | **Pending — fix proposed** | Second review (confirmed). The web API passes `since`/`until` through as parsed; a date without a time zone is then compared with Graph's dates, which carry one. **Example:** `/api/search?q=budget&since=2026-09-01T00:00` → `TypeError` (HTTP 500). The UI always sends UTC and MCP converts (`_utc`), so neither hits it today. **Fix:** convert dates to UTC once, in the service, and remove the two separate conversions in the surfaces (MCP `_utc`, web `_when`). |
-| H24 The folder cache's 10 minutes counted from the wrong moment | **Pending — fix proposed** | Second review. A process that loads a cache saved 9 minutes ago starts the 10-minute clock at load time, so it uses that list for up to about 20 minutes. **Example:** a UI session opened 9 minutes after an MCP call keeps the MCP call's folder list until minute 19. **Fix (one line):** count the age from when the cache was saved. |
-| H25 The UI reader silently cuts long messages | **Pending — fix proposed** | Second review. The reader asks for at most 200,000 characters and ignores `next_offset`. **Example:** a long plain-text log digest stops mid-sentence with no hint that more exists. **Fix:** show "truncated" with a way to load the rest. |
-| H26 A too-large attachment is reported as an "unexpected error" | **Pending — fix proposed** | Second review. The 150 MB download limit raises an error without Microsoft's answer, which the export classifies as unexpected. **Example:** a 180 MB video in an export gets `[EXPORT ERROR] … Likely: unexpected error · Fix: report it with the request id`. **Fix:** classify the limit: "larger than 150 MB; download it from Outlook". |
-| H27 Per-folder listings report no excluded counts | **Pending — fix proposed** | Second review. In a per-folder listing (H7) Junk and Deleted Items are never read, so `coverage.excluded` has no `deleted_or_junk` count. **Example:** the UI's "N in Deleted / Junk not shown" line disappears in the All mail view, and an agent reading `excluded` sees nothing left out. **Fix:** add the left-out folders to the same count batch (no extra request) and report their counts for the window. |
-| H28 `server_total` counts meeting mail the listing hides | **Pending — fix proposed** | First review, 2026-10-04. With `include_meeting_mail=false`, `include_total` still counts invitations and RSVPs. **Example:** "server_total: 120" while paging returns only 95 messages. **Fix:** say so in the note; counting without meeting mail would need a type filter in the count query, not yet tried. **Probed 2026-10-04 (read-only): a count cannot leave out meeting mail.** On `/me/mailFolders/inbox/messages?$count=true`, `$filter=not isof('microsoft.graph.eventMessage')` → 400 `ErrorInvalidUrlQueryFilter`, `meetingMessageType eq 'none'` → 400 (no such property on `message`), the same with a 30-day `receivedDateTime` window added. Plain counts: 126, 122 in the window; the listing of that window shows 12 meeting messages (122 − 12 = 110 a filtered count would have to give). So the fix is the note (research §3.1). |
-| H29 "Not on the server (deleted on the server)" | **Pending — fix proposed** | First review. The NotFound message repeats itself and says "deleted" even when the id is simply wrong. **Example:** `get_message("typo")` → "Message typo is not on the server (deleted on the server)." **Fix:** "Message … was not found: deleted or moved out of reach, or a wrong id."; remove the `GONE` constant (another `GONE` with a different meaning lives in failures.py). |
-| H30 Per-folder listing reads the busiest folder in rounds | **Pending — fix proposed** | Second review (measured on the fake: a 300-message Inbox, four small folders, Junk dominant). The first read of each folder is small and doubles as the merge uses it, so the busiest folder is read 2–3 times in sequence: page size 25 → Inbox reads 10, 20; 100 → 20, 40, 80; 200 (exports) → 40, 80, 160. **Fix:** size each folder's first read by its share of the window's count (already fetched); better, have the same count batch return each folder's newest date (`$orderby=receivedDateTime desc&$select=receivedDateTime`) and skip folders with nothing new enough. Usually one round per page. **Probed 2026-10-04 (read-only): yes, one batch gives each folder's count and newest date.** One `$batch` over the 16 in-scope folders, each `…/messages?$count=true&$top=1&$select=receivedDateTime&$orderby=receivedDateTime desc&$filter=<7-day window>` with `ConsistencyLevel: eventual`: 16 of 16 answered 200 in 0.9 s, each with `@odata.count`, and the 5 folders with mail also returned their newest `receivedDateTime`. The count batch the listing already sends can carry the newest date at no extra request (research §3.1). The live H7 check saw 15–18 requests per page without a window. |
-| H31 The count batch is sent twice with `include_total` | **Pending — fix proposed** | Second review. A per-folder first page with `include_total` counts the in-scope folders to pick them, then `_count` sends the same batch again. **Fix:** reuse the first answer. |
-| H32 Conversations are listed one at a time | **Pending — fix proposed** | Second review. Exports (`_select`) and `set_read_state(conversation_ids)` list each conversation in sequence. **Example:** selecting 30 threads in the UI and exporting them = 30 listings back to back. **Fix:** run them in parallel (the transport caps it at 4) or in one `$batch`. |
-| H33 `$batch` items are retried only on 429 | **Pending — fix proposed** | Second review. A 503 or 504 inside a batch becomes an `[EXPORT ERROR]` at once, while the same answer to a single request is retried after `Retry-After`. **Fix:** retry batch items on the same statuses as single requests (429, 502, 503, 504). |
-| H34 Work done twice inside one call | **Pending — fix proposed** | Second review, with the owner's rule "validate once, at the entry point; callees trust it" (also in AGENTS.md, and stated in the docstrings since 2026-10-04). **(a)** One `list_messages` call fetches the folder map 6–7 times, computes the folder categories 3 times and runs `reach()` twice; `Threads.messages`, `conversation_sizes` and mutations repeat it. Fix: work out the scope once per call and pass it down. **(b)** `set_read_state(conversation_ids)` lists the conversation (folder and read state included), then reads every message again (`get_summaries`). Fix: pass the listed summaries through. **(c)** `create_draft` for a reply reads the draft fully to set `verified`, then the reply check reads it again. Fix: take `verified` from the check. **(d)** The export runs threads and the range through `finish` (filtered, labelled, merged), then runs everything through `finish` again. Fix: only merge across sources and label the messages selected by id. **(e)** `send_email` for a reply reads the original in `propose()`, then twice more in the reply check. Fix: read it once per call and pass it down. **(f)** `save_message_mime` reads the summary for the subject, then downloads the `.eml`, so it checks twice that the message exists. Fix: download first, take the subject from the `.eml` headers, then rename. |
-| H35 Limits validated twice, sometimes differently | **Pending — fix proposed** | Second review. `export_messages` declares `limit` 1–2,000 and `ExportRequest` validates the same range; `get_message` and `get_thread` require `max_chars` ≥ 1,000 in MCP but ≥ 1 in the service; `list_messages` and `search` check `limit` in both. **Fix:** the service validates (the web routes call it too); the MCP signatures keep only descriptions, and the service's error states the bounds. |
-| H36 Counts stored next to the list they count | **Pending — fix proposed** | Second review. `ExportArtifact.export_errors["fetching message bodies"]` always equals `len(unavailable_message_ids)`, and `error_summary` repeats both as text; `Thread.body_errors` is the number of messages carrying `export_error`; `MutationResult.counts` is a tally of `results`. **Fix:** drop the duplicates; keep `MutationResult.counts`, which saves an agent tallying up to 100 results. |
-| H37 Duplicated logic | **Pending — fix proposed** | Second review. **(a)** The message's date (`received_at or sent_at`) is computed in 6 places with different defaults (`oldest_first`, `_stamp`, `_within`, `_day`, twice in the formatter): one `MessageSummary.when`. **(b)** Failure details (status, code, message, request id) are formatted 3 ways (`describe_failure`, `Failure.describe`, `failures.describe`), and `ows.item_error` re-implements `shorten()` with its own `MAX_ERROR_TEXT`. **(c)** `FetchedSummaries.failed` is text while `FetchedMessages.failed` is a `Failure`, and their Graph loops are near-identical: one shape, one helper. **(d)** `Transport.request` and `Transport.download` duplicate the sign-in renewal and retry logic: one helper. **(e)** A Graph continuation link is checked by `Graph._absolute` and again by the transport's host allowlist: the allowlist is enough. **(f)** Addresses are de-duplicated twice in `_reply_recipients` (`_unique(_addresses(…))`; `_addresses` already does it). **(g)** The UI port 8765 and the 30-minute idle timeout are defined in `__main__.py` and in `web/web_main.py`. **(h)** The fake mailbox re-implements `remote/ids.py`. **Probed 2026-10-04 (read-only, for H19 too):** `GET /me/messages/{id}/attachments?$select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId` → 200, and `contentId` came back on the inline file attachment (1 of 1, one message from the last 30 days). The attachment listing gives every image's content id in one request, so `attachment_content_ids` (one lookup per inline image) is unnecessary: **(i)** list attachments with the cast and drop the separate lookup, which also removes one of H19's two failure points (research §3.5). |
-| H38 Dead code | **Pending — fix proposed** | Second review (the dead-code scan found nothing else; every web route, UI element, CSS class and port method is used). `Attachment.content_id` is never set (content ids come from `attachment_content_ids`); `ExclusionReason` appears only in comments (use it as the key type or drop it); `raise_for_failures(allow=…)` and `prefer=` on `Graph.page`/`Graph.collect` are never passed; the export's `html.get(id) or bodies.get(id)` fallback can never yield HTML (bodies are fetched as text), so the fallback and `_download`'s `bodies` parameter can go; `__main__.py`'s comment "the write profile is optional until send/mutations exist" is stale. Partial overlap, kept: `list_attachments` repeats `get_message`'s attachments except for messages with only inline images. Kept on purpose (AGENTS.md: account-ownership safeguards): the store's owner check and `Writes.check_account()`, although the store path and the token provider already guarantee them. |
+## W7 — HTML for new messages
 
-## Send
+**Status:** Decided, not built.
 
-Draft first: an agent prepares the message and you send it from Outlook. It proves the OWS write path with nothing leaving the mailbox, and needs no confirmation protocol.
+**Current state:** replies already use HTML so Exchange can preserve quoted formatting and inline images. New messages and new-message drafts still use the older plain-text body path.
 
-| Item | Status | Scope |
-|---|---|---|
-| W0 Create draft | **Done** (live 2026-10-03) | `create_draft` via OWS `CreateItem` (`SaveOnly`) into Drafts, optionally as a reply (`ReplyToItem`/`ReplyAllToItem`, Outlook's reply defaults). Read back through Graph; never sends. Needs the write sign-in. |
-| W1 Send | **Done** (live 2026-10-03) | `propose_email` → user confirms → `send_email(message, user_confirmation)`. The code hashes the account and every material field and is recomputed at send time; the write sign-in must be the bound account. `CreateItem` `SendAndSaveCopy`, plain text, sent once; an unclear answer is checked against Sent Items and otherwise reported as "unknown". |
-| W6 Reply history fidelity | **Done** (live 2026-10-04; owner checked the replies in Outlook, Gmail and Hotmail) | Found 2026-10-03: a reply is sent as plain text, so Exchange converts the quoted original to text too: formatting is lost and inline images (signatures) become attachments with `[cid:…]` left in the text. On a real thread this would visibly break the conversation for every recipient. **Decided:** the history must arrive exactly as received (the client's own quote header aside). (1) Replies send our plain text as escaped HTML (`BodyType: HTML`), so Exchange quotes the original HTML and carries its inline images. (2) Every reply goes through a draft: create it (`SaveOnly`), read it back through Graph, require the original's HTML body (whitespace-normalised) inside the quoted part and every inline image the original references attached with the same bytes; only then send that same draft (OWS `SendItem`). If the check fails, nothing is sent and the draft stays in Drafts with the difference reported. `create_draft` replies run the same check. Live checks needed: the HTML reply body, `SendItem` (unproven), and a long real thread with formatting and images. Fallback if `SendItem` fails: send a fresh `CreateItem` copy of the checked reply, only with the owner's consent. **Done 2026-10-04:** `SendItem` is not supported over OWS (`OwaOperationNotSupportedException`, nothing sent), but Outlook Web's own way of sending a draft works: `UpdateItem` with `MessageDisposition: SendAndSaveCopy` sends that exact draft (no fallback needed). Replies now go: HTML reply draft → check (the original's full text inside the draft's text, whitespace-normalised; every inline image of the original present with the same bytes, SHA-256; no image left as `[cid:…]` text in the HTML; and, after the Codex review, the quoted formatting: at least as many lists, list items, tables, rows, cells, emphasis, links, images and `cid:` references as the original, since the raw HTML cannot be compared) → `UpdateItem` send of that draft. The reply's own text keeps repeated spaces and tabs (non-breaking spaces). A failed check sends nothing and leaves the draft in Drafts. `create_draft` replies report the same check (`history_intact`, `history_problem`). Live: two self-thread originals (lists, table, bold, a signature image) kept their formatting and image byte-for-byte; replies sent to the owner's work, Gmail and Hotmail addresses, and the owner checked them in all three. The raw HTML is not compared: Exchange re-wraps it when quoting; its structure is (both test threads kept every element, live). |
-| W7 HTML for new messages | **Pending — decided** (2026-10-04) | New messages stay plain text for now (the proven body). Later: send them as HTML too (same escaping as W6). Signatures are W8. **Decided 2026-10-04:** yes, new messages go as HTML too (same escaping as replies); prerequisite for W8. |
-| W8 Signatures | **Pending — decided** (2026-10-04) | Outlook Web does not add the user's signature to mail sent through OWS, so the connector will. **Decided:** the user imports one signature, which is then added to every outgoing message (drafts, sends, replies) while it is active; active by default once imported. Three MCP tools: `import_signature` (an HTML file, the way Outlook keeps signatures: `<name>.htm` plus a `<name>_files/` folder of images), `delete_signature`, and `set_signature_active(true\|false)`. Kept in the data directory as files (**decided 2026-10-04**), never sent anywhere but in the user's own mail: per account, `<data directory>/accounts/<account>/signature/`, holding the imported `<name>.htm` and its `<name>_files/` images as they were, plus the on/off state; `delete_signature` removes the folder. Images go out as inline attachments referenced by `cid:`. Depends on HTML bodies (W6 for replies, W7 for new messages). **Placement, decided 2026-10-04: exactly as Outlook does.** A new message: the user's text, then the signature at the end. A reply or reply-all: the user's text, then the signature, then Outlook's quote header and the quoted history, untouched (W6's check still applies to the history). Example: replying "Thanks, will do." to a thread gives `Thanks, will do.` · signature (name, title, logo) · `From: Ana… Sent: … Subject: RE: Budget` · Ana's message as received. One signature serves new messages and replies (Outlook allows two; one is enough here). **Decided 2026-10-04:** MCP only for now (no UI). The MCP instructions tell the agent to let the user know they can add a signature and where to find it (classic Outlook keeps them in `%APPDATA%\Microsoft\Signatures`: a `.htm`, with `.rtf`/`.txt` variants and an optional `<name>_files/` image folder). The owner's signature for the build is in the repo's `tmp/` folder (git-ignored, never committed); it has `.htm`, `.rtf` and `.txt` and no `_files/` folder. |
-| W9 Inbox rules (CRUD) | **Pending — decided** (2026-10-04) | List, create, change, enable or disable, and delete the mailbox's inbox rules (e.g. "move mail from X to Junk", "delete newsletters from Y"). **Route:** not Graph (the read sign-in has no `MailboxSettings` scope); Outlook Web, whose write token has `MailboxSettings.ReadWrite`. OWS knows `GetInboxRule`, but its request format is unknown (research §4.3). **Steps:** (1) capture what Outlook Web sends on its rules page (Settings → Mail → Rules) for reading, creating, editing and deleting a rule; (2) prove reading live, then each write on a throwaway test rule; (3) MCP tools `list_rules`, `create_rule`, `update_rule` (including enable/disable) and `delete_rule`, the conditions and actions limited to what was proven. **Safeguards:** a rule keeps acting on all future mail, so every write is proposed first and needs the user's confirmation code (like `send_email`), is sent once and never retried, and is read back; a rule the connector cannot fully represent is listed read-only and never rewritten. UI actions are optional, later. **2026-10-04:** step 1 done: the owner captured Outlook on the web creating, editing, disabling and deleting a throwaway rule, and reordering (research §4.4). Found: the rule actions (`GetInboxRule`, `NewInboxRule`, `SetInboxRule`, `DisableInboxRule`, `RemoveInboxRule`, `SetInboxAndSweepRules`) use a different envelope from item actions (no `Body` wrapper; success is `WasSuccessful`/`ErrorCode`), so `Ows.call` needs a second call style; edits are partial (fields left out are kept); order and enabled state are set together for all rules by `SetInboxAndSweepRules`; a second capture (same day) showed `EnableInboxRule` (same shape as Disable), that a field sent as `null` clears that condition, that renaming keeps the rule id, and that rules return their target folder by name rather than by id. The owner's 8 rules use only Move to folder, Sent to, Subject contains, From and Subject-or-body contains, which bounds the first version's conditions and actions. **Next:** step 2, replay with the connector: read, then create, edit (including clearing a condition), enable/disable, reorder and delete a throwaway rule; check whether a rule's request folder id (`AQMk…`) equals the Graph folder id from `list_folders`. **2026-10-04, step 2 done (live replay, one throwaway rule, no other rule touched; research §4.4):** `Ows.call_request` (the bare-request style, same URL and headers as `Ows.call`, sent once) proved `GetInboxRule` (8 rules, 90 fields; `TimeZoneContext` not needed), `NewInboxRule`, `SetInboxRule` (clearing a condition with `null`; rename keeps the id; left-out fields kept), `DisableInboxRule`/`EnableInboxRule`, `SetInboxAndSweepRules` (all rules in the new order with their `IsEnabled`: moved last and back first, every other rule kept its place and state) and `RemoveInboxRule`; the rule list ended as it started. **Folder ids:** `MoveToFolder.RawIdentity` accepts the Graph folder id from `list_folders` as is (here all folder ids are `AQMk…` without `-`/`_`, so the OWS form is identical). Nothing failed. **What the MCP tools can support** for the owner's conditions and actions (Move to folder, Sent to, From, Subject contains, Subject-or-body contains, Stop processing more rules): `list_rules` (GetInboxRule; the target folder comes back by name, `…:\<name>`, matched against `list_folders`, ambiguous when two folders share a name), `create_rule` (NewInboxRule; a new rule goes first), `update_rule` (SetInboxRule; partial, `null` clears a condition, rename keeps the id), enable/disable (Enable/DisableInboxRule), `reorder_rules` (SetInboxAndSweepRules, every rule each time with its current state) and `delete_rule` (RemoveInboxRule). A rule using any other of the 90 fields stays read-only. **Next:** step 3, the tools, not built yet. |
-| V2 Live write check | **Done** (2026-10-03) | Real mailbox, self-sends only. A new-message draft (read back, `verified`); a confirmed send (Sent Items and Inbox); a confirmed reply to "A TEST EMAIL HALPRIO190" (threaded, quoted original); a changed body with the old code refused, nothing sent; a reply draft with default recipients to mail you sent yourself (after the fix: addressed to you). Found: H12, H13, and W6 (replies flatten the quoted history). |
+**Next:** render the user's new-message text as escaped HTML using the same conventions as replies. Use it for both drafts and sends. This is the prerequisite for W8.
 
-## Mutations
+## W8 — Signatures
 
-Ordered by risk: reversible state changes first, then moves and deletes.
+**Status:** Decided, not built.
 
-| Item | Status | Scope |
-|---|---|---|
-| W4 Read/unread | **Done** (live 2026-10-03) | `set_read_state`: per message, and per conversation (every message in scope, all copies) with `UpdateItem`; read receipts suppressed |
-| W5 Flag | **Done** (live 2026-10-03) | `set_flag`: follow-up flag on / off, per message. |
-| W2 Move to folder | **Done** (live 2026-10-03) | `move_messages`: explicit ids + a target resolved like `list_folders`; well-known targets by alias and other folders by path (folder-id target proven live), ids unchanged by moves. Deleted Items refused (use delete). Per-message results |
-| V3 Live mutation check | **Done** (2026-10-03) | All passed on two test messages: read/unread with `unchanged` on repeat; conversation read state (5 copies across Inbox, Sent Items and Drafts, nothing from Deleted Items or Junk); flag and unflag; moves to Archive and to "Analytics Discussions" by path and back, same id; the move to Deleted Items refused; delete, then delete again `unchanged`; restore. A malformed id gives `failed` (Graph 400) without failing the call; `not_found` for a well-formed but gone id was not covered live (fake-tested). Found: H14. |
-| W3 Delete (soft) | **Done** (live 2026-10-03) | `delete_messages`: `DeleteItem` `MoveToDeletedItems`; messages already in Deleted Items are left alone. Never purge. |
+**Current state:** Outlook Web does not add the user's Outlook signature to mail sent through OWS, so the connector must add it itself. One signature per account is enough for the first version.
 
-## Later and parked
+**Build:**
 
-| Item | Status | Note |
-|---|---|---|
-| E3 Branch-aware threads | **Parked** | Decided 2026-10-02: rely on Exchange's conversations (and `uniqueBody` for quoted history) instead of rebuilding reply trees. Revisit only with a concrete need; it would start with R4. |
-| X1 Shared mailboxes | **Parked** | `Mail.Read.Shared` is granted. Needs a named mailbox and a need. |
-| X2 Online Archive mailbox | **Parked** | Not in Graph, and the account has none. The normal Archive folder is in scope. |
-| X3 OWS reader | **Parked** | Proven (research §4.3). Only needed in the "no Graph" scenario (architecture §6.2). |
-| X4 Substrate search | **Parked** | Works (research §5). Graph `$search` has equal recall. |
-| X5 Local full-text search | **Parked** | Online search was chosen |
-| X6 Attachment text extraction | **Parked** | Agents receive raw files |
-| X7 Resumable export with progress | **Parked** | Review suggestion. Not needed while exports finish in one call with per-item gaps (H1–H3); revisit if a real export still hits limits. |
-| X9 Folder delta | **Parked** | Researched (S2); a full folder refresh takes under a second. |
-| U2 Meeting mail and Outlook-style rows | **Done** (2026-10-04) | Graph marks meeting mail with Exchange's own type, so it is detected reliably, not from subjects. In the newest 600 messages of Inbox, Deleted Items and Sent Items, 210 were meeting traffic (87 invitations, 35 cancellations, 88 replies to invitations). Every listed message now carries `meeting` (kind, start, end, location, out of date) when it is one, at no extra request cost; plain replies to an invitation share its conversation (6 of 51 such conversations held discussion). The UI rows follow Outlook: sender, subject, preview, unread bar, dates, icons, file chips, meeting labels with time and place, Outlook's colors. Not covered: mail from outside Outlook that lacks Exchange's threading headers starts its own thread. `include_meeting_mail=false` (MCP default true; the UI's "Invites / RSVPs" switch starts off) leaves meeting mail out of list, search and range exports, per message: meeting-only conversations disappear, conversations with real replies show through them. |
-| X10 Meeting search | **Later — nice to have** | Decided 2026-10-02: belongs here, not in lrh-teams. Meetings are calendar events in the same Exchange mailbox (Graph `/me/calendarView`, `/me/events`: subject, time, organizer, attendees, agenda, Teams join link). lrh-teams keeps meeting chats, which it already reads; the join link carries the meeting chat id (`19:meeting_…`) so an agent can hand over to lrh-teams without duplicating either side. Not the `TeamsMeetings` folder items (undocumented Teams storage). First step: probe whether the read client's token grants `Calendars.Read`. **Probed 2026-10-04 (read-only): no.** The read token's `scp` has 18 scopes and no `Calendars.*` (`Mail.Read`, `Mail.Read.Shared`, `User.Read*`, `People.Read*`, `Files`/`Sites.ReadWrite.All`, `Presence.Read.All` and others; full list in research §3.1), so `/me/calendarView` was not called. Meeting search needs another sign-in route or client that grants `Calendars.Read` (the write token's Outlook scopes are a candidate, untested). |
-| X11 Categories | **Parked hard** (2026-10-03) | Never used. Writing them was built and removed: adding needs the master category list, which Graph only gives with `MailboxSettings.Read` (not in the read sign-in), and a free-form name creates an uncoloured category. Categories are still read and shown with each message. |
+- MCP tools: `import_signature`, `delete_signature`, `set_signature_active(true|false)`.
+- Import an Outlook-style `.htm` signature and optional `<name>_files/` image folder.
+- Store it per account under the connector data directory; active by default after import.
+- Send signature images as inline attachments referenced by `cid:`.
+- Placement matches Outlook: new message = body then signature; reply = new text, signature, then Outlook's quoted history untouched.
+- MCP only for now; no UI work required.
+
+## W9 — Inbox rules
+
+**Status:** Decided, API proven live; tools not built.
+
+**Current state:** the Outlook Web rule contracts have been captured and replayed successfully through `Ows.call_request`. Reading, creating, editing (including clearing a condition), enabling/disabling, reordering and deleting a throwaway rule all worked live. Graph folder ids are accepted by the write request.
+
+**First-version scope:**
+
+- `list_rules`
+- `create_rule`
+- `update_rule`, including enable/disable
+- `reorder_rules`
+- `delete_rule`
+
+Support only the conditions/actions already proven and used by the mailbox: From, Sent to, Subject contains, Subject-or-body contains, Move to folder, and Stop processing more rules. Unsupported rules are listed read-only and are never rewritten.
+
+**Safeguard:** every rule write is proposed first, requires user confirmation, is sent once, and is read back. Rules persist and affect future mail, so writes must not be retried automatically.
+
+**Next:** add the service mapping and MCP tools on top of the already-proven OWS calls.
+
+# Correctness and reliability
+
+## H17 — Partial mutation failures are reported incorrectly
+
+**Status:** Decided, not built.
+
+**Problem:** mutations are sent in chunks. If a later chunk fails, earlier chunks may already have changed the mailbox while the tool call raises only the later error.
+
+**Decision:** add `continue_on_error` to `set_read_state`, `set_flag`, `move_messages` and `delete_messages`, defaulting to `true`.
+
+- A clearly failed chunk returns `failed` results for its messages.
+- By default, later chunks are still attempted.
+- With `continue_on_error=false`, later chunks are not sent and are returned as `failed: not sent`.
+- A failed read-back after an unclear write outcome returns `unknown`.
+- The call always returns per-message results and `counts`, so already-completed work is visible.
+
+## H18 — A failed reply-history check can leave an unmentioned draft
+
+**Status:** Pending.
+
+**Problem:** a reply is saved as a draft before its quoted history is verified. If the verification reads fail because of throttling or network trouble, nothing is sent, but the saved draft is left behind while the tool returns only the verification error. Retrying can create duplicate drafts.
+
+**Next:**
+
+- `send_email`: report that the message was **not sent**, name the saved draft/id, and tell the caller to retry later or review it in Outlook.
+- `create_draft`: return the created draft instead of failing, with `history_intact: null` and a `history_problem` explaining that verification could not run.
+
+Do not add automatic draft deletion or draft reuse unless a real need appears.
+
+## H19 — Inline images can disappear from exports without an error
+
+**Status:** Pending.
+
+**Problem:** inline images are exported only when the HTML body references their `cid:`. If the body or content-id lookup fails, an image can currently be treated as unreferenced and silently skipped.
+
+**Current evidence:** Graph can return each file attachment's `contentId` directly in the attachment-list request, so the separate per-inline-image content-id lookup is unnecessary.
+
+**Next:** return `contentId` from the normal attachment listing, remove the extra lookup, and use a fail-open rule: if the connector cannot determine whether an inline image is referenced, include it rather than silently dropping it.
+
+## H20 — Explicit message ids can be filtered out during export
+
+**Status:** Decision needed.
+
+**Problem:** `export_messages(message_ids=[...])` reads the requested messages, then applies reach/scope filtering at the end. An explicitly supplied id from a hidden/out-of-reach folder can therefore disappear from the export without the selection behaving like `get_message(id)`.
+
+**Recommended decision:** treat explicit message ids as authoritative, like `get_message` does. Do not apply the hidden-folder filter to that selection source; only merge/label it with the other selected messages.
+
+**Alternative:** keep the filter but preserve and report its exclusion counts. This is stricter, but adds complexity for ids the connector itself never normally exposes.
+
+## H21 — Long conversations cannot be marked read/unread cleanly
+
+**Status:** Pending.
+
+**Problem:** `set_read_state(conversation_ids=[...])` expands a conversation to messages and then applies the 100-message limit intended for explicit `message_ids`. A long conversation can therefore be rejected even though the caller supplied only one conversation id. Conversations beyond the 1,000-message listing cap also need an explicit truncation note.
+
+**Next:** apply the 100 limit only to explicit `message_ids`. Expand conversation ids up to the existing conversation-listing limit, send changes in normal 20-item write chunks, and report when a conversation was truncated. Keep the response compact for very large conversations by relying on `counts` for ordinary `done`/`unchanged` results if needed.
+
+## H22 — A filter flag alone can turn an export into a whole-mailbox range
+
+**Status:** Pending.
+
+**Problem:** `include_meeting_mail=false` or `include_sent_items=false` can currently make `ExportRequest` think a range was requested even when the caller selected only conversations/messages. That can unexpectedly select the whole mailbox.
+
+**Next:** only `since`, `until` and `folder` create a range selection. The include flags only narrow whatever selection already exists.
+
+## H23 — Search dates without a timezone can crash
+
+**Status:** Pending.
+
+**Problem:** the web API can pass a naive `since`/`until` datetime into service code, which is then compared with timezone-aware Graph dates.
+
+**Next:** normalize dates to UTC once at the service entry point and remove duplicate surface-specific normalization.
+
+## H25 — The UI silently truncates very long message bodies
+
+**Status:** Pending.
+
+**Problem:** the UI reader asks for a bounded body and ignores `next_offset`, so a message over the current limit can stop mid-body without telling the user.
+
+**Next:** expose the truncation state in the UI and provide a way to load the continuation.
+
+## H26 — Oversized attachments are classified as unexpected failures
+
+**Status:** Pending.
+
+**Problem:** the connector's 150 MB download guard is a known local limit, but exports currently classify it like an unexpected error.
+
+**Next:** classify it explicitly: the attachment is larger than the connector's 150 MB limit and should be downloaded from Outlook.
+
+## H27 — Per-folder listing does not report excluded-folder counts
+
+**Status:** Pending.
+
+**Problem:** when the mailbox uses the per-folder listing strategy, Junk and Deleted Items are never read. That is efficient, but `coverage.excluded` therefore lacks the `deleted_or_junk` count even though those messages are outside the result.
+
+**Next:** include the left-out folders in the existing count batch and report their counts for the requested window. No extra network round trip should be necessary.
+
+## H28 — `server_total` includes meeting mail that the listing may hide
+
+**Status:** Pending.
+
+**Problem:** with `include_meeting_mail=false`, `server_total` still includes invitations, cancellations and RSVPs, so the total can be larger than the messages the listing can return.
+
+**Constraint:** Graph's folder count endpoint cannot filter out meeting-message types with the available query shapes.
+
+**Next:** make the coverage note explicit that `server_total` includes meeting mail even when the listing hides it. Do not add a second expensive counting path.
+
+## H29 — NotFound wording assumes deletion
+
+**Status:** Pending.
+
+**Problem:** a bad or inaccessible message id currently produces wording equivalent to "not on the server (deleted on the server)", even though the id may simply be wrong or the item may have moved out of reach.
+
+**Next:** use neutral wording: the message was not found; it may have been deleted, moved out of reach, or the id may be wrong. Remove the mailbox-level `GONE` wording that implies deletion.
+
+## H33 — `$batch` retries fewer transient statuses than single requests
+
+**Status:** Pending.
+
+**Problem:** individual requests retry transient 429/502/503/504 responses, but a failing item inside a Graph `$batch` is retried only for throttling. A 503/504 batch item therefore becomes an export gap immediately even though the equivalent single request would retry.
+
+**Next:** use the same transient status set for batch-item retries as for single requests.
+
+# Performance
+
+## H30 — Per-folder listing reads busy folders in several rounds
+
+**Status:** Pending.
+
+**Problem:** the per-folder merge starts every folder with a small chunk and doubles it as needed. A mailbox dominated by one busy folder can therefore read that folder two or three times sequentially for one page.
+
+**Current evidence:** the count batch can return both each folder's message count and its newest message date in the same request.
+
+**Next:** use the counts to size each folder's first read according to its expected share of the page, and use the newest date when useful to avoid reading folders that cannot contribute to the current merge. Aim for one read per contributing folder in the common case.
+
+## H31 — `include_total` can send the same count batch twice
+
+**Status:** Pending.
+
+**Problem:** the first page of a per-folder listing counts folders to choose/list them, then `include_total` asks `_count` for effectively the same data again.
+
+**Next:** carry the first count result through the call and reuse it for `server_total` and H27's excluded counts.
+
+## H32 — Conversation selections are expanded sequentially
+
+**Status:** Pending.
+
+**Problem:** exports that select many conversations, and conversation-based read-state changes, list each conversation one after another.
+
+**Next:** expand conversations concurrently under the transport's existing four-request mailbox limit, or use a Graph batch where the response shape remains simple.
+
+# Service and code cleanup
+
+## H34 — Work is repeated inside a single call
+
+**Status:** Pending.
+
+**Current duplication worth removing:**
+
+- mailbox scope/folder categories are recomputed several times during one listing or related operation;
+- conversation-based `set_read_state` lists summaries and then fetches them again;
+- reply draft/send verification rereads messages already fetched earlier in the same call;
+- export selections can run already-finished messages through scope/merge work again;
+- `save_message_mime` checks the message before downloading MIME even though the MIME headers can supply the subject.
+
+**Next:** compute/validate once at the public service entry point and pass the resulting scope/data down to helpers that trust it.
+
+## H35 — Limits are validated in more than one layer
+
+**Status:** Pending.
+
+**Problem:** MCP signatures and service methods both enforce several numeric bounds, sometimes with different minimums.
+
+**Next:** make the service authoritative for validation because both MCP and web call it. Surface schemas/descriptions should document limits but not enforce a second, different rule.
+
+## H36 — Derived counts are stored beside the data they count
+
+**Status:** Pending.
+
+**Problem:** several response models store both a list and a count that is always derivable from that list, creating two values that must stay synchronized.
+
+**Next:** remove redundant derived counts where callers can count the data directly. Keep `MutationResult.counts`, because tallying a large per-message mutation result is useful to an agent.
+
+## H37 — Repeated logic still has multiple sources of truth
+
+**Status:** Pending.
+
+**Main cleanup targets:**
+
+- one canonical message timestamp (`received_at` or `sent_at`);
+- one failure/detail formatter and one fetched-failure shape;
+- one shared authentication/retry loop for normal requests and downloads;
+- one authority for URL/host validation;
+- remove duplicate recipient de-duplication;
+- one definition of the UI's default port/idle timeout;
+- use the production id helpers in the fake mailbox;
+- return attachment `contentId` from the normal listing instead of a separate lookup (also simplifies H19).
+
+Recent constructor/protocol cleanup reduced unrelated duplication, but these review targets remain.
+
+## H38 — Small dead-code cleanup
+
+**Status:** Pending, low priority.
+
+**Current state:** the recent constructor cleanup removed some unused test seams, but the review still has a handful of small leftovers to remove or retype after H37 so the same code is not churned twice. Known candidates include unused attachment/content-id representation, an exclusion-reason type that is not actually used as a type, never-used optional parameters on Graph helpers, an impossible HTML fallback in export code, and stale comments.
+
+**Next:** do one dead-code pass after the structural cleanup and delete only what the current test suite proves unused. Keep the account-ownership checks intentionally.
+
+# Later
+
+## X10 — Meeting/calendar search
+
+**Status:** Later; blocked on authentication scope.
+
+**Goal:** search Exchange calendar events (subject, time, organizer, attendees, agenda and Teams join link) and hand a Teams meeting's chat id to `lrh-teams` when useful.
+
+**Current blocker:** the read profile has no `Calendars.*` scope, so Graph `/me/calendarView` is not available through the current read sign-in.
+
+**Next when revisited:** find or prove a sign-in/client route that grants `Calendars.Read`; the existing write token is a candidate to test. Keep calendar/event data in this connector and meeting chat in `lrh-teams`.
