@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1600" viewBox="0 0 2600 1600" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector architecture</title>
-  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses pydantic domain models. The service calls the remote layer and the local SQLite store. The remote layer reads mail through Microsoft Graph with the Outlook Mobile client, and writes through Outlook Web OWS with the One Outlook Web client. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache and a summary cache of listed messages.</desc>
+  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses pydantic domain models. The service calls the remote layer and the local SQLite store. The remote layer reads mail through Microsoft Graph with the Outlook Mobile client, and writes through Outlook Web OWS with the One Outlook Web client. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache and which account owns it.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -71,35 +71,41 @@
   <text class="card-title" x="100" y="483">SERVICE</text>
   <text class="card-subtitle" x="100" y="507"><tspan class="code">service/</tspan> · every domain decision; never sees HTTP, MCP, Graph or OWS JSON</text>
 
-  <rect x="100" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="118" y="580">mailbox.py</text>
-  <text class="detail" x="118" y="615">folders · list · get</text>
-  <text class="detail" x="118" y="643">search, grouped by</text>
-  <text class="detail" x="118" y="671">conversation</text>
+  <rect x="100" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="116" y="580">mailbox.py</text>
+  <text class="detail" x="116" y="615">folders · list · get</text>
+  <text class="detail" x="116" y="643">search, grouped by</text>
+  <text class="detail" x="116" y="671">conversation</text>
 
-  <rect x="421" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="439" y="580">threads.py</text>
-  <text class="detail" x="439" y="615">conversation fetch</text>
-  <text class="detail" x="439" y="643">local sort, copies once</text>
-  <text class="detail" x="439" y="671">bounded bodies, cursor</text>
+  <rect x="366" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="382" y="580">threads.py</text>
+  <text class="detail" x="382" y="615">conversation fetch</text>
+  <text class="detail" x="382" y="643">local sort, copies once</text>
+  <text class="detail" x="382" y="671">bounded bodies, cursor</text>
 
-  <rect x="742" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="760" y="580">files.py</text>
-  <text class="detail" x="760" y="615">attachment downloads</text>
-  <text class="detail" x="760" y="643">original .eml (MIME)</text>
-  <text class="detail" x="760" y="671">kept for a week</text>
+  <rect x="633" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="649" y="580">files.py</text>
+  <text class="detail" x="649" y="615">attachments, .eml</text>
+  <text class="detail" x="649" y="643">(MIME) to disk,</text>
+  <text class="detail" x="649" y="671">kept for a week</text>
 
-  <rect x="1063" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1081" y="580">writes.py</text>
-  <text class="detail" x="1081" y="615">send safeguards</text>
-  <text class="detail" x="1081" y="643">move · delete · flag</text>
-  <text class="detail" x="1081" y="671">explicit ids only</text>
+  <rect x="899" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="915" y="580">writes.py</text>
+  <text class="detail" x="915" y="615">drafts · send</text>
+  <text class="detail" x="915" y="643">confirmation code</text>
+  <text class="detail" x="915" y="671">reply history check</text>
 
-  <rect x="1384" y="544" width="296" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1402" y="580">export/</text>
-  <text class="detail" x="1402" y="615">orchestrator · formatter</text>
-  <text class="detail" x="1402" y="643">attachments · packaging</text>
-  <text class="detail" x="1402" y="671">one .txt or one .zip</text>
+  <rect x="1166" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="580">mutations.py</text>
+  <text class="detail" x="1182" y="615">read · flag · move</text>
+  <text class="detail" x="1182" y="643">delete (soft)</text>
+  <text class="detail" x="1182" y="671">explicit ids only</text>
+
+  <rect x="1432" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1448" y="580">export/</text>
+  <text class="detail" x="1448" y="615">orchestrator</text>
+  <text class="detail" x="1448" y="643">formatter · packaging</text>
+  <text class="detail" x="1448" y="671">one .txt or one .zip</text>
 
   <rect x="100" y="718" width="1580" height="64" fill="#eff8f6"/>
   <text class="detail" x="118" y="758"><tspan class="code" fill="#086d68">domain/models.py</tspan>: pydantic models, the single schema for service, MCP tools and web API  ·  <tspan class="code" fill="#086d68">domain/errors.py</tspan></text>
@@ -116,11 +122,10 @@
   <text class="card-title" x="100" y="903">LOCAL STORE</text>
   <text class="card-subtitle" x="100" y="927"><tspan class="code">store/</tspan> · SQLite per account (WAL)</text>
   <rect x="100" y="960" width="480" height="210" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="detail" x="120" y="995">Folder cache (TTL)</text>
-  <text class="detail" x="120" y="1025">Summaries of listed messages</text>
-  <text class="detail" x="120" y="1055">(instant preview, refresh=false)</text>
-  <text class="muted" x="120" y="1110">Not stored: bodies, mailbox mirror,</text>
-  <text class="muted" x="120" y="1138">attachment bytes</text>
+  <text class="detail" x="120" y="995">Folder cache (fresh for 10 minutes)</text>
+  <text class="detail" x="120" y="1025">Account binding</text>
+  <text class="muted" x="120" y="1110">Not stored: messages, bodies,</text>
+  <text class="muted" x="120" y="1138">attachments</text>
 
   <!-- Remote layer. -->
   <rect x="640" y="870" width="1060" height="320" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -148,8 +153,8 @@
   <rect x="1180" y="1066" width="500" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1198" y="1078" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1214" y="1097" text-anchor="middle">W</text>
-  <text class="section-title code" x="1240" y="1098">ows.py</text>
-  <text class="detail" x="1200" y="1130">send · read · flag · categories</text>
+  <text class="section-title code" x="1240" y="1098">ows.py · ows_mail.py</text>
+  <text class="detail" x="1200" y="1130">drafts · send · read · flag</text>
   <text class="detail" x="1200" y="1160">move · soft delete · never retried</text>
 
   <!-- Remote to Microsoft. -->
@@ -205,7 +210,7 @@
   <text class="section-title" x="1980" y="919">Microsoft Graph (documented)</text>
   <text class="detail" x="1940" y="954"><tspan class="code">graph.microsoft.com/v1.0</tspan></text>
   <text class="detail" x="1940" y="984"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan></text>
-  <text class="detail" x="1940" y="1014">$search · $batch · attachments · delta</text>
+  <text class="detail" x="1940" y="1014">$search · $batch · $count · attachments</text>
 
   <rect x="1920" y="1050" width="580" height="150" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1938" y="1064" width="32" height="26" rx="5" fill="#b7791f"/>
@@ -213,7 +218,7 @@
   <text class="section-title" x="1980" y="1085">Outlook Web OWS (private)</text>
   <text class="detail" x="1940" y="1120"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text>
   <text class="detail" x="1940" y="1150">CreateItem · UpdateItem · MoveItem</text>
-  <text class="detail" x="1940" y="1180">DeleteItem · ApplyConversationAction</text>
+  <text class="detail" x="1940" y="1180">DeleteItem</text>
 
   <rect x="1920" y="1250" width="580" height="194" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="1940" y="1290">Entra ID</text>
