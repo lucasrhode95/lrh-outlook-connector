@@ -45,6 +45,7 @@ ALLOWED_HOSTS = frozenset({"graph.microsoft.com", "outlook.cloud.microsoft", "ou
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_CONCURRENCY = 4  # Exchange Online: concurrent requests per app per mailbox
+MAX_ATTEMPTS = 4  # per retried request (GETs and read-style POSTs); writes are sent once
 MAX_ERROR_TEXT = 200
 
 _operation: ContextVar[str | None] = ContextVar("operation", default=None)
@@ -66,16 +67,13 @@ class Transport:
         tokens: TokenProvider,
         *,
         client: httpx.AsyncClient | None = None,
-        max_concurrency: int = MAX_CONCURRENCY,
-        max_attempts: int = 4,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._tokens = tokens
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(60.0, connect=15.0), follow_redirects=False
         )
-        self._limit = asyncio.Semaphore(max_concurrency)
-        self._max_attempts = max_attempts
+        self._limit = asyncio.Semaphore(MAX_CONCURRENCY)
         self._sleep = sleep
 
     async def aclose(self) -> None:
@@ -103,7 +101,7 @@ class Transport:
         """
         _check_host(url)
         retry = False if write else (method.upper() == "GET") if retry is None else retry
-        attempts = self._max_attempts if retry else 1
+        attempts = MAX_ATTEMPTS if retry else 1
         renewal: dict[str, Any] | None = None  # after a 401: how to renew the token, for one request
         renewed = False
         attempt = 0
@@ -211,7 +209,7 @@ class Transport:
                             attempt -= 1
                             continue
                         raise self._sign_in_required(profile, response)
-                    if response.status_code in RETRY_STATUSES and attempt < self._max_attempts:
+                    if response.status_code in RETRY_STATUSES and attempt < MAX_ATTEMPTS:
                         await response.aread()
                         wait = _retry_after(response, attempt)
                     elif not response.is_success:
@@ -230,7 +228,7 @@ class Transport:
                             dest.write(chunk)
                         return response.headers.get("content-type"), size
             except httpx.HTTPError as exc:
-                if attempt >= self._max_attempts:
+                if attempt >= MAX_ATTEMPTS:
                     connect = isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout)
                     what = "Could not reach" if connect else "No complete response from"
                     raise _no_response(f"{what} {urlsplit(url).hostname} ({type(exc).__name__}).") from None

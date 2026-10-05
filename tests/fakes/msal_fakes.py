@@ -64,6 +64,9 @@ class Script:
 
 
 class FakeAppFactory:
+    """Stands in for ``msal.PublicClientApplication`` in every test (conftest), so no test can reach
+    Microsoft. A test scripts the sign-in answers with ``use_script``."""
+
     def __init__(self, script: Script) -> None:
         self.script = script
 
@@ -148,3 +151,12 @@ def seed_cache(
             "data": {},
         }
     )
+
+
+FAKE_MSAL = FakeAppFactory(Script())
+
+
+def use_script(script: Script) -> Script:
+    """Answer this test's MSAL calls from ``script`` (the conftest fixture resets it per test)."""
+    FAKE_MSAL.script = script
+    return script
