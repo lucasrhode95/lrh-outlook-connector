@@ -1,14 +1,17 @@
 """Command-line entry point: ``outlook-connector <command>``.
 
-Commands import their dependencies lazily, so that ``mcp`` never loads the web stack.
+Each command has one handler (``set_defaults(handler=...)``); ``main`` parses and calls it.
+Handlers import their dependencies lazily, so that ``mcp`` never loads the web stack.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import json
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
@@ -39,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     auth.add_argument("--force", action="store_true", help="Sign in again even if a silent token works.")
     auth.add_argument("--sign-out", action="store_true", help="Delete the token cache (all profiles).")
     _add_unsecure(auth)
+    auth.set_defaults(handler=_auth)
 
     status = sub.add_parser("status", help="Show the signed-in account and profiles (offline by default).")
     status.add_argument(
@@ -48,9 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--json", action="store_true", help="Machine-readable output.")
     _add_unsecure(status)
+    status.set_defaults(handler=_status)
 
     mcp = sub.add_parser("mcp", help="Run the MCP server over stdio (started by your MCP client).")
     _add_unsecure(mcp)
+    mcp.set_defaults(handler=_mcp)
 
     ui = sub.add_parser("ui", help="Start the local web UI (stops when idle).")
     ui.add_argument(
@@ -59,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     ui.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
     ui.add_argument("--idle-minutes", type=float, default=30, help="Stop after this many idle minutes.")
     _add_unsecure(ui)
+    ui.set_defaults(handler=_ui)
     return parser
 
 
@@ -76,41 +83,67 @@ def main(argv: list[str] | None = None) -> int:
             f"{config.token_cache_path(unsecure=True)}. Do not share it; delete it when done.",
             file=sys.stderr,
         )
-    if args.command == "mcp":
-        from outlook_connector.surfaces import mcp_main
-
-        mcp_main.run(unsecure=args.unsecure)  # stdout belongs to the MCP protocol from here on
-        return EXIT_OK
-    if args.command == "ui":
-        from outlook_connector.surfaces.web import main as web_main
-
-        with contextlib.suppress(KeyboardInterrupt):
-            web_main.run(
-                unsecure=args.unsecure,
-                port=args.port,
-                open_browser=not args.no_browser,
-                idle_minutes=args.idle_minutes,
-            )
-        return EXIT_OK
-    try:
-        from outlook_connector.auth import tokens
-
-        provider = tokens.TokenProvider(unsecure=args.unsecure)
-        if args.command == "auth":
-            return _auth(provider, args)
-        return _status(provider, args)
-    except AuthenticationRequired as exc:
-        print(str(exc), file=sys.stderr)
-        return EXIT_AUTH_REQUIRED
-    except ConnectorError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-    except KeyboardInterrupt:
-        print("Interrupted.", file=sys.stderr)
-        return EXIT_INTERRUPTED
+    return args.handler(args)
 
 
-def _auth(provider: TokenProvider, args: argparse.Namespace) -> int:
+# ---------------------------------------------------------------------- handlers
+
+Handler = Callable[[argparse.Namespace], int]
+
+
+def _exit_codes(handler: Handler) -> Handler:
+    """For the terminal commands (auth, status): print an error and turn it into an exit code.
+    The MCP server and the UI report their own errors (the MCP server's stdout is the protocol)."""
+
+    @functools.wraps(handler)
+    def wrapper(args: argparse.Namespace) -> int:
+        try:
+            return handler(args)
+        except AuthenticationRequired as exc:
+            print(str(exc), file=sys.stderr)
+            return EXIT_AUTH_REQUIRED
+        except ConnectorError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+        except KeyboardInterrupt:
+            print("Interrupted.", file=sys.stderr)
+            return EXIT_INTERRUPTED
+
+    return wrapper
+
+
+def _tokens(args: argparse.Namespace) -> TokenProvider:
+    from outlook_connector.auth.tokens import TokenProvider
+
+    return TokenProvider(unsecure=args.unsecure)
+
+
+def _mcp(args: argparse.Namespace) -> int:
+    """``mcp``: the MCP server over stdio; stdout belongs to the protocol from here on."""
+    from outlook_connector.surfaces.mcp_main import serve_mcp
+
+    serve_mcp(unsecure=args.unsecure)
+    return EXIT_OK
+
+
+def _ui(args: argparse.Namespace) -> int:
+    """``ui``: the local web UI until Ctrl+C or idle."""
+    from outlook_connector.surfaces.web.main import serve_ui
+
+    with contextlib.suppress(KeyboardInterrupt):
+        serve_ui(
+            unsecure=args.unsecure,
+            port=args.port,
+            open_browser=not args.no_browser,
+            idle_minutes=args.idle_minutes,
+        )
+    return EXIT_OK
+
+
+@_exit_codes
+def _auth(args: argparse.Namespace) -> int:
+    """``auth``: device-code sign-in for one profile, or sign out."""
+    provider = _tokens(args)
     if args.sign_out:
         existed = provider.sign_out()
         print("Signed out: token cache deleted." if existed else "No token cache to delete.")
@@ -132,7 +165,10 @@ def _auth(provider: TokenProvider, args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _status(provider: TokenProvider, args: argparse.Namespace) -> int:
+@_exit_codes
+def _status(args: argparse.Namespace) -> int:
+    """``status``: the signed-in account and profiles; ``--check`` also gets each token silently."""
+    provider = _tokens(args)
     status = provider.status()
     checks: dict[str, dict[str, object]] = {}
     if args.check:
