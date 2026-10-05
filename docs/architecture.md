@@ -143,7 +143,7 @@ lrh-outlook-connector/
 - Cross-process lock around cache reads and writes.
 - The account fingerprint (`tid`+`oid`) must match the store owner (§7).
 - The `write` profile is optional. Read-only use works without it, and write tools report "write sign-in required".
-- A guard refuses the recorded `AADSTS65002` client/scope pairs.
+- The recorded `AADSTS65002` client/scope pairs (`config.DENIED_PAIRS`) are never requested; a unit test checks the profiles against them.
 
 ### 5.2 `remote/transport.py`
 
@@ -314,7 +314,7 @@ Re-run the probe suite first ([`research/README.md`](../research/README.md): `au
 | **Full Graph** (a client — first-party or a registered app — can obtain `Mail.ReadWrite` + `Mail.Send`) | Add `remote/graph_mail_writer.py` implementing `MailWriter` (`PATCH /messages/{id}` for read/flag/categories, `POST /messages/{id}/move`, move to `deleteditems`, `POST /me/sendMail`). Wire it in `bootstrap.py`. **Delete** `remote/ows.py`, `ows_mail.py`, `ows_mapping.py` and the OWS id mapping in `ids.py`. | Point the `write` profile at the Graph client/scopes, or merge it into `read` if one client covers both. Remove the One Outlook Web profile. |
 | **Partial change** (e.g. Graph `Mail.ReadWrite` but no `Mail.Send`) | Split `MailWriter` wiring per capability group only if needed: Graph for mutations, OWS for send. Keep the rule "one backend per capability". | `write` profile for Graph, plus a `send` profile for OWS. |
 | **No Graph mail at all** (no client can get `Mail.Read`) | Add `remote/ows_reader.py` implementing `MailReader`. The OWS read actions are already proven (research §4.3). Search moves to Substrate `searchservice/api/v2/query`, which works with client A (research §5). Change detection would need OWS sync actions (to be researched). | The `read` profile points at One Outlook Web (`outlook.office.com/.default`), and a `search` profile is added (`outlook.office.com/search/.default`). |
-| **Different first-party clients work** | No change if the scopes are equivalent. | Change the profile's `client_id` in config. Keep the AADSTS65002 guard list per tenant. |
+| **Different first-party clients work** | No change if the scopes are equivalent. | Change the profile's `client_id` in config. Keep the AADSTS65002 list (`DENIED_PAIRS`) per tenant; its test guards the profiles. |
 
 What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their tests. If a backend change forces an edit there, the port boundary has leaked and should be fixed instead.
 

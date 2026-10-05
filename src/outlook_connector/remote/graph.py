@@ -18,6 +18,7 @@ from outlook_connector.remote.transport import Transport, describe_failure, requ
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 PREFER_IMMUTABLE = 'IdType="ImmutableId"'
 PREFER_TEXT_BODY = 'outlook.body-content-type="text"'
+PROFILE = "read"  # Graph calls use the read sign-in
 BATCH_LIMIT = 20  # Graph JSON batching maximum per request
 BATCH_CONCURRENCY = 2  # batches in flight; each sub-request counts against the mailbox's 4 concurrent
 BATCH_RETRIES = 4  # rounds of re-sending throttled sub-requests
@@ -48,9 +49,8 @@ def _prefer(*extra: str) -> dict[str, str]:
 
 
 class Graph:
-    def __init__(self, transport: Transport, *, profile: str = "read") -> None:
+    def __init__(self, transport: Transport) -> None:
         self._transport = transport
-        self._profile = profile
         self._batch_gate = asyncio.Semaphore(BATCH_CONCURRENCY)
 
     def _absolute(self, path_or_url: str) -> str:
@@ -64,13 +64,13 @@ class Graph:
         self, path: str, params: Mapping[str, Any] | None = None, *, prefer: tuple[str, ...] = ()
     ) -> dict[str, Any]:
         url = self._absolute(relative(path, params) if not path.startswith("https://") else path)
-        data = await self._transport.json("GET", url, profile=self._profile, headers=_prefer(*prefer))
+        data = await self._transport.json("GET", url, profile=PROFILE, headers=_prefer(*prefer))
         return data if isinstance(data, dict) else {}
 
     async def get_bytes(self, path: str, *, max_bytes: int) -> bytes:
         """A small binary GET (a profile photo), read whole."""
         response = await self._transport.request(
-            "GET", self._absolute(path), profile=self._profile, headers=_prefer()
+            "GET", self._absolute(path), profile=PROFILE, headers=_prefer()
         )
         if len(response.content) > max_bytes:
             raise Upstream("Response too large.")
@@ -79,7 +79,7 @@ class Graph:
     async def post(self, path: str, body: Any) -> dict[str, Any]:
         """POST for read-style APIs (search). Idempotent, so retried like a GET."""
         data = await self._transport.json(
-            "POST", self._absolute(path), profile=self._profile, headers=_prefer(), json_body=body, retry=True
+            "POST", self._absolute(path), profile=PROFILE, headers=_prefer(), json_body=body, retry=True
         )
         return data if isinstance(data, dict) else {}
 
@@ -179,7 +179,7 @@ class Graph:
         dest.parent.mkdir(parents=True, exist_ok=True)
         with dest.open("wb") as handle:
             return await self._transport.download(
-                self._absolute(path), handle, profile=self._profile, headers=_prefer(), max_bytes=max_bytes
+                self._absolute(path), handle, profile=PROFILE, headers=_prefer(), max_bytes=max_bytes
             )
 
 

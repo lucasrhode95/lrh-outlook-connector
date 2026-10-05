@@ -1,24 +1,21 @@
 from __future__ import annotations
 
 import json
-from functools import partial
 
 import pytest
 
 from outlook_connector import __main__ as cli
 from outlook_connector import config
-from outlook_connector.auth import tokens
 from outlook_connector.auth.tokens import TokenProvider
-from tests.fakes.msal_fakes import FakeAppFactory, Script, msal_account, seed_cache, token_result
+from tests.fakes.msal_fakes import Script, msal_account, seed_cache, token_result, use_script
 
 GRAPH = "https://graph.microsoft.com"
 READ = config.OUTLOOK_MOBILE_CLIENT_ID
 
 
 def run(argv: list[str], script: Script) -> int:
-    with pytest.MonkeyPatch.context() as patch:  # the CLI's sign-ins go to a scripted MSAL fake
-        patch.setattr(tokens, "TokenProvider", partial(TokenProvider, app_factory=FakeAppFactory(script)))
-        return cli.main(argv)
+    use_script(script)  # the CLI's sign-ins go to the scripted fake MSAL (conftest)
+    return cli.main(argv)
 
 
 def test_auth_signs_in_with_device_code(capsys: pytest.CaptureFixture[str]) -> None:
@@ -52,7 +49,7 @@ def test_auth_force_always_runs_device_code() -> None:
 
 
 def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]) -> None:
-    provider = TokenProvider(unsecure=True, app_factory=FakeAppFactory(Script()))
+    provider = TokenProvider(unsecure=True)
     seed_cache(provider._cache(), client_id=READ, scope="https://graph.microsoft.com/Mail.Read")
     script = Script()
     assert run(["status", "--json", "--unsecure"], script) == cli.EXIT_OK

@@ -29,6 +29,7 @@ from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnkn
 from outlook_connector.remote.transport import Transport
 
 OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
+PROFILE = "write"  # Outlook Web calls use the write sign-in
 SERVER_VERSION = "V2018_01_08"
 URL_POST_DATA_LIMIT = 2048
 MAX_ERROR_TEXT = 200
@@ -38,14 +39,13 @@ SUCCESS = frozenset({"Success", "Warning"})
 class Ows:
     """One OWS action call: envelope, headers, item results."""
 
-    def __init__(self, transport: Transport, tokens: TokenProvider, *, profile: str = "write") -> None:
+    def __init__(self, transport: Transport, tokens: TokenProvider) -> None:
         self._transport = transport
         self._tokens = tokens
-        self._profile = profile
 
     def account(self) -> dict[str, Any]:
         """Claims of the write token (tid, oid, upn): the account writes act as."""
-        return self._tokens.get_token(self._profile).claims()
+        return self._tokens.get_token(PROFILE).claims()
 
     async def call(self, action: str, body: dict[str, Any], *, strict: bool = True) -> list[dict[str, Any]]:
         """Send one action; return its item results, in request order. ``strict``: raise unless
@@ -109,7 +109,7 @@ class Ows:
         return await self._transport.json(
             "POST",
             f"{OWS_URL}?action={action}&app=Mail",
-            profile=self._profile,
+            profile=PROFILE,
             headers=headers,
             json_body=None if in_header else payload,
             write=True,
