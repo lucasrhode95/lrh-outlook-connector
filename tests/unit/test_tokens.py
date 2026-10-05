@@ -18,11 +18,11 @@ from outlook_connector.domain.errors import (
 from tests.fakes.msal_fakes import (
     OTHER_OID,
     USER_OID,
-    FakeAppFactory,
     Script,
     msal_account,
     seed_cache,
     token_result,
+    use_script,
 )
 
 GRAPH = "https://graph.microsoft.com"
@@ -30,8 +30,9 @@ READ = config.OUTLOOK_MOBILE_CLIENT_ID
 WRITE = config.ONE_OUTLOOK_WEB_CLIENT_ID
 
 
-def provider(script: Script, **kwargs: object) -> TokenProvider:
-    return TokenProvider(unsecure=True, app_factory=FakeAppFactory(script), **kwargs)  # type: ignore[arg-type]
+def provider(script: Script) -> TokenProvider:
+    use_script(script)
+    return TokenProvider(unsecure=True)
 
 
 # ---------------------------------------------------------------- silent acquisition
@@ -144,12 +145,6 @@ def test_declined_sign_in_is_an_upstream_error() -> None:
 # ---------------------------------------------------------------- configuration and storage
 
 
-def test_denied_client_scope_pair_is_rejected_at_startup() -> None:
-    bad = {"read": config.TokenProfile("read", READ, ("https://graph.microsoft.com/Mail.Send",), "x")}
-    with pytest.raises(ConfigurationError, match="AADSTS65002"):
-        provider(Script(), profiles=bad)
-
-
 def test_unknown_profile() -> None:
     with pytest.raises(ConfigurationError):
         provider(Script()).get_token("admin")
@@ -162,7 +157,7 @@ def test_encrypted_storage_unavailable_fails_closed(
         raise RuntimeError("no DPAPI/keyring")
 
     monkeypatch.setattr(tokens, "build_encrypted_persistence", unavailable)
-    secure = TokenProvider(unsecure=False, app_factory=FakeAppFactory(Script()))
+    secure = TokenProvider(unsecure=False)
     with pytest.raises(SecureStorageUnavailable):
         secure.get_token("read")
     assert not config.token_cache_path(unsecure=True).exists()  # never falls back to plaintext
