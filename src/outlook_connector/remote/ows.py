@@ -21,11 +21,11 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from typing import Any, Protocol
+from typing import Any
 from urllib.parse import quote
 
 from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnknown
-from outlook_connector.remote.transport import Transport
+from outlook_connector.remote.transport import TokenSource, Transport
 
 OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
 SERVER_VERSION = "V2018_01_08"
@@ -34,18 +34,10 @@ MAX_ERROR_TEXT = 200
 SUCCESS = frozenset({"Success", "Warning"})
 
 
-class _Claims(Protocol):
-    def claims(self) -> dict[str, Any]: ...
-
-
-class WriteTokens(Protocol):
-    def get_token(self, profile: str) -> _Claims: ...
-
-
 class Ows:
     """One OWS action call: envelope, headers, item results."""
 
-    def __init__(self, transport: Transport, tokens: WriteTokens, *, profile: str = "write") -> None:
+    def __init__(self, transport: Transport, tokens: TokenSource, *, profile: str = "write") -> None:
         self._transport = transport
         self._tokens = tokens
         self._profile = profile
