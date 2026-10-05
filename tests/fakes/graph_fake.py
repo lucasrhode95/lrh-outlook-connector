@@ -108,7 +108,7 @@ class FakeGraph:
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
     # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
     # "no-items" / "not-json" (HTTP 200 without readable item results),
-    # an int (that HTTP status), or a dict (that item result)
+    # an int (that HTTP status), or a dict (that item result; for a bare-request call, the answer)
     me: str = "me@example.com"
     reply_drops_history: bool = False  # simulate a reply draft that lost the quoted original
     reply_flattens_html: bool = False  # simulate a reply whose quoted original lost its formatting
@@ -186,6 +186,8 @@ class FakeGraph:
         assert request.headers.get("action") == action
         posted = request.headers.get("x-owa-urlpostdata")
         envelope = json.loads(unquote(posted)) if posted else json.loads(request.content)
+        if envelope["__type"] == f"{action}Request:#Exchange":  # bare request style (inbox rules)
+            return self._ows_bare(action, envelope, request)
         assert envelope["__type"] == f"{action}JsonRequest:#Exchange"
         body = envelope["Body"]
         assert body["__type"] == f"{action}Request:#Exchange"
@@ -205,6 +207,20 @@ class FakeGraph:
         if script == "done-no-answer":
             raise httpx.ReadTimeout("no answer", request=request)
         return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": items}}})
+
+    def _ows_bare(
+        self, action: str, request_object: dict[str, Any], request: httpx.Request
+    ) -> httpx.Response:
+        """The inbox-rule style: no wrapper, no Body; the answer carries ``WasSuccessful``."""
+        assert request_object["Header"]["__type"] == "JsonRequestHeaders:#Exchange"
+        self.ows_calls.append((action, request_object))
+        script = self.ows_next.pop(0) if self.ows_next else None
+        if script == "no-answer":
+            raise httpx.ReadTimeout("no answer", request=request)
+        if isinstance(script, int):
+            return httpx.Response(script, headers={"x-owa-error": "FakeError"}, json={})
+        answer = script if isinstance(script, dict) else {"WasSuccessful": True, "ErrorCode": 0}
+        return httpx.Response(200, json=answer)
 
     def ows_CreateItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
         disposition = body["MessageDisposition"]
