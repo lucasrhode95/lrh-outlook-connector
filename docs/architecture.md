@@ -89,7 +89,9 @@ lrh-outlook-connector/
 │  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference, downloads
 │  │  ├─ graph_mail.py             # MailReader over Graph
 │  │  └─ graph_mapping.py          # Graph JSON → domain models
-│  │  ├─ ows.py                    # MailWriter over Outlook Web (OWS): drafts, send, mutations
+│  │  ├─ ows.py                    # OWS plumbing: envelope, headers, item results, the bare-request style
+│  │  ├─ ows_mail.py               # MailWriter over Outlook Web (OWS): drafts, send, mutations
+│  │  ├─ ows_mapping.py            # domain values → OWS request JSON
 │  │  ├─ ids.py                    # Graph ↔ OWS ids
 │  │
 │  ├─ domain/
@@ -181,9 +183,10 @@ lrh-outlook-connector/
 
 **`graph_mapping.py`:** maps every Graph shape to `domain.models`. Unknown fields are ignored. Missing optional fields become `None`.
 
-### 5.5 `remote/ows.py`
+### 5.5 `remote/ows.py`, `ows_mail.py`, `ows_mapping.py`
 
-- Implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
+- Split like the Graph side (§5.4): `ows.py` is the client (`Ows`), `ows_mapping.py` builds request bodies (pure functions), `ows_mail.py` holds `OwsMailWriter`.
+- `OwsMailWriter` implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
 - The bearer-only OWS envelope and write contracts proven in research §4.1–4.2. Payloads ≤ 2,048 characters go in the `X-OWA-UrlPostData` header. Anchor mailbox, correlation headers.
 - `Ows.call(action, body)` sends one action and returns its item results; an item whose `ResponseClass` is not `Success`/`Warning` raises an error naming its `ResponseCode`. The anchor mailbox is the write token's `upn`.
 - `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Not yet used by a tool (W9).
@@ -297,7 +300,7 @@ The backend split is a **tenant-specific outcome**, not a design preference. The
 ### 6.1 How the code stays swappable
 
 - **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (create_draft, send, set_read, set_flag, move, delete). The service depends **only on these ports**, never on a concrete backend.
-- **Adapters.** `remote/graph_mail.py` implements `MailReader`. `remote/ows.py` implements `MailWriter`. Each adapter maps its protocol to the same `domain` models, so swapping an adapter never changes the service, surfaces, store or tests above it.
+- **Adapters.** `remote/graph_mail.py` implements `MailReader`. `remote/ows_mail.py` implements `MailWriter`. Each adapter maps its protocol to the same `domain` models, so swapping an adapter never changes the service, surfaces, store or tests above it.
 - **Wiring.** `bootstrap.py` picks one adapter per port, and one token profile per adapter, from `config.py`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change
@@ -306,7 +309,7 @@ Re-run the probe suite first ([`research/README.md`](../research/README.md): `au
 
 | Situation | Remote layer change | Token layer change |
 |---|---|---|
-| **Full Graph** (a client — first-party or a registered app — can obtain `Mail.ReadWrite` + `Mail.Send`) | Add `remote/graph_mail_writer.py` implementing `MailWriter` (`PATCH /messages/{id}` for read/flag/categories, `POST /messages/{id}/move`, move to `deleteditems`, `POST /me/sendMail`). Wire it in `bootstrap.py`. **Delete** `remote/ows.py` and the OWS id mapping in `ids.py`. | Point the `write` profile at the Graph client/scopes, or merge it into `read` if one client covers both. Remove the One Outlook Web profile. |
+| **Full Graph** (a client — first-party or a registered app — can obtain `Mail.ReadWrite` + `Mail.Send`) | Add `remote/graph_mail_writer.py` implementing `MailWriter` (`PATCH /messages/{id}` for read/flag/categories, `POST /messages/{id}/move`, move to `deleteditems`, `POST /me/sendMail`). Wire it in `bootstrap.py`. **Delete** `remote/ows.py`, `ows_mail.py`, `ows_mapping.py` and the OWS id mapping in `ids.py`. | Point the `write` profile at the Graph client/scopes, or merge it into `read` if one client covers both. Remove the One Outlook Web profile. |
 | **Partial change** (e.g. Graph `Mail.ReadWrite` but no `Mail.Send`) | Split `MailWriter` wiring per capability group only if needed: Graph for mutations, OWS for send. Keep the rule "one backend per capability". | `write` profile for Graph, plus a `send` profile for OWS. |
 | **No Graph mail at all** (no client can get `Mail.Read`) | Add `remote/ows_reader.py` implementing `MailReader`. The OWS read actions are already proven (research §4.3). Search moves to Substrate `searchservice/api/v2/query`, which works with client A (research §5). Change detection would need OWS sync actions (to be researched). | The `read` profile points at One Outlook Web (`outlook.office.com/.default`), and a `search` profile is added (`outlook.office.com/search/.default`). |
 | **Different first-party clients work** | No change if the scopes are equivalent. | Change the profile's `client_id` in config. Keep the AADSTS65002 guard list per tenant. |

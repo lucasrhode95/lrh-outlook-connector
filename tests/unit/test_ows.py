@@ -6,7 +6,8 @@ import pytest
 from outlook_connector.domain.errors import NotFound, Throttled, Upstream, WriteOutcomeUnknown
 from outlook_connector.domain.models import EmailProposal
 from outlook_connector.remote import ids
-from outlook_connector.remote.ows import Ows, OwsMailWriter
+from outlook_connector.remote.ows import Ows
+from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.transport import Transport
 from tests.fakes.graph_fake import FakeGraph, StaticTokens, sample_mailbox
 

@@ -10,7 +10,8 @@ from outlook_connector.auth.tokens import Account
 from outlook_connector.domain.errors import AccountMismatch, InvalidRequest
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ows import Ows, OwsMailWriter
+from outlook_connector.remote.ows import Ows
+from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.mutations import Mutations
