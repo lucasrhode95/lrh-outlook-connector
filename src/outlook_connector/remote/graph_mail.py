@@ -20,7 +20,7 @@ from outlook_connector.remote.graph import (
     relative,
     sub_failure,
 )
-from outlook_connector.remote.ports import BodyFormat, FetchedMessages, FetchedSummaries
+from outlook_connector.remote.ports import BodyFormat, FetchedMessages, FetchedSummaries, MailReader
 from outlook_connector.remote.transport import operation
 
 WELL_KNOWN = (
@@ -66,7 +66,7 @@ def _named(name: str) -> Callable[[F], F]:
     return wrap
 
 
-class GraphMailReader:
+class GraphMailReader(MailReader):
     """Implements ``MailReader`` over Microsoft Graph.
 
     Assumes (not re-checked here): ids, folder ids, page sizes and windows come from the service, which
