@@ -63,8 +63,12 @@ class _Token(Protocol):
     @property
     def value(self) -> str: ...
 
+    def claims(self) -> dict[str, Any]: ...
+
 
 class TokenSource(Protocol):
+    """What the transport and OWS need from the token provider (``auth.tokens.TokenProvider``)."""
+
     def get_token(
         self, profile: str, *, force_refresh: bool = False, claims_challenge: str | None = None
     ) -> _Token: ...
