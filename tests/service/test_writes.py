@@ -18,7 +18,8 @@ from outlook_connector.domain.errors import (
 from outlook_connector.domain.models import OutgoingMessage
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ows import Ows, OwsMailWriter
+from outlook_connector.remote.ows import Ows
+from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.writes import Writes
