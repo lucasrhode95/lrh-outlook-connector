@@ -25,7 +25,7 @@ from urllib.parse import quote
 from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnknown
 from outlook_connector.domain.models import EmailProposal
 from outlook_connector.remote import ids
-from outlook_connector.remote.ports import FolderTarget
+from outlook_connector.remote.ports import FolderTarget, MailWriter
 from outlook_connector.remote.transport import Transport, operation
 
 OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
@@ -194,7 +194,7 @@ def _created_id(items: list[dict[str, Any]]) -> str | None:
     return ids.to_graph(value) if isinstance(value, str) and value else None
 
 
-class OwsMailWriter:
+class OwsMailWriter(MailWriter):
     """Implements ``MailWriter`` over OWS.
 
     Assumes (not re-checked here): proposals come from ``Writes.propose`` (addresses, subject and body
