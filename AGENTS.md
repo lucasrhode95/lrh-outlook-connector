@@ -31,6 +31,13 @@ already guarantees. Write the contract in the docstring: an entry point says wha
 ("Entry point: ..."), and an internal routine says what it assumes ("Assumes (not re-checked here): ...").
 When you add a caller to a routine that assumes sanitized input, make sure the new caller provides it.
 
+## Code layout and readability
+
+- Order each module top-down: the entry point or public API first (e.g. `main`), then what it calls, then private helpers and formatting. Python looks names up at call time, so only what runs at import time (decorators, base classes, module-level constants and aliases) must come before its use. `if __name__ == "__main__":` stays last.
+- Keep calls followable with go-to-definition (Ctrl+click): call functions by name. Prefer an explicit `match`/`if` over dispatch through data (argparse `set_defaults(handler=...)`, handler dicts, `getattr` by string).
+- Import the names you use (`from x.y import Z`), as the codebase does; import a module only to avoid a name clash. Name functions so they read without their module (`serve_mcp`, not `run`).
+- Keep production code simple; test-only seams belong in the tests (pytest `monkeypatch`), not in production signatures. Constructor injection that is part of the design (ports, transport, token provider) stays.
+
 ## Checks: run all four before every commit, and fix what they report
 
 ```bash

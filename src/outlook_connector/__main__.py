@@ -1,6 +1,6 @@
 """Command-line entry point: ``outlook-connector <command>``.
 
-Each command has one handler (``set_defaults(handler=...)``); ``main`` parses and calls it.
+Top-down: ``main`` first, then one handler per command, then the parser and the output helpers.
 Handlers import their dependencies lazily, so that ``mcp`` never loads the web stack.
 """
 
@@ -27,54 +27,6 @@ EXIT_AUTH_REQUIRED = 2
 EXIT_INTERRUPTED = 130
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=config.CLI_NAME, description="Local Outlook mailbox connector.")
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    auth = sub.add_parser("auth", help="Sign in with a device code (the only command that ever prompts).")
-    auth.add_argument(
-        "profile",
-        nargs="?",
-        default="read",
-        choices=sorted(config.PROFILES),
-        help="Which client profile to sign in (default: read).",
-    )
-    auth.add_argument("--force", action="store_true", help="Sign in again even if a silent token works.")
-    auth.add_argument("--sign-out", action="store_true", help="Delete the token cache (all profiles).")
-    _add_unsecure(auth)
-    auth.set_defaults(handler=_auth)
-
-    status = sub.add_parser("status", help="Show the signed-in account and profiles (offline by default).")
-    status.add_argument(
-        "--check",
-        action="store_true",
-        help="Also acquire each profile's token silently (contacts Microsoft).",
-    )
-    status.add_argument("--json", action="store_true", help="Machine-readable output.")
-    _add_unsecure(status)
-    status.set_defaults(handler=_status)
-
-    mcp = sub.add_parser("mcp", help="Run the MCP server over stdio (started by your MCP client).")
-    _add_unsecure(mcp)
-    mcp.set_defaults(handler=_mcp)
-
-    ui = sub.add_parser("ui", help="Start the local web UI (stops when idle).")
-    ui.add_argument(
-        "--port", type=int, default=8765, help="Preferred port (default 8765; a free one if busy)."
-    )
-    ui.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
-    ui.add_argument("--idle-minutes", type=float, default=30, help="Stop after this many idle minutes.")
-    _add_unsecure(ui)
-    ui.set_defaults(handler=_ui)
-    return parser
-
-
-def _add_unsecure(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--unsecure", action="store_true", help="Development only: use a separate PLAINTEXT token cache."
-    )
-
-
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.unsecure:
@@ -83,11 +35,22 @@ def main(argv: list[str] | None = None) -> int:
             f"{config.token_cache_path(unsecure=True)}. Do not share it; delete it when done.",
             file=sys.stderr,
         )
-    return args.handler(args)
+    match args.command:
+        case "auth":
+            return _auth(args)
+        case "status":
+            return _status(args)
+        case "mcp":
+            return _mcp(args)
+        case "ui":
+            return _ui(args)
+        case _:  # argparse accepts only the commands above
+            raise AssertionError(f"unknown command {args.command!r}")
 
 
 # ---------------------------------------------------------------------- handlers
 
+# The decorator comes first: it runs when the handlers below are defined.
 Handler = Callable[[argparse.Namespace], int]
 
 
@@ -110,12 +73,6 @@ def _exit_codes(handler: Handler) -> Handler:
             return EXIT_INTERRUPTED
 
     return wrapper
-
-
-def _tokens(args: argparse.Namespace) -> TokenProvider:
-    from outlook_connector.auth.tokens import TokenProvider
-
-    return TokenProvider(unsecure=args.unsecure)
 
 
 def _mcp(args: argparse.Namespace) -> int:
@@ -184,6 +141,59 @@ def _status(args: argparse.Namespace) -> int:
     # Only the read profile is required; the write profile is optional until send/mutations exist.
     read_ok = checks.get("read", {"ok": True})["ok"]
     return EXIT_OK if read_ok else EXIT_AUTH_REQUIRED
+
+
+def _tokens(args: argparse.Namespace) -> TokenProvider:
+    from outlook_connector.auth.tokens import TokenProvider
+
+    return TokenProvider(unsecure=args.unsecure)
+
+
+# ---------------------------------------------------------------------- parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog=config.CLI_NAME, description="Local Outlook mailbox connector.")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    auth = sub.add_parser("auth", help="Sign in with a device code (the only command that ever prompts).")
+    auth.add_argument(
+        "profile",
+        nargs="?",
+        default="read",
+        choices=sorted(config.PROFILES),
+        help="Which client profile to sign in (default: read).",
+    )
+    auth.add_argument("--force", action="store_true", help="Sign in again even if a silent token works.")
+    auth.add_argument("--sign-out", action="store_true", help="Delete the token cache (all profiles).")
+    _add_unsecure(auth)
+
+    status = sub.add_parser("status", help="Show the signed-in account and profiles (offline by default).")
+    status.add_argument(
+        "--check",
+        action="store_true",
+        help="Also acquire each profile's token silently (contacts Microsoft).",
+    )
+    status.add_argument("--json", action="store_true", help="Machine-readable output.")
+    _add_unsecure(status)
+
+    mcp = sub.add_parser("mcp", help="Run the MCP server over stdio (started by your MCP client).")
+    _add_unsecure(mcp)
+
+    ui = sub.add_parser("ui", help="Start the local web UI (stops when idle).")
+    ui.add_argument(
+        "--port", type=int, default=8765, help="Preferred port (default 8765; a free one if busy)."
+    )
+    ui.add_argument("--no-browser", action="store_true", help="Do not open a browser window.")
+    ui.add_argument("--idle-minutes", type=float, default=30, help="Stop after this many idle minutes.")
+    _add_unsecure(ui)
+    return parser
+
+
+def _add_unsecure(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--unsecure", action="store_true", help="Development only: use a separate PLAINTEXT token cache."
+    )
 
 
 # ---------------------------------------------------------------------- formatting
