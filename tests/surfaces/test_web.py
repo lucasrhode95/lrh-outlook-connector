@@ -83,23 +83,23 @@ def test_foreign_host_header_is_refused(client: TestClient) -> None:
     assert client.get("/", headers={"Host": f"evil.example.com:{PORT}"}).status_code == 403
 
 
-def test_folders_messages_search_thread_and_message(client: TestClient) -> None:
+def test_folders_messages_search_conversation_and_message(client: TestClient) -> None:
     assert any(f["path"] == "Inbox/Projects/RIE" for f in client.get("/api/folders").json())
     page = client.get("/api/messages", params={"folder": "inbox", "limit": 10}).json()
     assert [m["id"] for m in page["items"]] == ["m5", "m1"]
     found = client.get("/api/search", params={"q": "relatório"}).json()
     assert found["conversations"][0]["conversation_id"] == "c-rel"
-    thread = client.get("/api/threads/c-rel").json()
-    assert [t["message"]["id"] for t in thread["messages"]] == ["m1", "m2", "m3"]
-    assert "text" not in thread["messages"][0]  # the UI lists threads without bodies
+    conversation = client.get("/api/conversations/c-rel").json()
+    assert [t["message"]["id"] for t in conversation["messages"]] == ["m1", "m2", "m3"]
+    assert "text" not in conversation["messages"][0]  # the UI lists conversations without bodies
     message = client.get("/api/messages/m2", params={"body": "full"}).json()
     assert "> First report" in message["text"]
 
 
-def test_thread_sizes(client: TestClient) -> None:
-    sizes = client.post("/api/thread-sizes", json={"conversation_ids": ["c-rel", "c-lunch"]}).json()
+def test_conversation_sizes(client: TestClient) -> None:
+    sizes = client.post("/api/conversation-sizes", json={"conversation_ids": ["c-rel", "c-lunch"]}).json()
     assert [(s["conversation_id"], s["messages"]) for s in sizes] == [("c-rel", 3), ("c-lunch", 1)]
-    assert client.post("/api/thread-sizes", json={"conversation_ids": "c-rel"}).status_code == 400
+    assert client.post("/api/conversation-sizes", json={"conversation_ids": "c-rel"}).status_code == 400
 
 
 def test_attachment_download_and_junk_scope(client: TestClient) -> None:

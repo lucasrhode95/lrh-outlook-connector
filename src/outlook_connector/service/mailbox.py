@@ -3,7 +3,7 @@
 Remote first: every call asks Outlook (Graph). The local store caches the folder list only; no
 message data is kept locally, so a message deleted on the server is gone here too.
 
-Scope rules shared by list, search, threads, sizes and export (a folder counts with its parents):
+Scope rules shared by list, search, conversations, sizes and export (a folder counts with its parents):
 - Deleted Items and Junk Email are left out unless ``include_deleted_items`` (a folder asked for by
   name is always included).
   Sent Items, Drafts and Outbox are included unless ``include_sent_items`` is false. List and
@@ -12,7 +12,8 @@ Scope rules shared by list, search, threads, sizes and export (a folder counts w
   with real replies shows through them. Every flag points the same way: true shows more mail.
 - Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
   and items outside the mail folders (e.g. Teams meeting records) are out of reach:
-  never listed, searched, counted, threaded or exported, and list_folders does not show them.
+  never listed, searched, counted, included in conversations or exported, and list_folders does
+  not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.
 """
@@ -31,6 +32,7 @@ from outlook_connector.domain.models import (
     Attachment,
     BodyKind,
     ConversationHit,
+    ConversationSize,
     Coverage,
     Detail,
     Folder,
@@ -39,7 +41,6 @@ from outlook_connector.domain.models import (
     MessagePage,
     MessageSummary,
     SearchResult,
-    ThreadSize,
     UserProfile,
 )
 from outlook_connector.remote.ports import MailReader
@@ -435,8 +436,8 @@ class Mailbox:
 
     async def conversation_sizes(
         self, conversation_ids: list[str], *, include_deleted_items: bool = False
-    ) -> list[ThreadSize]:
-        """How many messages each conversation has, counted the way get_thread lists them.
+    ) -> list[ConversationSize]:
+        """How many messages each conversation has, counted the way get_conversation lists them.
 
         One batched server listing of folders and Internet ids per conversation (copies counted
         once).
@@ -464,7 +465,7 @@ class Mailbox:
                 if internet_id:
                     seen.add(internet_id)
                 count += 1
-            out.append(ThreadSize(conversation_id=cid, messages=count, at_least=more))
+            out.append(ConversationSize(conversation_id=cid, messages=count, at_least=more))
         return out
 
     # ---------------------------------------------------------------- content

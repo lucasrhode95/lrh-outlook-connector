@@ -1,6 +1,6 @@
-"""One classification of failed Microsoft requests for exports and threads (requirements v4 §10.1).
+"""One classification of failed Microsoft requests for exports and conversations (requirements v4 §10.1).
 
-Every gap in an export or a thread body is an ExportError: the step, Microsoft's answer (status,
+Every gap in an export or a conversation body is an ExportError: the step, Microsoft's answer (status,
 code, message, request id), the likely cause, whether retrying can help, and what to do. It is
 rendered the same way everywhere: ``error_block`` for text, the model itself for JSONL and MCP.
 """
@@ -90,7 +90,7 @@ def describe(error: ExportError) -> str:
 
 
 def error_block(headline: str, error: ExportError) -> str:
-    """The text marker for a gap, in exports and get_thread."""
+    """The text marker for a gap, in exports and get_conversation."""
     return "\n".join(
         (
             f"[EXPORT ERROR] {headline}",

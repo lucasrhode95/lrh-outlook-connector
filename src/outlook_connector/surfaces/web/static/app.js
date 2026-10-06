@@ -12,8 +12,8 @@ const state = {
   query: "",
   cursor: null,
   folders: new Map(),    // id -> folder (for well-known aliases)
-  threads: new Map(),    // key -> { key, conversationId, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
-  selectedThreads: new Set(),
+  conversations: new Map(),    // key -> { key, conversationId, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
+  selectedConversations: new Set(),
   selectedMessages: new Set(),
   attachments: new Map(), // message id -> its files (null while asked), for the list's chips
   activeMessage: null,
@@ -151,7 +151,7 @@ function folderItem(id, name, depth, unread) {
 // ------------------------------------------------------------------ list and search
 
 // Deleted Items and Junk are left out unless the toggle is on, or the user is inside one
-// of them (the server always lists a folder asked for by name; threads, counts and exports follow this).
+// of them (the server always lists a folder asked for by name; conversations, counts and exports follow this).
 function includeDeleted() {
   return $("opt-deleted").checked || (state.mode === "list" && insideLeftOutFolder(state.folder));
 }
@@ -168,20 +168,20 @@ function insideLeftOutFolder(id) {
   return false;
 }
 
-function resetThreads() {
-  state.threads = new Map();
+function resetConversations() {
+  state.conversations = new Map();
   state.cursor = null;
 }
 
 function addMessage(summary, { matched = false } = {}) {
   const key = summary.conversation_id || summary.id;
-  let thread = state.threads.get(key);
-  if (!thread) {
-    thread = { key, conversationId: summary.conversation_id, messages: new Map(), expanded: false, complete: false,
+  let conversation = state.conversations.get(key);
+  if (!conversation) {
+    conversation = { key, conversationId: summary.conversation_id, messages: new Map(), expanded: false, complete: false,
       size: undefined, sizeAtLeast: false };
-    state.threads.set(key, thread);
+    state.conversations.set(key, conversation);
   }
-  thread.messages.set(summary.id, { ...summary, matched });
+  conversation.messages.set(summary.id, { ...summary, matched });
 }
 
 function spinner(text) {
@@ -193,8 +193,8 @@ function spinner(text) {
 async function loadPage(reset, path, apply, loadingText) {
   const request = ++state.listRequest;
   if (reset) {
-    resetThreads();
-    $("threads").replaceChildren(spinner(loadingText));
+    resetConversations();
+    $("conversations").replaceChildren(spinner(loadingText));
     $("coverage").textContent = "";
     $("more").hidden = true;
   } else {
@@ -212,7 +212,7 @@ async function loadPage(reset, path, apply, loadingText) {
     loadAttachmentNames(request);
   } catch {
     if (request !== state.listRequest) return;
-    if (reset) $("threads").replaceChildren(el("p", { class: "muted pad" }, "Could not load messages (see the message above)."));
+    if (reset) $("conversations").replaceChildren(el("p", { class: "muted pad" }, "Could not load messages (see the message above)."));
   } finally {
     if (request === state.listRequest) {
       $("more").disabled = false;
@@ -242,22 +242,22 @@ function runSearch(reset) {
 }
 
 // Ask Outlook how many messages each listed conversation really has, so single messages render as
-// plain rows and threads show an accurate count. Rows look as before until the counts arrive.
+// plain rows and conversations show an accurate count. Rows look as before until the counts arrive.
 async function loadSizes(request) {
-  const pending = [...state.threads.values()].filter((t) => t.conversationId && t.size === undefined).map((t) => t.conversationId);
+  const pending = [...state.conversations.values()].filter((t) => t.conversationId && t.size === undefined).map((t) => t.conversationId);
   for (let start = 0; start < pending.length; start += 200) {
     let sizes;
     try {
-      sizes = await json("/api/thread-sizes", { method: "POST", headers: { "Content-Type": "application/json" },
+      sizes = await json("/api/conversation-sizes", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), include_deleted_items: includeDeleted() }) });
     } catch {
       return; // counts are a refinement; the rows keep working without them
     }
     if (request !== state.listRequest) return; // the list was replaced meanwhile
     const byId = new Map(sizes.map((s) => [s.conversation_id, s]));
-    for (const thread of state.threads.values()) {
-      const size = byId.get(thread.conversationId);
-      if (size) { thread.size = size.messages; thread.sizeAtLeast = size.at_least; }
+    for (const conversation of state.conversations.values()) {
+      const size = byId.get(conversation.conversationId);
+      if (size) { conversation.size = size.messages; conversation.sizeAtLeast = size.at_least; }
     }
     render();
   }
@@ -266,7 +266,7 @@ async function loadSizes(request) {
 // File names for the chips under messages with attachments: one batched request per 200 messages
 // (Graph takes them 20 at a time). Rows work without them.
 async function loadAttachmentNames(request = state.listRequest) {
-  const pending = [...state.threads.values()].flatMap((t) => [...t.messages.values()])
+  const pending = [...state.conversations.values()].flatMap((t) => [...t.messages.values()])
     .filter((m) => m.has_attachments && !state.attachments.has(m.id)).map((m) => m.id);
   for (let start = 0; start < pending.length; start += 200) {
     const ids = pending.slice(start, start + 200);
@@ -294,16 +294,16 @@ function showCoverage(coverage) {
 
 // ------------------------------------------------------------------ rendering
 
-function sortedThreads() {
-  const threads = [...state.threads.values()];
-  if (state.mode === "search") return threads; // server rank order
+function sortedConversations() {
+  const conversations = [...state.conversations.values()];
+  if (state.mode === "search") return conversations; // server rank order
   const latest = (t) => Math.max(...[...t.messages.values()].map((m) => Date.parse(m.received_at || m.sent_at || 0)));
-  return threads.sort((a, b) => latest(b) - latest(a));
+  return conversations.sort((a, b) => latest(b) - latest(a));
 }
 
-function matchesFilter(thread, needle) {
+function matchesFilter(conversation, needle) {
   if (!needle) return true;
-  for (const m of thread.messages.values()) {
+  for (const m of conversation.messages.values()) {
     const haystack = [m.subject, m.preview, m.folder, m.sender && m.sender.name, m.sender && m.sender.address,
       ...(m.to || []).map((r) => `${r.name} ${r.address}`)].join(" ");
     if (fold(haystack).includes(needle)) return true;
@@ -313,22 +313,22 @@ function matchesFilter(thread, needle) {
 
 function render() {
   const needle = fold($("filter").value.trim());
-  const container = $("threads");
-  container.replaceChildren(...sortedThreads().filter((t) => matchesFilter(t, needle)).map(renderThread));
+  const container = $("conversations");
+  container.replaceChildren(...sortedConversations().filter((t) => matchesFilter(t, needle)).map(renderConversation));
   if (!container.children.length) container.append(el("p", { class: "muted", style: "padding:0 12px" }, "No messages."));
   $("more").hidden = !state.cursor;
   renderSelection();
 }
 
-function isSingle(thread) {
-  if (thread.messages.size !== 1) return false;
-  if (!thread.conversationId) return true;
-  return thread.size !== undefined && !thread.sizeAtLeast && thread.size <= 1;
+function isSingle(conversation) {
+  if (conversation.messages.size !== 1) return false;
+  if (!conversation.conversationId) return true;
+  return conversation.size !== undefined && !conversation.sizeAtLeast && conversation.size <= 1;
 }
 
-function countLabel(thread, loaded) {
-  if (thread.complete) return `${loaded}`;
-  if (thread.size !== undefined) return `${Math.max(thread.size, loaded)}${thread.sizeAtLeast ? "+" : ""}`;
+function countLabel(conversation, loaded) {
+  if (conversation.complete) return `${loaded}`;
+  if (conversation.size !== undefined) return `${Math.max(conversation.size, loaded)}${conversation.sizeAtLeast ? "+" : ""}`;
   return `${loaded}+`;
 }
 
@@ -406,25 +406,25 @@ function selectBox(title, checked, disabled, onchange) {
   return box;
 }
 
-// The invitation a thread is about: the newest current one, else the newest cancellation.
-function threadMeeting(messages) {
+// The invitation a conversation is about: the newest current one, else the newest cancellation.
+function conversationMeeting(messages) {
   const meetings = messages.map((m) => m.meeting).filter(Boolean);
   return meetings.find((m) => (m.kind === "invite" || m.kind === "update") && !m.out_of_date)
     || meetings.find((m) => m.kind === "cancelled") || null;
 }
 
 // A conversation with one message: a plain row, like Outlook's conversation view.
-function renderSingle(thread) {
-  const [message] = thread.messages.values();
+function renderSingle(conversation) {
+  const [message] = conversation.messages.values();
   const checkbox = selectBox("Export this message",
-    state.selectedMessages.has(message.id) || state.selectedThreads.has(thread.conversationId), false, (event) => {
+    state.selectedMessages.has(message.id) || state.selectedConversations.has(conversation.conversationId), false, (event) => {
       toggle(state.selectedMessages, message.id, event.target.checked);
-      if (!event.target.checked && thread.conversationId) state.selectedThreads.delete(thread.conversationId);
+      if (!event.target.checked && conversation.conversationId) state.selectedConversations.delete(conversation.conversationId);
       render();
     });
   const response = message.meeting && RESPONSES.has(message.meeting.kind);
-  return el("div", { class: "thread" },
-    el("div", { class: rowClasses("thread-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response }),
+  return el("div", { class: "conversation" },
+    el("div", { class: rowClasses("conversation-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response }),
       onclick: (event) => clickRow(event, checkbox, () => openMessage(message.id)) },
       checkbox,
       el("span", { class: "toggle" }),
@@ -437,32 +437,32 @@ function renderSingle(thread) {
       sideColumn(message.received_at || message.sent_at, { flagged: message.flagged, attachments: message.has_attachments })));
 }
 
-function renderThread(thread) {
-  if (isSingle(thread)) return renderSingle(thread);
-  // newest on top, like the list and Outlook's conversation view (exports and get_thread stay oldest first)
+function renderConversation(conversation) {
+  if (isSingle(conversation)) return renderSingle(conversation);
+  // newest on top, like the list and Outlook's conversation view (exports and get_conversation stay oldest first)
   const when = (m) => Date.parse(m.received_at || m.sent_at || 0);
-  const messages = [...thread.messages.values()].sort((a, b) => when(b) - when(a));
+  const messages = [...conversation.messages.values()].sort((a, b) => when(b) - when(a));
   const newest = messages[0];
   const senders = [...new Set(messages.map((m) => who(m.sender)))].join(SEPARATOR);
   const unread = messages.some((m) => m.is_read === false);
-  const selectable = Boolean(thread.conversationId);
-  const checkbox = selectBox("Export the whole thread", state.selectedThreads.has(thread.conversationId), !selectable,
-    (event) => { toggle(state.selectedThreads, thread.conversationId, event.target.checked); render(); });
-  const meeting = threadMeeting(messages);
-  const row = el("div", { class: rowClasses("thread-row", { unread }), onclick: (event) => clickRow(event, checkbox, () => expand(thread)) },
+  const selectable = Boolean(conversation.conversationId);
+  const checkbox = selectBox("Export the whole conversation", state.selectedConversations.has(conversation.conversationId), !selectable,
+    (event) => { toggle(state.selectedConversations, conversation.conversationId, event.target.checked); render(); });
+  const meeting = conversationMeeting(messages);
+  const row = el("div", { class: rowClasses("conversation-row", { unread }), onclick: (event) => clickRow(event, checkbox, () => expand(conversation)) },
     checkbox,
-    el("span", { class: "toggle" }, icon(thread.expanded ? "chevronDown" : "chevronRight")),
+    el("span", { class: "toggle" }, icon(conversation.expanded ? "chevronDown" : "chevronRight")),
     el("div", { class: "lines" },
-      el("div", { class: "who" }, senders, el("span", { class: "thread-count" }, countLabel(thread, messages.length))),
+      el("div", { class: "who" }, senders, el("span", { class: "conversation-count" }, countLabel(conversation, messages.length))),
       el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
       el("div", { class: "preview" }, newest.preview || ""),
       meetingPanel(meeting)),
     sideColumn(newest.received_at || newest.sent_at,
       { flagged: messages.some((m) => m.flagged), attachments: messages.some((m) => m.has_attachments) }));
-  const node = el("div", { class: "thread" }, row);
-  if (thread.expanded) {
-    node.append(el("div", { class: "messages" }, messages.map((m) => renderMessage(m, thread)),
-      thread.loading ? spinner("Loading the whole conversation…") : null));
+  const node = el("div", { class: "conversation" }, row);
+  if (conversation.expanded) {
+    node.append(el("div", { class: "messages" }, messages.map((m) => renderMessage(m, conversation)),
+      conversation.loading ? spinner("Loading the whole conversation…") : null));
   }
   return node;
 }
@@ -475,9 +475,9 @@ function badges(message, withFolder) {
   ];
 }
 
-function renderMessage(message, thread) {
-  const covered = state.selectedThreads.has(thread.conversationId);
-  const checkbox = selectBox(covered ? "Included with the thread" : "Export this message",
+function renderMessage(message, conversation) {
+  const covered = state.selectedConversations.has(conversation.conversationId);
+  const checkbox = selectBox(covered ? "Included with the conversation" : "Export this message",
     covered || state.selectedMessages.has(message.id), covered,
     (event) => { toggle(state.selectedMessages, message.id, event.target.checked); renderSelection(); });
   const response = message.meeting && RESPONSES.has(message.meeting.kind);
@@ -497,24 +497,24 @@ function toggle(set, value, on) {
   if (on) set.add(value); else set.delete(value);
 }
 
-async function expand(thread) {
-  thread.expanded = !thread.expanded;
-  if (thread.expanded && thread.conversationId && !thread.complete && !thread.loading) {
-    thread.loading = true;
+async function expand(conversation) {
+  conversation.expanded = !conversation.expanded;
+  if (conversation.expanded && conversation.conversationId && !conversation.complete && !conversation.loading) {
+    conversation.loading = true;
     render();
     try {
-      const full = await json(`/api/threads/${encodeURIComponent(thread.conversationId)}?${query({ include_deleted_items: includeDeleted() })}`);
-      for (const entry of full.messages) thread.messages.set(entry.message.id, { ...entry.message, matched: thread.messages.get(entry.message.id)?.matched });
-      // incomplete coverage: the conversation is larger than the server lists (a "1000+" thread)
-      thread.complete = full.coverage.complete;
-      thread.size = full.messages.length;
-      thread.sizeAtLeast = !full.coverage.complete;
+      const full = await json(`/api/conversations/${encodeURIComponent(conversation.conversationId)}?${query({ include_deleted_items: includeDeleted() })}`);
+      for (const entry of full.messages) conversation.messages.set(entry.message.id, { ...entry.message, matched: conversation.messages.get(entry.message.id)?.matched });
+      // incomplete coverage: the conversation is larger than the server lists (a "1000+" conversation)
+      conversation.complete = full.coverage.complete;
+      conversation.size = full.messages.length;
+      conversation.sizeAtLeast = !full.coverage.complete;
       loadAttachmentNames();
     } finally {
-      thread.loading = false;
+      conversation.loading = false;
     }
   }
-  if (state.threads.get(thread.key) === thread) render(); // skip if the list was replaced meanwhile
+  if (state.conversations.get(conversation.key) === conversation) render(); // skip if the list was replaced meanwhile
 }
 
 // ------------------------------------------------------------------ reader
@@ -568,18 +568,18 @@ async function download(path, options) {
 // ------------------------------------------------------------------ selection and export
 
 function renderSelection() {
-  const threads = state.selectedThreads.size;
-  const messages = [...state.selectedMessages].filter((id) => !coveredByThread(id)).length;
+  const conversations = state.selectedConversations.size;
+  const messages = [...state.selectedMessages].filter((id) => !coveredByConversation(id)).length;
   const parts = [];
-  if (threads) parts.push(`${threads} thread${threads > 1 ? "s" : ""}`);
+  if (conversations) parts.push(`${conversations} conversation${conversations > 1 ? "s" : ""}`);
   if (messages) parts.push(`${messages} message${messages > 1 ? "s" : ""}`);
   $("selection").textContent = parts.length ? `Selected: ${parts.join(" + ")}` : "Nothing selected";
   $("export").disabled = !parts.length;
 }
 
-function coveredByThread(messageId) {
-  for (const thread of state.threads.values()) {
-    if (thread.messages.has(messageId) && state.selectedThreads.has(thread.conversationId)) return true;
+function coveredByConversation(messageId) {
+  for (const conversation of state.conversations.values()) {
+    if (conversation.messages.has(messageId) && state.selectedConversations.has(conversation.conversationId)) return true;
   }
   return false;
 }
@@ -595,8 +595,8 @@ function exportOptions() {
 
 function exportRequest() {
   return {
-    conversation_ids: [...state.selectedThreads],
-    message_ids: [...state.selectedMessages].filter((id) => !coveredByThread(id)),
+    conversation_ids: [...state.selectedConversations],
+    message_ids: [...state.selectedMessages].filter((id) => !coveredByConversation(id)),
     ...exportOptions(),
   };
 }
@@ -751,7 +751,7 @@ $("refresh-folders").addEventListener("click", () => loadFolders(true));
 $("opt-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
 $("opt-deleted").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
 $("opt-meetings").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
-$("clear").addEventListener("click", () => { state.selectedThreads.clear(); state.selectedMessages.clear(); render(); });
+$("clear").addEventListener("click", () => { state.selectedConversations.clear(); state.selectedMessages.clear(); render(); });
 $("export").addEventListener("click", () => runExport($("export"), exportRequest(), "Export"));
 setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_000);
 

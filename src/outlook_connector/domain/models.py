@@ -12,7 +12,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, SerializerFunctionWrapHandler, model_serializer
 
 BodyKind = Literal["unique", "full", "html"]
-CombineMode = Literal["per_thread", "all", "none"]
+CombineMode = Literal["per_conversation", "all", "none"]
 ExportFormat = Literal["txt", "jsonl"]
 Detail = Literal["compact", "full"]
 
@@ -154,7 +154,7 @@ class ConversationHit(Compact):
     subject: str | None
     last_received_at: datetime | None
     matching_messages: list[MessageSummary]
-    message_count: int | None = None  # the whole conversation, counted like get_thread
+    message_count: int | None = None  # the whole conversation, counted like get_conversation
     message_count_at_least: bool = False
 
 
@@ -179,7 +179,7 @@ ExportStep = Literal["fetching message bodies", "listing attachments", "download
 
 
 class ExportError(Compact):
-    """Why part of an export (or a thread body) is missing: the step, Microsoft's answer, the
+    """Why part of an export (or a conversation body) is missing: the step, Microsoft's answer, the
     likely cause, whether retrying can help, and what to do."""
 
     step: ExportStep
@@ -192,17 +192,17 @@ class ExportError(Compact):
     fix: str
 
 
-class ThreadMessage(Compact):
+class ConversationMessage(Compact):
     message: MessageSummary
     text: str | None = None  # bounded body when requested
     truncated: bool = False
     export_error: ExportError | None = None  # the body could not be fetched (``text`` holds its block)
 
 
-class Thread(Compact):
+class Conversation(Compact):
     conversation_id: str
     subject: str | None
-    messages: list[ThreadMessage]
+    messages: list[ConversationMessage]
     cursor: str | None = None
     coverage: Coverage
     body_errors: int = 0  # messages on this page whose body could not be fetched (see export_error)
@@ -215,9 +215,9 @@ class UserProfile(Compact):
     email: str | None = None
 
 
-class ThreadSize(Compact):
+class ConversationSize(Compact):
     conversation_id: str
-    messages: int  # what get_thread would list with the same include_deleted_items
+    messages: int  # what get_conversation would list with the same include_deleted_items
     at_least: bool = False  # the conversation is larger than the server listed in one request
 
 
@@ -238,7 +238,7 @@ class ExportRequest(BaseModel):
     limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
     format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
     include_attachments: bool = False
-    combine: CombineMode = "per_thread"
+    combine: CombineMode = "per_conversation"
     body: Literal["unique", "full"] = "unique"
     include_deleted_items: bool = False
 

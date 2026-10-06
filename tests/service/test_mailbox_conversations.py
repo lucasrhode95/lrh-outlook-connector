@@ -14,7 +14,7 @@ from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service import cursors
 from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.service.threads import Threads, base_subject
+from outlook_connector.service.conversations import Conversations, base_subject
 from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
@@ -85,7 +85,7 @@ async def test_meeting_mail_is_marked(mailbox: Mailbox, fake: FakeGraph) -> None
     assert items["m5"].meeting is None  # ordinary mail
 
 
-def add_meeting_threads(fake: FakeGraph) -> None:
+def add_meeting_conversations(fake: FakeGraph) -> None:
     """c-only: an invitation, an RSVP and a cancellation. c-talk: an invitation with a real reply."""
     for mid, kind, conv in (
         ("inv1", "meetingRequest", "c-only"),
@@ -99,7 +99,7 @@ def add_meeting_threads(fake: FakeGraph) -> None:
 
 
 async def test_meeting_mail_can_be_left_out(mailbox: Mailbox, fake: FakeGraph) -> None:
-    add_meeting_threads(fake)
+    add_meeting_conversations(fake)
     everything = await mailbox.list_messages(folder="inbox")
     assert {"inv1", "rsvp1", "cxl1", "inv2", "reply2"} <= {m.id for m in everything.items}  # default: shown
     page = await mailbox.list_messages(folder="inbox", include_meeting_mail=False)
@@ -107,12 +107,12 @@ async def test_meeting_mail_can_be_left_out(mailbox: Mailbox, fake: FakeGraph) -
     assert "reply2" in ids  # the conversation with a real reply still shows, through the reply
     assert not ids & {"inv1", "rsvp1", "cxl1", "inv2"}  # the meeting-only conversation is gone
     assert page.coverage.excluded == {"meeting_mail": 4}
-    thread = await Threads(mailbox).get_thread("c-talk", include_bodies=False)
-    assert [t.message.id for t in thread.messages] == ["inv2", "reply2"]  # threads stay whole
+    conversation = await Conversations(mailbox).get_conversation("c-talk", include_bodies=False)
+    assert [t.message.id for t in conversation.messages] == ["inv2", "reply2"]  # conversations stay whole
 
 
 async def test_meeting_filter_survives_paging_and_search(mailbox: Mailbox, fake: FakeGraph) -> None:
-    add_meeting_threads(fake)
+    add_meeting_conversations(fake)
     first = await mailbox.list_messages(include_meeting_mail=False, limit=2)
     rest, cursor = list(first.items), first.cursor
     while cursor:
@@ -166,8 +166,8 @@ async def test_copies_of_one_message_are_shown_once(mailbox: Mailbox, fake: Fake
     copy = next(m for m in page.items if m.conversation_id == "c-self")
     assert [m.id for m in page.items].count(copy.id) == 1 and copy.id == "self-recv"
     assert copy.also_in == ["Sent Items"]
-    thread = await Threads(mailbox).get_thread("c-self")
-    assert [t.message.id for t in thread.messages] == ["self-recv"]
+    conversation = await Conversations(mailbox).get_conversation("c-self")
+    assert [t.message.id for t in conversation.messages] == ["self-recv"]
     assert (await mailbox.conversation_sizes(["c-self"]))[0].messages == 1
 
 
@@ -228,84 +228,84 @@ async def test_search_requires_a_query(mailbox: Mailbox) -> None:
         await mailbox.search("  ")
 
 
-# ---------------------------------------------------------------- threads
+# ---------------------------------------------------------------- conversations
 
 
-async def test_thread_spans_folders_sorted_and_excludes_junk_by_default(mailbox: Mailbox) -> None:
-    thread = await Threads(mailbox).get_thread("c-rel")
-    assert [t.message.id for t in thread.messages] == ["m1", "m2", "m3"]
-    assert [t.message.folder for t in thread.messages] == ["Inbox", "Sent Items", "Inbox/Projects/RIE"]
-    assert [t.text for t in thread.messages] == ["First report", "Thanks!", "Follow-up with numbers"]
-    assert thread.subject == "Relatório BE semanal"
-    assert any("left out: in Deleted Items or Junk Email" in n for n in thread.coverage.notes)
-    assert thread.coverage.excluded == {"deleted_or_junk": 1}
+async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(mailbox: Mailbox) -> None:
+    conversation = await Conversations(mailbox).get_conversation("c-rel")
+    assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3"]
+    assert [t.message.folder for t in conversation.messages] == ["Inbox", "Sent Items", "Inbox/Projects/RIE"]
+    assert [t.text for t in conversation.messages] == ["First report", "Thanks!", "Follow-up with numbers"]
+    assert conversation.subject == "Relatório BE semanal"
+    assert any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)
+    assert conversation.coverage.excluded == {"deleted_or_junk": 1}
 
 
-async def test_thread_can_include_deleted_items_and_junk(mailbox: Mailbox) -> None:
-    thread = await Threads(mailbox).get_thread("c-rel", include_deleted_items=True, include_bodies=False)
-    assert [t.message.id for t in thread.messages] == ["m1", "m2", "m3", "m4"]
+async def test_conversation_can_include_deleted_items_and_junk(mailbox: Mailbox) -> None:
+    conversation = await Conversations(mailbox).get_conversation("c-rel", include_deleted_items=True, include_bodies=False)
+    assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3", "m4"]
 
 
-async def test_thread_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> None:
-    threads = Threads(mailbox)
-    first = await threads.get_thread("c-rel", max_chars=15)  # "First report" fits, "Thanks!" does not
+async def test_conversation_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> None:
+    conversations = Conversations(mailbox)
+    first = await conversations.get_conversation("c-rel", max_chars=15)  # "First report" fits, "Thanks!" does not
     assert [t.message.id for t in first.messages] == ["m1"] and first.cursor
     # the cursor restores the original options: max_chars=1000 here is ignored
-    second = await threads.get_thread("c-rel", max_chars=1000, cursor=first.cursor)
+    second = await conversations.get_conversation("c-rel", max_chars=1000, cursor=first.cursor)
     assert [t.message.id for t in second.messages] == ["m2"] and second.cursor
-    third = await threads.get_thread("c-rel", cursor=second.cursor)
+    third = await conversations.get_conversation("c-rel", cursor=second.cursor)
     assert [t.message.id for t in third.messages] == ["m3"] and third.cursor is None
 
 
-async def test_thread_cursor_keeps_include_deleted_items(mailbox: Mailbox) -> None:
-    threads = Threads(mailbox)
-    first = await threads.get_thread("c-rel", include_deleted_items=True, max_chars=15)
+async def test_conversation_cursor_keeps_include_deleted_items(mailbox: Mailbox) -> None:
+    conversations = Conversations(mailbox)
+    first = await conversations.get_conversation("c-rel", include_deleted_items=True, max_chars=15)
     rest = []
     cursor = first.cursor
     while cursor:  # continue without repeating include_deleted_items
-        page = await threads.get_thread("c-rel", cursor=cursor)
+        page = await conversations.get_conversation("c-rel", cursor=cursor)
         rest += [t.message.id for t in page.messages]
         cursor = page.cursor
     assert [t.message.id for t in first.messages] + rest == ["m1", "m2", "m3", "m4"]
 
 
-async def test_thread_cursor_belongs_to_its_conversation(mailbox: Mailbox) -> None:
-    first = await Threads(mailbox).get_thread("c-rel", max_chars=15)
+async def test_conversation_cursor_belongs_to_its_conversation(mailbox: Mailbox) -> None:
+    first = await Conversations(mailbox).get_conversation("c-rel", max_chars=15)
     assert first.cursor
     with pytest.raises(InvalidRequest, match="different conversation"):
-        await Threads(mailbox).get_thread("c-lunch", cursor=first.cursor)
+        await Conversations(mailbox).get_conversation("c-lunch", cursor=first.cursor)
 
 
 async def test_truncated_conversation_is_not_reported_complete(
     mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
-    thread = await Threads(mailbox).get_thread("c-rel", include_bodies=False)
-    assert not thread.coverage.complete and any("listing limit" in n for n in thread.coverage.notes)
+    conversation = await Conversations(mailbox).get_conversation("c-rel", include_bodies=False)
+    assert not conversation.coverage.complete and any("listing limit" in n for n in conversation.coverage.notes)
 
 
-async def test_thread_sizes_count_like_get_thread(mailbox: Mailbox, fake: FakeGraph) -> None:
-    threads = Threads(mailbox)
+async def test_conversation_sizes_count_like_get_conversation(mailbox: Mailbox, fake: FakeGraph) -> None:
+    conversations = Conversations(mailbox)
     sizes = {s.conversation_id: s.messages for s in await mailbox.conversation_sizes(["c-rel", "c-lunch"])}
-    assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_thread
+    assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_conversation
     with_junk = await mailbox.conversation_sizes(["c-rel"], include_deleted_items=True)
     assert with_junk[0].messages == 4 and not with_junk[0].at_least
     del fake.messages["m2"]
     assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 2
-    assert len((await threads.get_thread("c-rel")).messages) == 2
+    assert len((await conversations.get_conversation("c-rel")).messages) == 2
 
 
 async def test_single_oversized_message_is_truncated_not_skipped(mailbox: Mailbox, fake: FakeGraph) -> None:
     fake.add(
         FakeMessage("big", "Huge", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-big", text="x" * 500)
     )
-    thread = await Threads(mailbox).get_thread("c-big", max_chars=100)
-    assert thread.messages[0].truncated and len(thread.messages[0].text or "") == 100
+    conversation = await Conversations(mailbox).get_conversation("c-big", max_chars=100)
+    assert conversation.messages[0].truncated and len(conversation.messages[0].text or "") == 100
 
 
 async def test_unknown_conversation(mailbox: Mailbox) -> None:
     with pytest.raises(NotFound):
-        await Threads(mailbox).get_thread("nope")
+        await Conversations(mailbox).get_conversation("nope")
 
 
 def test_base_subject_strips_reply_and_forward_prefixes() -> None:
@@ -378,49 +378,49 @@ async def test_a_folder_that_answers_not_found_mid_listing_is_dropped(
     assert fake.calls.count("GET /v1.0/me/mailFolders") == 1  # the folder list was refreshed once
 
 
-async def test_thread_marks_missing_bodies_with_the_export_error_block(
+async def test_conversation_marks_missing_bodies_with_the_export_error_block(
     mailbox: Mailbox, fake: FakeGraph
 ) -> None:
     await mailbox.folders()
     fake.throttle_items = 10_000
-    thread = await Threads(mailbox).get_thread("c-rel")
-    text = thread.messages[0].text or ""
+    conversation = await Conversations(mailbox).get_conversation("c-rel")
+    text = conversation.messages[0].text or ""
     assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
     assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
-    assert not thread.coverage.complete  # throttling is retryable
-    assert thread.body_errors == 3 and all(t.export_error and t.export_error.retry for t in thread.messages)
+    assert not conversation.coverage.complete  # throttling is retryable
+    assert conversation.body_errors == 3 and all(t.export_error and t.export_error.retry for t in conversation.messages)
 
 
-async def test_thread_body_denied_does_not_make_coverage_incomplete(
+async def test_conversation_body_denied_does_not_make_coverage_incomplete(
     mailbox: Mailbox, fake: FakeGraph
 ) -> None:
     fake.fail[r"/me/messages/m2"] = 403
-    thread = await Threads(mailbox).get_thread("c-rel")
-    texts = {t.message.id: t.text or "" for t in thread.messages}
+    conversation = await Conversations(mailbox).get_conversation("c-rel")
+    texts = {t.message.id: t.text or "" for t in conversation.messages}
     assert "  Likely: access denied for this item" in texts["m2"] and texts["m1"] == "First report"
-    assert thread.coverage.complete  # retrying will not help
+    assert conversation.coverage.complete  # retrying will not help
     # ...but the caller still learns about it without reading the text
-    assert thread.body_errors == 1 and any(
-        "1 message body(ies) could not be fetched" in n for n in thread.coverage.notes
+    assert conversation.body_errors == 1 and any(
+        "1 message body(ies) could not be fetched" in n for n in conversation.coverage.notes
     )
-    errors = {t.message.id: t.export_error for t in thread.messages}
+    errors = {t.message.id: t.export_error for t in conversation.messages}
     assert errors["m1"] is None and errors["m2"] is not None and errors["m2"].status == 403
 
 
-async def test_thread_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox, fake: FakeGraph) -> None:
+async def test_conversation_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox, fake: FakeGraph) -> None:
     fake.add(
         FakeMessage("big", "Huge", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-big", text="x" * 5000)
     )
-    thread = await Threads(mailbox).get_thread("c-big", max_chars=1000)
-    assert thread.messages[0].truncated and thread.cursor is None and thread.coverage.complete
+    conversation = await Conversations(mailbox).get_conversation("c-big", max_chars=1000)
+    assert conversation.messages[0].truncated and conversation.cursor is None and conversation.coverage.complete
 
 
 async def test_truncated_listing_stays_incomplete_when_bodies_fit(
     mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
-    thread = await Threads(mailbox).get_thread("c-rel", max_chars=100_000)
-    assert not thread.coverage.complete
+    conversation = await Conversations(mailbox).get_conversation("c-rel", max_chars=100_000)
+    assert not conversation.coverage.complete
 
 
 async def test_search_dates_are_exact_whatever_the_time_zone(mailbox: Mailbox) -> None:

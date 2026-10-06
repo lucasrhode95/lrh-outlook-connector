@@ -1,7 +1,7 @@
 """The single export path (requirements v4 §10), used by both the local UI and MCP.
 
 selection (conversations + messages + a range) → copies merged → bodies (Graph $batch) →
-attachments (policy) → grouping (per thread / all / none) →
+attachments (policy) → grouping (per conversation / all / none) →
 TXT or JSONL rendering → packaging.
 """
 
@@ -27,6 +27,7 @@ from outlook_connector.domain.models import (
     Message,
     MessageSummary,
 )
+from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first
 from outlook_connector.service.export import attachments as policy
 from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
 from outlook_connector.service.export.packaging import TextFile, package
@@ -37,7 +38,6 @@ from outlook_connector.service.failures import (
     error_summary,
     export_error,
 )
-from outlook_connector.service.threads import BODY_MISSING, Threads, base_subject, oldest_first
 
 RANGE_PAGE = 200
 SHOWN_FAILURES = 3
@@ -65,10 +65,10 @@ class Fetched:
 
 
 class Exports:
-    def __init__(self, threads: Threads) -> None:
-        self.threads = threads
-        self.mailbox = threads.mailbox
-        self.reader = threads.mailbox.reader
+    def __init__(self, conversations: Conversations) -> None:
+        self.conversations = conversations
+        self.mailbox = conversations.mailbox
+        self.reader = conversations.mailbox.reader
 
     async def export(self, request: ExportRequest) -> ExportArtifact:
         """Export a selection to one local file (requirements v4 §10).
@@ -88,7 +88,7 @@ class Exports:
             raise InvalidRequest(
                 f"Nothing to export: the selection holds no messages{_excluded_note(selection.excluded)}."
             )
-        bodies, missing = await self.threads.bodies(summaries, known=selection.known)
+        bodies, missing = await self.conversations.bodies(summaries, known=selection.known)
         found, attachment_failures = await self._attachments(
             summaries, inline=request.include_attachments, skip=set(missing)
         )
@@ -132,7 +132,7 @@ class Exports:
         selected: dict[str, MessageSummary] = {}
         excluded: dict[str, int] = defaultdict(int)
         for conversation_id in dict.fromkeys(request.conversation_ids):
-            items, left_out, truncated = await self.threads.messages(
+            items, left_out, truncated = await self.conversations.messages(
                 conversation_id, include_deleted_items=request.include_deleted_items
             )
             if truncated:
@@ -223,7 +223,7 @@ class Exports:
         every message is asked, in batches.
 
         Assumes (not re-checked here): ``summaries`` is the final selection from ``_select``, and ``skip``
-        the messages without a body from ``Threads.bodies``.
+        the messages without a body from ``Conversations.bodies``.
         """
         wanted = [m.id for m in summaries if m.id not in skip and (inline or m.has_attachments)]
         if not wanted:
@@ -293,7 +293,7 @@ class Exports:
         selection: Selection,
         summary: str | None,
     ) -> list[TextFile]:
-        """The text files: one per group (per thread, all, none), TXT or JSONL.
+        """The text files: one per group (per conversation, all, none), TXT or JSONL.
 
         Assumes (not re-checked here): ``fetched`` covers every summary (each has a body or an entry in
         ``missing``), and ``downloads`` comes from ``_download`` for the same selection.
@@ -336,7 +336,7 @@ class Exports:
         """One message's text, attachment lines (TXT) and attachment records (JSONL).
 
         Assumes (not re-checked here): the message has a body in ``fetched.bodies`` or an error in
-        ``fetched.missing`` (``Threads.bodies`` guarantees one of the two).
+        ``fetched.missing`` (``Conversations.bodies`` guarantees one of the two).
         """
         lines: list[str] = []
         blocks: list[str] = []

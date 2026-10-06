@@ -7,6 +7,8 @@ A local connector for one user's Exchange Online mailbox. It has two surfaces: a
 - **What Microsoft allows:** [docs/outlook-api-research.md](docs/outlook-api-research.md)
 - **Work register:** [docs/outlook-roadmap.md](docs/outlook-roadmap.md)
 
+**Terminology:** this project uses **conversation** consistently for the Exchange/Graph `conversationId` grouping. A conversation is what email users and many clients commonly call a **thread**; there is no separate thread id in this connector.
+
 ## Setup
 
 Python ≥ 3.12.
@@ -41,7 +43,7 @@ claude mcp add lrh-outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scr
 ```
 
 The client starts one `outlook-connector mcp` process per session. Read tools: `list_folders`,
-`list_messages`, `search_messages`, `get_thread`, `get_message`, `list_attachments`,
+`list_messages`, `search_messages`, `get_conversation`, `get_message`, `list_attachments`,
 `download_attachment`, `save_message_mime`, `export_messages`, `auth_status`, `propose_email`. Reading
 never changes the mailbox, not even read state.
 
@@ -68,7 +70,7 @@ message (mail sent to yourself or to a list you are on) are shown once, with `al
 other folders.
 
 **Out of reach:** hidden folders, and items outside the mail folders (Teams meeting records,
-settings and other non-mail items), are never listed, searched, counted, threaded or exported, and
+settings and other non-mail items), are never listed, searched, counted, grouped into conversations or exported, and
 `list_folders` does not show them. Search covers mail only. List and search results are compact by default (`detail="full"` for every field);
 search hits carry the conversation's message count, and `list_messages(include_total=true)` returns the
 server's count for the window.
@@ -93,7 +95,7 @@ errors" line) says how many and why. In TXT the mark is a block:
 
 In JSONL it is an `export_error` object (step, status, code, message, request id, likely cause,
 `retry`, fix) on the message record or on the failed attachment record (`attachments_export_error`
-when the attachments could not be listed). `get_thread` marks a body it cannot fetch the same way, sets `export_error` on that message and
+when the attachments could not be listed). `get_conversation` marks a body it cannot fetch the same way, sets `export_error` on that message and
 counts them in `body_errors`, so a caller never has to read the text to find out.
 
 **Throttling.** Microsoft Graph allows about 4 concurrent requests and 10,000 requests per 10 minutes
@@ -111,10 +113,10 @@ it stops 30 minutes after the last one is closed:
 outlook-connector ui
 ```
 
-The UI opens on the Inbox. Browse folders or recent mail grouped by thread (a conversation with one
-message is a plain row; a real thread shows its message count across all folders, newest message on
+The UI opens on the Inbox. Browse folders or recent mail grouped by conversation (a conversation with one
+message is a plain row; a real conversation shows its message count across all folders, newest message on
 top), search the mailbox, filter what is loaded, read messages and download their attachments, tick
-threads or single messages, and export them as one `.txt` or `.zip` (one file per thread, one for
+conversations or single messages, and export them as one `.txt` or `.zip` (one file per conversation, one for
 everything, or one per message; attachments optional). "export this view" exports the whole current
 folder and date range. Deleted Items and Junk are left out unless you tick "Deleted / Junk"
 (they are always shown inside those folders). Hidden folders and Sync Issues (classic Outlook's

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="3585" viewBox="0 0 2600 3585" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, or signs in. Both surfaces call service classes: Mailbox, Threads, Exports, Files, Writes and Mutations. The service depends only on the MailReader and MailWriter ports in remote/ports.py, implemented by GraphMailReader over Graph and OwsMailWriter over Outlook Web; both send through one Transport, which takes a token from TokenProvider for every request. Mailbox keeps only the folder cache and the account binding in the local Store. AppContext in bootstrap.py builds all of it once per process. Hovering an item shows its details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, or signs in. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes and Mutations. The service depends only on the MailReader and MailWriter ports in remote/ports.py, implemented by GraphMailReader over Graph and OwsMailWriter over Outlook Web; both send through one Transport, which takes a token from TokenProvider for every request. Mailbox keeps only the folder cache and the account binding in the local Store. AppContext in bootstrap.py builds all of it once per process. Hovering an item shows its details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -67,7 +67,7 @@
 <g><title>Mail folders with paths (e.g. Inbox/Projects/RIE), well-known aliases and counts. → Mailbox.folders</title><text class="detail" x="118" y="656">• <tspan class="code">list_folders</tspan></text></g>
 <g><title>Messages newest first, from the server; folder optional (whole mailbox), date window, scope flags, cursor. → Mailbox.list_messages</title><text class="detail" x="118" y="683">• <tspan class="code">list_messages</tspan></text></g>
 <g><title>Server-side search of mail only; hits grouped by conversation in rank order, with each conversation's message_count. → Mailbox.search</title><text class="detail" x="118" y="710">• <tspan class="code">search_messages</tspan></text></g>
-<g><title>A whole conversation across folders, oldest first; body=unique strips quoted history. → Threads.get_thread</title><text class="detail" x="118" y="737">• <tspan class="code">get_thread</tspan></text></g>
+<g><title>A whole conversation across folders, oldest first; body=unique strips quoted history. → Conversations.get_conversation</title><text class="detail" x="118" y="737">• <tspan class="code">get_conversation</tspan></text></g>
 <g><title>One message's body (unique/full/html) with offset continuation, plus attachment metadata. → Mailbox.get_message</title><text class="detail" x="118" y="764">• <tspan class="code">get_message</tspan></text></g>
 <text class="group-title" x="118" y="803">Files</text>
 <g><title>Attachment metadata; kind=item is a forwarded email, kind=reference a cloud link. → Mailbox.attachments</title><text class="detail" x="118" y="833">• <tspan class="code">list_attachments</tspan></text></g>
@@ -90,8 +90,8 @@
 <g><title>GET. One page of a folder, newest first, with the scope switches and a cursor. → Mailbox.list_messages</title><text class="detail" x="1008" y="683">• <tspan class="code">/api/messages</tspan></text></g>
 <g><title>GET. One message's body for the reading pane. → Mailbox.get_message</title><text class="detail" x="1008" y="710">• <tspan class="code">/api/messages/{id}</tspan></text></g>
 <g><title>GET. Server-side search, grouped by conversation. → Mailbox.search</title><text class="detail" x="1008" y="737">• <tspan class="code">/api/search</tspan></text></g>
-<g><title>GET. The whole conversation with bodies. → Threads.get_thread</title><text class="detail" x="1008" y="764">• <tspan class="code">/api/threads/{id}</tspan></text></g>
-<g><title>POST. Message counts for the listed conversations (the row badges). → Mailbox.conversation_sizes</title><text class="detail" x="1008" y="791">• <tspan class="code">/api/thread-sizes</tspan></text></g>
+<g><title>GET. The whole conversation with bodies. → Conversations.get_conversation</title><text class="detail" x="1008" y="764">• <tspan class="code">/api/conversations/{id}</tspan></text></g>
+<g><title>POST. Message counts for the listed conversations (the row badges). → Mailbox.conversation_sizes</title><text class="detail" x="1008" y="791">• <tspan class="code">/api/conversation-sizes</tspan></text></g>
 <text class="group-title" x="1277" y="626">Files</text>
 <g><title>GET. Download one attachment. → Files.download_attachment</title><text class="detail" x="1277" y="656">• <tspan class="code">/api/messages/{id}/attachments/{aid}</tspan></text></g>
 <g><title>POST. Attachment names for many messages at once (the file chips on rows). → Mailbox.attachments_many</title><text class="detail" x="1277" y="683">• <tspan class="code">/api/attachments</tspan></text></g>
@@ -122,12 +122,12 @@
 <g><title>Server-side $search, hits grouped by conversation, ids translated to immutable ids.</title><text class="detail" x="359" y="1258">• <tspan class="code">search</tspan></text></g>
 <g><title>One message's body with offset continuation, and its attachment metadata.</title><text class="detail" x="359" y="1285">• <tspan class="code">get_message</tspan></text></g>
 <g><title>Attachment metadata of one message, or of many at once (batched).</title><text class="detail" x="359" y="1312">• <tspan class="code">attachments(_many)</tspan></text></g>
-<g><title>How many messages each conversation has, counted the way get_thread lists them.</title><text class="detail" x="359" y="1339">• <tspan class="code">conversation_sizes</tspan></text></g>
+<g><title>How many messages each conversation has, counted the way get_conversation lists them.</title><text class="detail" x="359" y="1339">• <tspan class="code">conversation_sizes</tspan></text></g>
 <text class="muted" x="118" y="1446">uses <tspan class="code">MailReader</tspan> · <tspan class="code">Store</tspan> · <tspan class="code">cursors</tspan></text>
 <rect x="673" y="1129" width="553" height="333" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="691" y="1164"><tspan class="code">Threads</tspan><tspan class="detail" dx="12">threads.py</tspan></text>
+<text class="section-title" x="691" y="1164"><tspan class="code">Conversations</tspan><tspan class="detail" dx="12">conversations.py</tspan></text>
 <text class="group-title" x="691" y="1201">Methods</text>
-<g><title>A whole conversation across folders, oldest first, with bounded bodies and a cursor. Bodies that could not be fetched carry an ExportError block.</title><text class="detail" x="691" y="1231">• <tspan class="code">get_thread(id, ...)</tspan></text></g>
+<g><title>A whole conversation across folders, oldest first, with bounded bodies and a cursor. Bodies that could not be fetched carry an ExportError block.</title><text class="detail" x="691" y="1231">• <tspan class="code">get_conversation(id, ...)</tspan></text></g>
 <g><title>All messages of the conversation, oldest first, what was left out by folder, and whether the server listing was truncated.</title><text class="detail" x="691" y="1258">• <tspan class="code">messages(id, ...)</tspan></text></g>
 <g><title>Text bodies from the server, in $batch requests of 20.</title><text class="detail" x="691" y="1285">• <tspan class="code">bodies(summaries, ...)</tspan></text></g>
 <text class="group-title" x="691" y="1324">Rules</text>
@@ -140,7 +140,7 @@
 <g><title>Export a selection (conversations, messages, a date range) to one local file: TXT for people or JSONL for agents, optionally a ZIP with attachments.</title><text class="detail" x="1265" y="1231">• <tspan class="code">export(request)</tspan></text></g>
 <text class="group-title" x="1265" y="1270">Modules</text>
 <g><title>formatter.py renders TXT/JSONL; attachments.py is the selection policy and safe file names; packaging.py builds the one output file.</title><text class="detail" x="1265" y="1300">• <tspan class="code">formatter</tspan> · <tspan class="code">attachments</tspan> · <tspan class="code">packaging</tspan></text></g>
-<text class="muted" x="1265" y="1446">uses <tspan class="code">Threads</tspan> · <tspan class="code">failures</tspan> · <tspan class="code">localfiles</tspan></text>
+<text class="muted" x="1265" y="1446">uses <tspan class="code">Conversations</tspan> · <tspan class="code">failures</tspan> · <tspan class="code">localfiles</tspan></text>
 <rect x="100" y="1482" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="1517"><tspan class="code">Files</tspan><tspan class="detail" dx="12">files.py</tspan></text>
 <text class="group-title" x="118" y="1554">Methods</text>
@@ -299,8 +299,8 @@
 <g><title>The MailReader adapter.</title><text class="detail" x="1938" y="366">• <tspan class="code">GraphMailReader(Graph(transport))</tspan></text></g>
 <g><title>SQLite file per account fingerprint.</title><text class="detail" x="1938" y="393">• <tspan class="code">Store(account)</tspan></text></g>
 <g><title>Everything else reads through it.</title><text class="detail" x="1938" y="420">• <tspan class="code">Mailbox(reader, store)</tspan></text></g>
-<text class="detail" x="1938" y="447">• <tspan class="code">Threads(mailbox)</tspan></text>
-<text class="detail" x="1938" y="474">• <tspan class="code">Exports(threads)</tspan> · <tspan class="code">Files(mailbox)</tspan></text>
+<text class="detail" x="1938" y="447">• <tspan class="code">Conversations(mailbox)</tspan></text>
+<text class="detail" x="1938" y="474">• <tspan class="code">Exports(conversations)</tspan> · <tspan class="code">Files(mailbox)</tspan></text>
 <g><title>The MailWriter adapter; uses the write sign-in only when a write is made.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter(Ows(transport, tokens))</tspan></text></g>
 <text class="detail" x="1938" y="528">• <tspan class="code">Writes(mailbox, writer, account)</tspan></text>
 <text class="detail" x="1938" y="555">• <tspan class="code">Mutations(mailbox, writer, check)</tspan></text>

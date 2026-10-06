@@ -1,6 +1,6 @@
 """Conversation retrieval (requirements v4 §8, research §3.4).
 
-A thread is an Exchange conversation: every message with one conversationId across all folders.
+A conversation is an Exchange conversation: every message with one conversationId across all folders.
 Graph cannot sort that query, so messages are sorted here. Copies of one message are shown once
 (mailbox.py).
 Bodies are optional and bounded, with a cursor.
@@ -14,13 +14,13 @@ from typing import Literal
 from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
+    Conversation,
+    ConversationMessage,
     Coverage,
     ExportError,
     ExportStep,
     Message,
     MessageSummary,
-    Thread,
-    ThreadMessage,
 )
 from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
@@ -42,7 +42,7 @@ def oldest_first(m: MessageSummary) -> float:
     return stamp.timestamp() if stamp else 0.0
 
 
-class Threads:
+class Conversations:
     def __init__(self, mailbox: Mailbox) -> None:
         self.mailbox = mailbox
 
@@ -62,7 +62,7 @@ class Threads:
         items, excluded = await self.mailbox.finish(sorted(remote, key=oldest_first), skip)
         return items, excluded, truncated
 
-    async def get_thread(
+    async def get_conversation(
         self,
         conversation_id: str,
         *,
@@ -71,7 +71,7 @@ class Threads:
         include_deleted_items: bool = False,
         max_chars: int = 40000,
         cursor: str | None = None,
-    ) -> Thread:
+    ) -> Conversation:
         """A whole conversation across folders, oldest first, with bounded bodies and a cursor.
 
         Entry point: the authoritative check of ``max_chars`` and the cursor (the web routes pass them
@@ -79,7 +79,7 @@ class Threads:
         """
         start = 0
         if cursor:  # the cursor carries the original selection, so a continuation never drifts
-            state = cursors.decode(cursor, "get_thread")
+            state = cursors.decode(cursor, "get_conversation")
             if state.get("conversation_id") != conversation_id:
                 raise InvalidRequest("This cursor belongs to a different conversation.")
             start = int(state["start"])
@@ -103,7 +103,7 @@ class Threads:
         if any(m.also_in for m in items):
             notes.append("Copies of one message are shown once; also_in names the other folders.")
 
-        entries: list[ThreadMessage] = []
+        entries: list[ConversationMessage] = []
         next_start: int | None = None
         if include_bodies:
             budget = max_chars
@@ -119,7 +119,7 @@ class Threads:
                         break
                     cut = len(text) > budget
                     entries.append(
-                        ThreadMessage(message=summary, text=text[:budget], truncated=cut, export_error=error)
+                        ConversationMessage(message=summary, text=text[:budget], truncated=cut, export_error=error)
                     )
                     budget -= min(len(text), budget)
                     if budget <= 0 and index + offset + 1 < len(items):
@@ -127,7 +127,7 @@ class Threads:
                         break
                 index += len(chunk)
         else:
-            entries = [ThreadMessage(message=m) for m in items[start:]]
+            entries = [ConversationMessage(message=m) for m in items[start:]]
         errors = [e.export_error for e in entries if e.export_error]
         retryable = sum(1 for error in errors if error.retry)
         if errors:
@@ -136,12 +136,12 @@ class Threads:
                 "those messages carry export_error and an [EXPORT ERROR] block in their text."
             )
 
-        return Thread(
+        return Conversation(
             conversation_id=conversation_id,
             subject=base_subject(items[0].subject) if items else None,
             messages=entries,
             cursor=cursors.encode(
-                "get_thread",
+                "get_conversation",
                 start=next_start,
                 conversation_id=conversation_id,
                 include_bodies=include_bodies,

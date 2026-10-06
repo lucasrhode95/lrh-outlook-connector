@@ -15,7 +15,7 @@ from tests.fakes.graph_fake import FakeGraph, sample_mailbox
 from tests.fakes.msal_fakes import jwt
 
 READ_TOOLS = {
-    "auth_status", "list_folders", "list_messages", "search_messages", "get_thread",
+    "auth_status", "list_folders", "list_messages", "search_messages", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
     "propose_email",
 }  # fmt: skip
@@ -96,13 +96,13 @@ async def test_draft_then_proposal_then_confirmed_send(server: FastMCP, fake: Fa
     assert [body["MessageDisposition"] for _, body in fake.ows_calls] == ["SaveOnly", "SendAndSaveCopy"]
 
 
-async def test_list_search_thread_message_flow(server: FastMCP) -> None:
+async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
     page = await call(server, "list_messages", folder="inbox", limit=10)
     assert [m["id"] for m in page["items"]] == ["m5", "m1"] and page["coverage"]["complete"]
     found = await call(server, "search_messages", query="relatório")
     conversation_id = found["conversations"][0]["conversation_id"]
-    thread = await call(server, "get_thread", conversation_id=conversation_id)
-    assert [m["message"]["id"] for m in thread["messages"]] == ["m1", "m2", "m3"]
+    conversation = await call(server, "get_conversation", conversation_id=conversation_id)
+    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3"]
     message = await call(server, "get_message", message_id="m2")
     assert message["text"] == "Thanks!"
 

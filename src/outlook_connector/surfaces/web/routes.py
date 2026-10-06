@@ -160,15 +160,15 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         )
         return _json(result)
 
-    async def thread(request: Request) -> Response:
-        result = await (await context.services()).threads.get_thread(
+    async def conversation(request: Request) -> Response:
+        result = await (await context.services()).conversations.get_conversation(
             request.path_params["conversation_id"],
             include_bodies=False,
             include_deleted_items=_flag(request, "include_deleted_items"),
         )
         return _json(result)
 
-    async def thread_sizes(request: Request) -> Response:
+    async def conversation_sizes(request: Request) -> Response:
         payload = await request.json()
         ids = payload.get("conversation_ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
@@ -228,9 +228,9 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         Route("/api/messages/{message_id}", api(message)),
         Route("/api/messages/{message_id}/attachments/{attachment_id}", api(attachment)),
         Route("/api/search", api(search)),
-        Route("/api/thread-sizes", api(thread_sizes), methods=["POST"]),
+        Route("/api/conversation-sizes", api(conversation_sizes), methods=["POST"]),
         Route("/api/attachments", api(attachment_names), methods=["POST"]),
-        Route("/api/threads/{conversation_id}", api(thread)),
+        Route("/api/conversations/{conversation_id}", api(conversation)),
         Route("/api/export", api(export), methods=["POST"]),
         Route("/api/heartbeat", heartbeat, methods=["POST"]),
         Mount("/static", StaticFiles(directory=str(STATIC)), name="static"),

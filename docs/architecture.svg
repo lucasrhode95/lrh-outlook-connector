@@ -47,7 +47,7 @@
   <text class="card-subtitle" x="930" y="227"><tspan class="code">outlook-connector ui</tspan> · started by you when needed</text>
   <rect x="930" y="260" width="750" height="100" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="detail" x="950" y="292"><tspan class="code">surfaces/web/</tspan>: Starlette JSON API + static JS</text>
-  <text class="detail" x="950" y="320">Thread list · in-memory filter · export download</text>
+  <text class="detail" x="950" y="320">Conversation list · in-memory filter · export download</text>
   <text class="detail" x="950" y="348">Localhost only · exits on Ctrl+C or idle timeout</text>
 
   <!-- No-daemon note. -->
@@ -78,7 +78,7 @@
   <text class="detail" x="116" y="671">conversation</text>
 
   <rect x="366" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="382" y="580">threads.py</text>
+  <text class="section-title code" x="382" y="580">conversations.py</text>
   <text class="detail" x="382" y="615">conversation fetch</text>
   <text class="detail" x="382" y="643">local sort, copies once</text>
   <text class="detail" x="382" y="671">bounded bodies, cursor</text>

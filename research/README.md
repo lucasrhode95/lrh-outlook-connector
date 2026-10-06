@@ -32,7 +32,7 @@ in `common.py`.
 |---|---|---|---|
 | 1 | `graph_scopes.py` | Which Graph mail scopes each first-party client can obtain (`.default` + explicit). This decides the Graph/OWS split. | No (token requests only) |
 | 2 | `catalog.py` | Mailbox size, folder tree, metadata walk and delta timings | No |
-| 3 | `threads.py` | Conversation retrieval across folders, `$orderby` support, reply-header quality | No |
+| 3 | `conversations.py` | Conversation retrieval across folders, `$orderby` support, reply-header quality | No |
 | 4 | `search.py "query" …` | Graph `$search` vs `/search/query` vs Substrate: recall, totals, paging, id alignment | No |
 | 5 | `attachments.py` | Attachment types, inline/`cid:` usage, `$value` per type | No |
 | 6 | `delta_moves.py --snapshot`, then a change, then `--check` | What delta reports for moves, deletes and read toggles | No (the change is made by you or by step 7) |
