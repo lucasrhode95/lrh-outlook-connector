@@ -16,11 +16,11 @@ from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.transport import Transport
+from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.mutations import Mutations
-from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store, store_path
 
