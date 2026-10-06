@@ -44,15 +44,17 @@ claude mcp add lrh-outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scr
 
 The client starts one `outlook-connector mcp` process per session. Read tools: `list_folders`,
 `list_messages`, `search_messages`, `get_conversation`, `get_message`, `list_attachments`,
-`download_attachment`, `save_message_mime`, `export_messages`, `auth_status`, `propose_email`. Reading
+`download_attachment`, `save_message_mime`, `export_messages`, `auth_status`. Reading
 never changes the mailbox, not even read state.
 
-Write tools (they need `outlook-connector auth write`): `create_draft` saves a plain-text message or
-reply into Drafts and never sends it. `send_email` sends only a message you confirmed: the agent calls
-`propose_email`, shows you the exact message and its confirmation code, and passes that code once you
-confirm; any change to the recipients, subject or body afterwards is refused. A send is never
-retried; if Outlook gives no clear answer, the connector looks in Sent Items and otherwise tells you
-to check before anything is sent again.
+Write tools (they need `outlook-connector auth write`): `create_draft` accepts exactly one of
+`text_body` or `html_body`, for new mail and replies. `edit_draft` updates only supplied fields.
+Both save once and require Graph read-back, returning the Microsoft draft id, full server text/HTML,
+and verification findings. Plain text is escaped without Markdown conversion; intentional HTML is
+passed through except active web content. Replies report quoted-history checks.
+After the user explicitly asks to send, `send_draft(draft_id)` sends that existing draft without
+changing its content. There is no direct send or confirmation-code API. Sends are never retried;
+unknown outcomes require checking Sent Items and Outbox before sending again.
 
 Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` and
 `delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)

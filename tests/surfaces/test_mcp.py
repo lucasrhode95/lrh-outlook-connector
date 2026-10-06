@@ -17,9 +17,8 @@ from tests.fakes.msal_fakes import jwt
 READ_TOOLS = {
     "auth_status", "list_folders", "list_messages", "search_messages", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
-    "propose_email",
 }  # fmt: skip
-WRITE_TOOLS = {"create_draft", "send_email"}
+WRITE_TOOLS = {"create_draft", "edit_draft", "send_draft"}
 CHANGE_TOOLS = {"set_read_state", "set_flag"}
 RELOCATE_TOOLS = {"move_messages", "delete_messages"}
 
@@ -76,24 +75,22 @@ async def test_tools_and_annotations(server: FastMCP) -> None:
     for name in READ_TOOLS:
         annotations = tools[name].annotations
         assert annotations and annotations.readOnlyHint and not annotations.destructiveHint
-    draft, send = tools["create_draft"].annotations, tools["send_email"].annotations
+    draft, send = tools["create_draft"].annotations, tools["send_draft"].annotations
     assert draft and not draft.readOnlyHint and not draft.destructiveHint and not draft.openWorldHint
     assert send and not send.readOnlyHint and send.destructiveHint and send.openWorldHint
     assert "never attempt to sign in" in (server.instructions or "")
     assert "Never confirm on the user's behalf" in (server.instructions or "")
 
 
-async def test_draft_then_proposal_then_confirmed_send(server: FastMCP, fake: FakeGraph) -> None:
-    message = {"to": ["bob@example.com"], "subject": "Hi", "body": "Hello Bob"}
-    draft = await call(server, "create_draft", message=message)
-    assert draft["verified"] and fake.messages[draft["id"]].folder == "f-drafts"
-    proposal = await call(server, "propose_email", message=message)
-    assert proposal["sender"] == "me@example.com" and proposal["to"] == ["bob@example.com"]
-    with pytest.raises(Exception, match="does not match"):
-        await server.call_tool("send_email", {"message": message, "user_confirmation": "SEND-WRONG"})
-    sent = await call(server, "send_email", message=message, user_confirmation=proposal["confirmation"])
-    assert sent["status"] == "sent"
-    assert [body["MessageDisposition"] for _, body in fake.ows_calls] == ["SaveOnly", "SendAndSaveCopy"]
+async def test_draft_edit_then_send(server: FastMCP, fake: FakeGraph) -> None:
+    draft = await call(server, "create_draft", to=["bob@example.com"], subject="Hi", text_body="Hello Bob")
+    assert draft["verified"] and draft["text_body"] == "Hello Bob"
+    updated = await call(server, "edit_draft", draft_id=draft["id"], html_body="<b>Updated</b>")
+    assert updated["html_body"] == "<b>Updated</b>"
+    sent = await call(server, "send_draft", draft_id=draft["id"])
+    assert sent["status"] == "sent" and fake.sent_drafts == [draft["id"]]
+    tools = {t.name: t for t in await server.list_tools()}
+    assert set(tools["send_draft"].inputSchema["properties"]) == {"draft_id"}
 
 
 async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
