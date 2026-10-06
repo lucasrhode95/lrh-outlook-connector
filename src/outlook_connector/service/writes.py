@@ -52,7 +52,7 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ports import MailWriter
 from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.service.threads import base_subject
+from outlook_connector.service.conversations import base_subject
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
 SENT_LOOKBACK = timedelta(minutes=5)

@@ -20,7 +20,7 @@ from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.mutations import Mutations
-from outlook_connector.service.threads import Threads
+from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store, store_path
 
@@ -29,7 +29,7 @@ from outlook_connector.store.db import Store, store_path
 class Services:
     account: Account
     mailbox: Mailbox
-    threads: Threads
+    conversations: Conversations
     exports: Exports
     files: Files
     writes: Writes  # uses the write sign-in, only when a write is made
@@ -61,12 +61,12 @@ class AppContext:
             reader = GraphMailReader(Graph(self._transport))
             store = Store(store_path(account.fingerprint), account.fingerprint)
             mailbox = Mailbox(reader, store)
-            threads = Threads(mailbox)
+            conversations = Conversations(mailbox)
             writer = OwsMailWriter(Ows(self._transport, self.tokens))
             writes = Writes(mailbox, writer, account)
             mutations = Mutations(mailbox, writer, writes.check_account)
             self._services = Services(
-                account, mailbox, threads, Exports(threads), Files(mailbox), writes, mutations
+                account, mailbox, conversations, Exports(conversations), Files(mailbox), writes, mutations
             )
         return self._services
 

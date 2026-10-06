@@ -110,7 +110,7 @@ Three pages of 25 per backend.
 - After resolving Substrate's `ImmutableId`s through Graph, `subject:relatório` returned the **identical 50 conversations** from both. For `relatório be`, all 52 `$search` conversations appear in Substrate's top 75.
 - **Conclusion:** adopt Graph `$search`, and group hits by `conversationId` locally. `/search/query` is not used: its total comes from another engine and ignores the folder rules.
 
-### 3.4 Conversations and reply headers (`threads.py`)
+### 3.4 Conversations and reply headers (`conversations.py`)
 
 Sample: 25 recent conversations, 192 messages.
 
@@ -123,7 +123,7 @@ Sample: 25 recent conversations, 192 messages.
 | Reply tree | 6 of 25 conversations branch (18 branch points). 9 parents are not in the mailbox. |
 | `uniqueBody` / `body` | median length ratio 0.10 |
 
-**Conclusion:** `get_thread` = conversation filter + local sort. Branch detection is feasible for received mail. The user's own messages need a fallback.
+**Conclusion:** `get_conversation` = conversation filter + local sort. Branch detection is feasible for received mail. The user's own messages need a fallback.
 
 ### 3.5 Attachments (`attachments.py`)
 

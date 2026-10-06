@@ -76,7 +76,7 @@ def render_file(
     """One TXT file. With ``sections``, consecutive messages of different conversations get a header.
 
     ``notes`` (what the export left out or could not fetch) go in the header. Every message carries
-    its ids, which get_message/get_thread accept, so an export can be traced back to its source.
+    its ids, which get_message/get_conversation accept, so an export can be traced back to its source.
 
     Assumes (not re-checked here): every item carries its body text, or the error block in ``text`` with
     ``export_error`` set (the orchestrator builds them).

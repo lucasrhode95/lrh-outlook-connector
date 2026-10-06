@@ -21,7 +21,7 @@ from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.localfiles import kept_dir
 from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.service.threads import Threads
+from outlook_connector.service.conversations import Conversations
 from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
@@ -40,7 +40,7 @@ def exports(fake: FakeGraph, tmp_path: Path) -> Exports:
     transport = Transport(
         StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep
     )
-    return Exports(Threads(Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))))
+    return Exports(Conversations(Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))))
 
 
 def zip_names(path: str) -> list[str]:
@@ -53,7 +53,7 @@ def zip_text(path: str, name: str) -> str:
         return archive.read(name).decode("utf-8")
 
 
-async def test_thread_with_attachments_is_one_zip_with_sibling_folder(exports: Exports) -> None:
+async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
     assert artifact.filename.endswith(".zip") and artifact.message_count == 3
     stem = "2026-09-28 Relatório BE semanal"
@@ -67,7 +67,7 @@ async def test_thread_with_attachments_is_one_zip_with_sibling_folder(exports: E
     assert "buy now" not in text
 
 
-async def test_without_attachments_a_single_thread_is_a_flat_txt(exports: Exports) -> None:
+async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
     assert artifact.filename == "2026-09-28 Relatório BE semanal.txt" and artifact.content_type.startswith(
         "text/plain"
@@ -101,7 +101,7 @@ async def test_combine_none_is_one_file_per_message_in_a_zip(exports: Exports) -
     assert zip_names(artifact.path) == ["2026-09-28 Relatório BE semanal.txt", "2026-09-30 Lunch_.txt"]
 
 
-async def test_selected_messages_join_their_thread_file(exports: Exports) -> None:
+async def test_selected_messages_join_their_conversation_file(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-lunch"], message_ids=["m1", "m3"]))
     assert artifact.text_files == 2 and artifact.message_count == 3
 
@@ -489,7 +489,7 @@ async def test_copies_on_different_pages_are_exported_once_naming_both_folders(
 async def test_a_range_export_of_a_junk_heavy_mailbox_never_reads_junk(
     exports: Exports, fake: FakeGraph
 ) -> None:
-    from tests.service.test_mailbox_threads import _junk_heavy
+    from tests.service.test_mailbox_conversations import _junk_heavy
 
     _junk_heavy(fake)
     fake.calls.clear()

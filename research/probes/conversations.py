@@ -1,4 +1,4 @@
-"""R3 + R4: can Graph return a whole conversation across folders, and how good are thread headers?
+"""R3 + R4: can Graph return a whole conversation across folders, and how good are conversation headers?
 
 Read-only (profile 'read'). Samples recent conversations from Sent Items and Inbox,
 then for each conversation:
@@ -27,7 +27,7 @@ from common import emit, graph, graph_pages, need, rows, well_known_ids
 
 FWD = re.compile(r"^\s*(fw|fwd|enc|wg|tr|rv)\s*:", re.I)
 REPLY = re.compile(r"^\s*(re|res|aw|sv|antw)\s*:", re.I)
-HEADER_NAMES = {"message-id", "in-reply-to", "references", "thread-index", "thread-topic"}
+HEADER_NAMES = {"message-id", "in-reply-to", "references", "conversation-index", "conversation-topic"}
 
 
 def sample_conversations(token: str, n: int) -> list[str]:
@@ -139,8 +139,8 @@ def main() -> int:
                  "list_status": conv["status"], "orderby_with_filter": conv["orderby_with_filter"],
                  "folders": dict(folders), "drafts": sum(1 for m in msgs if m.get("isDraft"))}
         if not args.skip_headers and len(msgs) >= 2:
-            entry["threading"] = header_analysis(token, msgs)
-            t = entry["threading"]
+            entry["conversation_headers"] = header_analysis(token, msgs)
+            t = entry["conversation_headers"]
             totals["messages"] += t["messages_analysed"]
             totals["branch_points"] += t["branch_points"]
             totals["orphans"] += t["orphans_parent_not_in_conversation"]
@@ -151,7 +151,7 @@ def main() -> int:
         per_conv.append(entry)
 
     emit({
-        "probe": "threads (R3/R4)",
+        "probe": "conversations (R3/R4)",
         "conversations_sampled": len(cids),
         "R3_summary": {
             "message_count_distribution": {"min": min(sizes, default=0), "median": statistics.median(sizes) if sizes else 0,

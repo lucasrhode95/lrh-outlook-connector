@@ -28,9 +28,9 @@ These are the use cases the design must serve. "Phase" refers to §12.
 
 | # | Use case | Capabilities used | Phase |
 |---|---|---|---|
-| A1 | "Search my whole mailbox for information on topic X." The agent tries several keywords, then pulls the full thread of each match. | `search_messages` (repeated) → `get_thread` | MVP |
-| A2 | "Summarize attention points from last week's email." | `list_messages(since=…)` across the mailbox → `get_thread` per relevant message | MVP |
-| A3 | "Explain what the Teams 'Analytics Chat' is talking about." The agent reads Teams, decides it needs more context, searches email and reads attachments. | Teams MCP + this MCP side by side in the client. `search_messages`, `get_thread`, attachment resources. **No cross-repo integration needed.** | MVP |
+| A1 | "Search my whole mailbox for information on topic X." The agent tries several keywords, then pulls the full conversation of each match. | `search_messages` (repeated) → `get_conversation` | MVP |
+| A2 | "Summarize attention points from last week's email." | `list_messages(since=…)` across the mailbox → `get_conversation` per relevant message | MVP |
+| A3 | "Explain what the Teams 'Analytics Chat' is talking about." The agent reads Teams, decides it needs more context, searches email and reads attachments. | Teams MCP + this MCP side by side in the client. `search_messages`, `get_conversation`, attachment resources. **No cross-repo integration needed.** | MVP |
 | A4 | "Delete all marketing email from last week." | `list_messages`/`search_messages` → `move_messages(target=deleteditems)` | Mutations |
 | A5 | "Move inbound items to their project folders (National Grid, Naturgy, RIE…). If unsure, don't move; list them for me." | `list_folders`, `list_messages`, `get_message`; the agent classifies, then calls `move_messages` per target and reports the unsure items in chat | Mutations |
 | A6 | Agent marks messages read/unread or flags them as part of triage. | `set_read_state`, `set_flag` | Mutations |
@@ -40,7 +40,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 
 | # | Use case | Phase |
 |---|---|---|
-| U1 | Browse messages **grouped by thread**. Select whole threads and/or individual messages, choose export options, and get **one download**. | MVP |
+| U1 | Browse messages **grouped by conversation**. Select whole conversations and/or individual messages, choose export options, and get **one download**. | MVP |
 | U2 | Search messages by subject and participants, and by content through online search. Instantly filter what's already loaded. | MVP |
 
 ## 3. Non-goals
@@ -51,7 +51,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 - A permanent background sync daemon.
 - Local full-text content search (§8).
 - Server-side text extraction from attachments. Agents receive the raw file (§9).
-- Branch-aware thread reconstruction (parked: §10.3).
+- Branch-aware conversation reconstruction (parked: §10.3).
 
 ## 4. Authentication (decided)
 
@@ -59,7 +59,7 @@ No new Entra registration exists or will be made. The app runs its own MSAL `Pub
 
 | Role | Client | Resource | Status |
 |---|---|---|---|
-| **Reads**: folders, messages, threads, MIME, attachments, delta, search | Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | `https://graph.microsoft.com/Mail.Read` | Proven: interactive + silent cache |
+| **Reads**: folders, messages, conversations, MIME, attachments, delta, search | Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | `https://graph.microsoft.com/Mail.Read` | Proven: interactive + silent cache |
 | **Writes**: send, move, delete, read state, flag, categories | One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | `https://outlook.office.com/.default` → OWS | Send and every mutation proven (research §4.2) |
 
 Every Graph mail write/send scope is denied (`AADSTS65002`) to both clients (research §2). Denied pairs are never requested again.
@@ -90,32 +90,32 @@ Authentication requirements:
 Lazy population:
 
 - **Folders** are cached and served from the cache immediately; a cache older than 10 minutes is refreshed in the background. A full refresh is cheap: about 23 folders in under a second.
-- **Message metadata is not mirrored or cached.** It is fetched by every list/search/thread call. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2). The summary cache for instant display was removed on 2026-10-04: listing is fast enough without it.
+- **Message metadata is not mirrored or cached.** It is fetched by every list/search/conversation call. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2). The summary cache for instant display was removed on 2026-10-04: listing is fast enough without it.
 - **Bodies and attachments** are fetched only on read or export. Attachment bytes are never cached automatically.
 - **No local retention** (decided 2026-10-02): mail deleted on the server is gone here too. Reading it gives "not found". A message selected by id that is gone when the export starts fails the export with a clear message; one deleted while the export runs is marked `[EXPORT ERROR]` in the file (§10.1).
 - Development DBs can be reset freely. No migrations (see AGENTS.md).
 
-## 8. Listing, threads and search
+## 8. Listing, conversations and search
 
-**Scope, shared by list, search, thread and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; threads stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
 
 - Always from the server; there is no local-only listing (`refresh=false` was removed with the summary cache on 2026-10-04).
 
-**Thread** (`get_thread`): every message with one `conversationId` **across all folders**, deduplicated (copies shown once) and chronological.
+**Conversation** (`get_conversation`): every message with one `conversationId` **across all folders**, deduplicated (copies shown once) and chronological.
 
-- Messages you forgot to move into the right folder still belong to the thread.
+- Messages you forgot to move into the right folder still belong to the conversation.
 - Default scope: all folders except Deleted Items and Junk, with an `include_deleted_items` flag (O4).
-- The result is bounded, with continuation for long threads.
+- The result is bounded, with continuation for long conversations.
 - Graph rejects `$orderby` combined with the `conversationId` filter, so **sort client-side** (research §3.4).
-- In this phase, a "thread" is exactly Exchange's conversation. Branches are not distinguished yet (§10.3).
+- In this phase, a "conversation" is exactly Exchange's conversation. Branches are not distinguished yet (§10.3).
 
 **Search is online only.** No local FTS content search.
 
 - UI search for subject/participants uses the same online search, with field-scoped queries where the backend supports them (e.g. Graph `subject:`, `from:`, `to:`).
-- The UI also offers an instant in-memory filter over messages and threads already loaded.
-- Retained mail that was deleted remotely is reachable through list, thread and filter, but not through search. Search results must say so.
+- The UI also offers an instant in-memory filter over messages and conversations already loaded.
+- Retained mail that was deleted remotely is reachable through list, conversation and filter, but not through search. Search results must say so.
 
 **Search backend: Graph `$search`**, which has the same recall as Outlook's own top-bar search, folds accents and supports field scoping (research §3.3). Results are messages, grouped into conversations locally. No search total is reported: Microsoft Search (`/search/query`) counts with a different engine and without the connector's folder rules, so its number cannot be compared with the results.
 
@@ -132,12 +132,12 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 ### 10.1 Selection and options (UI and MCP)
 
-The selection is any mix of **whole threads**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `include_sent_items`), deduplicated by message and by copy. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
+The selection is any mix of **whole conversations**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `include_sent_items`), deduplicated by message and by copy. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
 
 | Option | Default | Effect |
 |---|---|---|
 | `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
-| `combine` | `per_thread` | `per_thread`: one TXT per thread, chronological; a selected individual message goes into its thread's TXT. `all`: one TXT for the whole selection, chronological, with per-thread section headers. `none`: one TXT per message. |
+| `combine` | `per_conversation` | `per_conversation`: one TXT per conversation, chronological; a selected individual message goes into its conversation's TXT. `all`: one TXT for the whole selection, chronological, with per-conversation section headers. `none`: one TXT per message. |
 | `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, dates, folder, people, body, attachments), always one file. |
 | `include_deleted_items` | off | Include Deleted Items and Junk Email (see §8). |
 | `body` | `unique` | `unique` strips quoted reply history (Graph `uniqueBody`). `full` keeps it. |
@@ -148,9 +148,9 @@ TXT content:
 - The file header says what was left out by folder, and one "Export errors: …" line counts what could not be exported, by kind and likely cause; a merged copy is named on its message (`Also in:`).
 - Then the body.
 
-**Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Threads and ranges are listed from the server at export time.
+**Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Conversations and ranges are listed from the server at export time.
 
-Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes. Callers never have to scan messages to learn about errors: the export result counts them (`export_errors`, `error_summary`), and `get_thread` sets `export_error` on each affected message and counts them in `body_errors`. Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_thread`):
+Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes. Callers never have to scan messages to learn about errors: the export result counts them (`export_errors`, `error_summary`), and `get_conversation` sets `export_error` on each affected message and counts them in `body_errors`. Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_conversation`):
 
 ```text
 [EXPORT ERROR] The body of this message could not be fetched.
@@ -180,7 +180,7 @@ JSONL carries the same error as an `export_error` object (on the message when it
 
 One shared orchestrator serves both the UI (HTTP download) and MCP (resource or file reference).
 
-### 10.3 Parked: branch-aware threads
+### 10.3 Parked: branch-aware conversations
 
 Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` headers, with Exchange `ConversationId` and `Thread-Index` as supporting evidence. Detect branches, including forwards, and offer a merged chronological view where each message is labeled with its branch. Research the quality of the existing headers before committing to this (R4).
 
@@ -223,10 +223,10 @@ Requirements:
 
 | Phase | Content |
 |---|---|
-| **MVP (read)** | Auth (read client), folders, `list_messages`, `get_thread`, `get_message`, attachment resources, online search, export (§10), local UI, MCP read surface |
+| **MVP (read)** | Auth (read client), folders, `list_messages`, `get_conversation`, `get_message`, attachment resources, online search, export (§10), local UI, MCP read surface |
 | **Send** | Write-client sign-in, `send_email` with safeguards |
 | **Mutations** | move → delete → read state → flag |
-| **Parked** | Branch-aware threads (§10.3): rely on Exchange conversations for now |
+| **Parked** | Branch-aware conversations (§10.3): rely on Exchange conversations for now |
 
 ## 13. Operational rules
 
@@ -239,6 +239,6 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 
 | # | Question | How it gets decided |
 |---|---|---|
-| O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing threads grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for threads and messages; export options per §10.1 | Confirm while building U1 |
-| O4 | `get_thread` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
-| O5 | Thread-header quality for branch detection | R4, before §10.3 |
+| O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
+| O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
+| O5 | Conversation-header quality for branch detection | R4, before §10.3 |

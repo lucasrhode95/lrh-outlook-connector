@@ -21,6 +21,7 @@ from outlook_connector.domain.models import (
     Attachment,
     BodyKind,
     CombineMode,
+    Conversation,
     Detail,
     DraftResult,
     EmailProposal,
@@ -34,7 +35,6 @@ from outlook_connector.domain.models import (
     OutgoingMessage,
     SearchResult,
     SendResult,
-    Thread,
 )
 from outlook_connector.service.files import SavedFile
 
@@ -54,7 +54,7 @@ Items, Drafts and Outbox: use it for "the latest mail I received", which include
 filed into other folders. Both flags point the same way: true shows more mail, false filters more. \
 coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
-and other non-mail items), are never listed, searched, counted, threaded or exported, and \
+and other non-mail items), are never listed, searched, counted, grouped into conversations or exported, and \
 list_folders does not show them; coverage.excluded.hidden counts any that were dropped. Search \
 covers mail only.
 - Meeting mail (invitations and their updates, cancellations, replies to invitations) carries \
@@ -62,10 +62,10 @@ meeting: kind (invite, update, cancelled, accepted, tentative, declined), start,
 out_of_date; ordinary mail has none. A reply written to an invitation stays in its conversation. \
 include_meeting_mail=false (list, search, range export) leaves meeting mail out: a conversation \
 that is only invitations, RSVPs and cancellations disappears; one with real replies shows \
-through them (get_thread still returns the whole conversation).
+through them (get_conversation still returns the whole conversation).
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
-- Reading: get_thread returns a whole conversation across folders, oldest first, with bodies \
+- Reading: get_conversation returns a whole conversation across folders, oldest first, with bodies \
 without quoted history by default; a body that could not be fetched sets export_error on its \
 message, and body_errors counts them. get_message reads one message with offset/max_chars continuation.
 - Always read `coverage` before treating results as complete; follow `cursor` for more. \
@@ -98,7 +98,7 @@ Never confirm on the user's behalf. A message changed after confirmation is refu
 confirm again. If send_email returns status "unknown", do not send again; ask the user to check \
 Sent Items and Outbox.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
-explicit message ids (from list, search or get_thread), at most 100 per call, never a query; \
+explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
 set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
 (already so; nothing sent), not_found, failed (with Outlook's code) or unknown (no clear answer; \
 check before repeating). delete_messages moves \
@@ -122,7 +122,7 @@ CHANGE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHi
 RELOCATE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
 
 MessageIds = Annotated[
-    list[str], Field(description="Explicit message ids (at most 100), from list, search or get_thread.")
+    list[str], Field(description="Explicit message ids (at most 100), from list, search or get_conversation.")
 ]
 
 
@@ -134,7 +134,7 @@ IncludeMeetings = Annotated[
     bool,
     Field(
         description="Include meeting mail: invitations, RSVPs and cancellations "
-        "(false: leave them out; threads with real replies still show those)."
+        "(false: leave them out; conversations with real replies still show those)."
     ),
 ]
 IncludeSent = Annotated[
@@ -245,7 +245,7 @@ def build_server(context: AppContext) -> FastMCP:
         )
 
     @mcp.tool(annotations=READ_ONLY)
-    async def get_thread(
+    async def get_conversation(
         conversation_id: str,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "unique",
@@ -255,9 +255,9 @@ def build_server(context: AppContext) -> FastMCP:
             str | None,
             Field(description="Continuation; it restores the original options, which are then ignored."),
         ] = None,
-    ) -> Thread:
+    ) -> Conversation:
         """A whole conversation across folders, oldest first. body=unique strips quoted reply history."""
-        return await (await services()).threads.get_thread(
+        return await (await services()).conversations.get_conversation(
             conversation_id,
             include_bodies=include_bodies,
             body=body,
@@ -301,9 +301,9 @@ def build_server(context: AppContext) -> FastMCP:
         combine: Annotated[
             CombineMode,
             Field(
-                description="per_thread: one TXT per conversation; all: one TXT; none: one TXT per message."
+                description="per_conversation: one TXT per conversation; all: one TXT; none: one TXT per message."
             ),
-        ] = "per_thread",
+        ] = "per_conversation",
         body: Literal["unique", "full"] = "unique",
         include_deleted_items: IncludeDeleted = False,
         format: Annotated[

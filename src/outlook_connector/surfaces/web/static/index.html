@@ -14,7 +14,7 @@
       <input id="search" type="search" placeholder="Search mail (e.g. budget review, from:alice, subject:invoice)">
       <button type="submit">Search</button>
     </form>
-    <input id="filter" type="search" placeholder="Filter loaded threads" aria-label="Filter loaded threads">
+    <input id="filter" type="search" placeholder="Filter loaded conversations" aria-label="Filter loaded conversations">
     <div class="range-picker" id="range-picker">
       <button id="range-toggle" class="range-toggle" type="button" aria-haspopup="dialog" aria-expanded="false"
               title="Message date range">
@@ -65,7 +65,7 @@
           <input id="opt-meetings" type="checkbox" autocomplete="off"> Invites / RSVPs</label>
         <button id="export-view" class="link" title="Export every message of this folder and date range">export this view</button>
       </div>
-      <div id="threads"></div>
+      <div id="conversations"></div>
       <button id="more" class="more" hidden>Load older messages</button>
     </section>
 
@@ -81,10 +81,10 @@
   <footer class="exportbar">
     <span id="selection" class="muted">Nothing selected</span>
     <label class="switch"><input id="opt-attachments" type="checkbox"> Include attachments</label>
-    <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a thread reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox"> Include quoted history</label>
+    <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a conversation reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox"> Include quoted history</label>
     <span class="files">Files
       <span class="segmented" role="radiogroup" aria-label="Files">
-        <label title="One file per thread"><input type="radio" name="files" value="per_thread" checked><span>Per thread</span></label>
+        <label title="One file per conversation"><input type="radio" name="files" value="per_conversation" checked><span>Per conversation</span></label>
         <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
         <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
       </span>
