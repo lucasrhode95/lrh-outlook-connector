@@ -13,8 +13,8 @@ from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service import cursors
-from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.conversations import Conversations, base_subject
+from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
@@ -242,13 +242,17 @@ async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(ma
 
 
 async def test_conversation_can_include_deleted_items_and_junk(mailbox: Mailbox) -> None:
-    conversation = await Conversations(mailbox).get_conversation("c-rel", include_deleted_items=True, include_bodies=False)
+    conversation = await Conversations(mailbox).get_conversation(
+        "c-rel", include_deleted_items=True, include_bodies=False
+    )
     assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3", "m4"]
 
 
 async def test_conversation_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> None:
     conversations = Conversations(mailbox)
-    first = await conversations.get_conversation("c-rel", max_chars=15)  # "First report" fits, "Thanks!" does not
+    first = await conversations.get_conversation(
+        "c-rel", max_chars=15
+    )  # "First report" fits, "Thanks!" does not
     assert [t.message.id for t in first.messages] == ["m1"] and first.cursor
     # the cursor restores the original options: max_chars=1000 here is ignored
     second = await conversations.get_conversation("c-rel", max_chars=1000, cursor=first.cursor)
@@ -281,7 +285,9 @@ async def test_truncated_conversation_is_not_reported_complete(
 ) -> None:
     monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
     conversation = await Conversations(mailbox).get_conversation("c-rel", include_bodies=False)
-    assert not conversation.coverage.complete and any("listing limit" in n for n in conversation.coverage.notes)
+    assert not conversation.coverage.complete and any(
+        "listing limit" in n for n in conversation.coverage.notes
+    )
 
 
 async def test_conversation_sizes_count_like_get_conversation(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -388,7 +394,9 @@ async def test_conversation_marks_missing_bodies_with_the_export_error_block(
     assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
     assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
     assert not conversation.coverage.complete  # throttling is retryable
-    assert conversation.body_errors == 3 and all(t.export_error and t.export_error.retry for t in conversation.messages)
+    assert conversation.body_errors == 3 and all(
+        t.export_error and t.export_error.retry for t in conversation.messages
+    )
 
 
 async def test_conversation_body_denied_does_not_make_coverage_incomplete(
@@ -412,7 +420,9 @@ async def test_conversation_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox,
         FakeMessage("big", "Huge", "f-inbox", "2026-09-01T00:00:00Z", conversation="c-big", text="x" * 5000)
     )
     conversation = await Conversations(mailbox).get_conversation("c-big", max_chars=1000)
-    assert conversation.messages[0].truncated and conversation.cursor is None and conversation.coverage.complete
+    assert (
+        conversation.messages[0].truncated and conversation.cursor is None and conversation.coverage.complete
+    )
 
 
 async def test_truncated_listing_stays_incomplete_when_bodies_fit(

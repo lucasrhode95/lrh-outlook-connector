@@ -119,7 +119,9 @@ class Conversations:
                         break
                     cut = len(text) > budget
                     entries.append(
-                        ConversationMessage(message=summary, text=text[:budget], truncated=cut, export_error=error)
+                        ConversationMessage(
+                            message=summary, text=text[:budget], truncated=cut, export_error=error
+                        )
                     )
                     budget -= min(len(text), budget)
                     if budget <= 0 and index + offset + 1 < len(items):
