@@ -2,7 +2,7 @@
 
 Current work only. This is a decision and implementation register, not a changelog: completed work and intentionally parked ideas are omitted.
 
-Snapshot **2026-10-05**, against `main`.
+Snapshot **2026-10-06**, against `main`.
 
 - Product requirements: [Requirements v4](outlook-requirements-v4.md)
 - Build/module map: [architecture §11](architecture.md)
@@ -10,7 +10,7 @@ Snapshot **2026-10-05**, against `main`.
 
 ## Current priority
 
-1. **W7 → W8:** HTML for new messages, then signatures.
+1. **W7 → W8:** draft-first text/HTML sending, then signatures.
 2. **W9:** inbox-rule MCP tools; the API contracts are already proven live.
 3. **Correctness and reliability:** H17–H29 and H33.
 4. **Performance and cleanup:** H30–H38.
@@ -24,25 +24,56 @@ Status wording used below:
 
 # Send and mailbox features
 
-## W7 — HTML for new messages
+## W7 — Draft-first text and HTML sending
 
 **Status:** Decided, not built.
 
-**Current state:** replies already use HTML so Exchange can preserve quoted formatting and inline images. New messages and new-message drafts still use the older plain-text body path.
+**Goal:** make Outlook drafts the only entry point for agent-authored outgoing mail. The connector must never guess whether a body is plain text or HTML, and it must never reconstruct a message at send time.
 
-**Next:** render the user's new-message text as escaped HTML using the same conventions as replies. Use it for both drafts and sends. This is the prerequisite for W8.
+**Public write surface:**
+
+- `create_draft(..., text_body=..., html_body=...)`
+- `edit_draft(draft_id, ..., text_body=..., html_body=...)`
+- `send_draft(draft_id)`
+
+`create_draft` accepts exactly one of `text_body` or `html_body`. `edit_draft` uses the same explicit body fields when the body is changed; neither is required for recipient/subject-only edits. New messages and replies use the same tools, with the existing reply context (`reply_to_message_id`, `reply_all`) selecting reply behavior.
+
+**Body handling:**
+
+- Plain text is escaped into minimal HTML before entering the shared private write path. Preserve line breaks, indentation, repeated spaces/tabs and especially non-breaking-space semantics; do not parse Markdown, auto-link, inject fonts or make formatting decisions.
+- HTML is intentional pass-through for now. Do not distinguish fragments from full HTML documents, normalize/repair markup, restrict CSS, or reject remote images solely for being remote.
+- Reject only clearly active/web-application content such as scripts, iframes/objects/embeds, forms, JavaScript URLs and event-handler attributes.
+- The connector has one private HTML write engine after the public text/HTML boundary.
+
+**Draft-first flow:**
+
+1. Validate recipients, subject/body and reply arguments locally.
+2. Create or update the Outlook draft through OWS.
+3. Read that server draft back through Graph.
+4. Return the Microsoft draft id plus both server text and server HTML, along with simple verification findings.
+5. The agent shows/uses that read-back in the conversation. If the user later explicitly asks to send it, `send_draft(draft_id)` sends that existing Microsoft draft exactly as stored.
+
+There is no `propose_email`, direct `send_email`, format flag, format guessing, connector-side draft registry or custom confirmation token. Human approval remains the agent/host interaction before `send_draft`; the connector's safety property is that the send operation accepts only an existing Microsoft draft id and cannot alter/reconstruct the message while sending.
+
+**Read-back and checks:** successful create/edit requires Graph read-back. A few bounded retries for normal propagation/transient failures are fine; if read-back ultimately fails, report the operation as failed and return any reliable server id/details already obtained. Do not create another draft automatically or maintain local recovery state.
+
+For the first version, automatic verification stays deliberately simple and high-confidence: flag an empty/missing body, missing expected attachments/inline images where cheaply knowable, and preserve the existing reply-history checks. Do not compare submitted HTML with Microsoft's returned HTML or implement a generalized body diff.
+
+**Deferred live-test research, not blockers:** after the basic flow works, test how Outlook/Graph and recipient clients treat fragments vs complete HTML documents, malformed-but-accepted HTML, CSS, remote images and representative formatting. Revisit body-change detection only with real examples; a future approach may compare normalized visible text (entities decoded, whitespace/non-breaking spaces normalized) rather than HTML structure.
+
+**Next:** replace the current `create_draft` / `propose_email` / `send_email` surface and write service with the draft-first API above, update models/tests/docs together, and live-test both plain-text and HTML creation/edit/reply/send flows.
 
 ## W8 — Signatures
 
 **Status:** Decided, not built.
 
-**Current state:** Outlook Web does not add the user's Outlook signature to mail sent through OWS, so the connector must add it itself. One signature per account is enough for the first version.
+**Scope:** exactly one signature for the connector: import it, remove it, enable it or disable it. No multiple-signature selection, routing rules or signature editor.
 
 **Build:**
 
 - MCP tools: `import_signature`, `delete_signature`, `set_signature_active(true|false)`.
 - Import an Outlook-style `.htm` signature and optional `<name>_files/` image folder.
-- Store it per account under the connector data directory; active by default after import.
+- Store the one signature under the connector data directory; active by default after import.
 - Send signature images as inline attachments referenced by `cid:`.
 - Placement matches Outlook: new message = body then signature; reply = new text, signature, then Outlook's quoted history untouched.
 - MCP only for now; no UI work required.
@@ -82,19 +113,6 @@ Support only the conditions/actions already proven and used by the mailbox: From
 - With `continue_on_error=false`, later chunks are not sent and are returned as `failed: not sent`.
 - A failed read-back after an unclear write outcome returns `unknown`.
 - The call always returns per-message results and `counts`, so already-completed work is visible.
-
-## H18 — A failed reply-history check can leave an unmentioned draft
-
-**Status:** Pending.
-
-**Problem:** a reply is saved as a draft before its quoted history is verified. If the verification reads fail because of throttling or network trouble, nothing is sent, but the saved draft is left behind while the tool returns only the verification error. Retrying can create duplicate drafts.
-
-**Next:**
-
-- `send_email`: report that the message was **not sent**, name the saved draft/id, and tell the caller to retry later or review it in Outlook.
-- `create_draft`: return the created draft instead of failing, with `history_intact: null` and a `history_problem` explaining that verification could not run.
-
-Do not add automatic draft deletion or draft reuse unless a real need appears.
 
 ## H19 — Inline images can disappear from exports without an error
 
