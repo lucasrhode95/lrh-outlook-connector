@@ -12,7 +12,7 @@ Snapshot **2026-10-06**, against `main`.
 
 1. **W7 → W8:** draft-first text/HTML sending, then signatures.
 2. **W9:** inbox-rule MCP tools; the API contracts are already proven live.
-3. **Correctness and reliability:** H17–H29 and H33.
+3. **Correctness and reliability:** H17, H19–H29 and H33.
 4. **Performance and cleanup:** H30–H38.
 
 Status wording used below:
