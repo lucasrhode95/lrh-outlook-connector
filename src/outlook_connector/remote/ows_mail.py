@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from outlook_connector.domain.models import EmailProposal
+from outlook_connector.domain.models import DraftMessage
 from outlook_connector.remote import ows_mapping as mapping
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ports import FolderTarget, MailWriter
@@ -14,7 +14,7 @@ from outlook_connector.remote.transport import operation
 class OwsMailWriter(MailWriter):
     """Implements ``MailWriter`` over OWS.
 
-    Assumes (not re-checked here): proposals come from ``Writes.propose`` (addresses, subject and body
+    Assumes (not re-checked here): draft messages come from ``Writes._resolve`` (addresses, subject and body
     validated), message ids are Graph immutable ids from this connector, folder targets were resolved by
     the service, and the write account was checked (``Writes.check_account``). Nothing is re-validated
     here; every call is sent once.
@@ -26,44 +26,45 @@ class OwsMailWriter(MailWriter):
     def account(self) -> dict[str, Any]:
         return self._ows.account()
 
-    async def create_draft(self, message: EmailProposal) -> str | None:
+    async def create_draft(self, message: DraftMessage) -> str | None:
         """Save into Drafts (never sends). Returns the draft's Graph id when Outlook reports it."""
         with operation("saving a draft"):
-            return mapping.created_id(await self._ows.call("CreateItem", mapping.create(message, "SaveOnly")))
+            return mapping.created_id(await self._ows.call("CreateItem", mapping.create(message)))
 
-    async def send(self, message: EmailProposal) -> None:
-        """Send once and keep a copy in Sent Items. Never retried."""
-        with operation("sending a message"):
-            await self._ows.call("CreateItem", mapping.create(message, "SendAndSaveCopy"))
-
-    async def send_draft(self, draft_id: str, subject: str) -> None:
-        """Send an existing draft as it is, the way Outlook Web does: ``UpdateItem`` with
-        ``SendAndSaveCopy`` (``SendItem`` is not supported over OWS; live 2026-10-04). The update
-        sets the subject the draft already has. Sent once, never retried."""
-        body = {
-            "ItemChanges": [
-                {
-                    "__type": "ItemChange:#Exchange",
-                    "ItemId": mapping.item_id(draft_id),
-                    "Updates": [
-                        {
-                            "__type": "SetItemField:#Exchange",
-                            "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": "item:Subject"},
-                            "Item": {"__type": "Message:#Exchange", "Subject": subject},
-                        }
-                    ],
-                }
-            ],
-            "ConflictResolution": "AlwaysOverwrite",
-            "MessageDisposition": "SendAndSaveCopy",
-            "SavedItemFolderId": {
-                "__type": "TargetFolderId:#Exchange",
-                "BaseFolderId": {"__type": "DistinguishedFolderId:#Exchange", "Id": "sentitems"},
-            },
-            "SuppressReadReceipts": True,
-            "SendCalendarInvitationsOrCancellations": "SendToNone",
+    async def edit_draft(self, draft_id: str, changes: dict[str, Any]) -> None:
+        """Assumes (not re-checked here): existing draft, validated partial fields, bound account."""
+        fields = {
+            "subject": ("item:Subject", "Subject"),
+            "html_body": ("item:Body", "Body"),
+            "to": ("message:ToRecipients", "ToRecipients"),
+            "cc": ("message:CcRecipients", "CcRecipients"),
+            "bcc": ("message:BccRecipients", "BccRecipients"),
         }
-        with operation("sending a reply"):
+        updates = []
+        for key, value in changes.items():
+            uri, prop = fields[key]
+            if key == "html_body":
+                value = mapping.html_body(value)
+            elif key in ("to", "cc", "bcc"):
+                value = [mapping.address(a) for a in value]
+            updates.append(
+                {
+                    "__type": "SetItemField:#Exchange",
+                    "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": uri},
+                    "Item": {"__type": "Message:#Exchange", prop: value},
+                }
+            )
+        with operation("editing a draft"):
+            await self._ows.call("UpdateItem", _draft_update(draft_id, updates, "SaveOnly"))
+
+    async def send_draft(self, draft_id: str) -> None:
+        """Send only this existing draft; no message fields changed, no automatic retry."""
+        body = _draft_update(draft_id, [], "SendAndSaveCopy")
+        body["SavedItemFolderId"] = {
+            "__type": "TargetFolderId:#Exchange",
+            "BaseFolderId": {"__type": "DistinguishedFolderId:#Exchange", "Id": "sentitems"},
+        }
+        with operation("sending a draft"):
             await self._ows.call("UpdateItem", body)
 
     # ---------------------------------------------------------------- mutations (research §4.2)
@@ -125,3 +126,16 @@ class OwsMailWriter(MailWriter):
             "SendCalendarInvitationsOrCancellations": "SendToNone",
         }
         return mapping.per_id(list(changes), await self._ows.call("UpdateItem", body, strict=False))
+
+
+def _draft_update(draft_id: str, updates: list[dict[str, Any]], disposition: str) -> dict[str, Any]:
+    """Assumes (not re-checked here): id and updates validated by Writes."""
+    return {
+        "ItemChanges": [
+            {"__type": "ItemChange:#Exchange", "ItemId": mapping.item_id(draft_id), "Updates": updates}
+        ],
+        "ConflictResolution": "AlwaysOverwrite",
+        "MessageDisposition": disposition,
+        "SuppressReadReceipts": True,
+        "SendCalendarInvitationsOrCancellations": "SendToNone",
+    }
