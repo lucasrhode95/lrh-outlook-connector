@@ -65,11 +65,15 @@ For the first version, automatic verification stays deliberately simple and high
 
 ## W8 — Signatures
 
-**Status:** Decided, not built.
+**Status:** Postponed until W7 is complete.
 
-**Scope:** exactly one signature for the connector: import it, remove it, enable it or disable it. No multiple-signature selection, routing rules or signature editor.
+**First investigate server-side signature retrieval:** after W7's draft-first flow is working, create an empty or minimal new-message draft through Outlook and read it back through Graph. Determine whether Outlook inserts the user's configured signature into a server-created draft and, if so, whether the connector can reliably extract and reuse the signature HTML plus any associated inline images/CIDs. Prefer this zero-setup approach if it works reliably, because it would avoid requiring the user to export and provide an Outlook `.htm` signature.
 
-**Build:**
+The existing import design below remains the fallback if Outlook does not expose the configured signature through draft creation/read-back.
+
+**Fallback scope:** exactly one signature for the connector: import it, remove it, enable it or disable it. No multiple-signature selection, routing rules or signature editor.
+
+**Fallback build:**
 
 - MCP tools: `import_signature`, `delete_signature`, `set_signature_active(true|false)`.
 - Import an Outlook-style `.htm` signature and optional `<name>_files/` image folder.
@@ -146,9 +150,13 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 **Status:** Pending.
 
-**Problem:** `include_meeting_mail=false` or `include_sent_items=false` can currently make `ExportRequest` think a range was requested even when the caller selected only conversations/messages. That can unexpectedly select the whole mailbox.
+**Root cause:** export has three additive selection sources: conversation ids, an optional mailbox range, and explicit message ids. `ExportRequest.by_range` is supposed to say whether the mailbox-range source is active, but it currently returns true not only for `since`, `until` or `folder`, but also when `include_sent_items=false` or `include_meeting_mail=false`.
 
-**Next:** only `since`, `until` and `folder` create a range selection. The include flags only narrow whatever selection already exists.
+`Exports._select()` first adds messages selected by conversation id, then calls `_select_range()` whenever `by_range` is true, then adds explicit message ids. These sources are merged; the explicit selection is not being ignored. The bug is that a filter flag accidentally activates an additional range selection. If no real range selector was supplied, `_select_range()` calls `list_messages(folder=None, since=None, until=None, ...)`, which is effectively an unbounded reachable-mailbox listing subject to the include filters.
+
+**Example:** `export_messages(conversation_ids=["budget-thread"], include_meeting_mail=false)` should export that conversation. Today, `include_meeting_mail=false` also makes `by_range=true`, so the exporter additionally lists the whole reachable mailbox with meeting mail excluded and merges those messages with the requested conversation. On a large mailbox this can even hit the 2,000-message export cap before anything is exported.
+
+**Next:** only `since`, `until` and `folder` activate the mailbox-range selection source. `include_meeting_mail` and `include_sent_items` remain filters for a range when one is actually requested; they must never create a range on their own or broaden an explicit conversation/message selection.
 
 ## H23 — Search dates without a timezone can crash
 
@@ -172,7 +180,9 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 **Problem:** the connector's 150 MB download guard is a known local limit, but exports currently classify it like an unexpected error.
 
-**Next:** classify it explicitly: the attachment is larger than the connector's 150 MB limit and should be downloaded from Outlook.
+**Why 150 MB:** keep the existing 150 MB limit as a connector policy. The code currently defines `MAX_DOWNLOAD_BYTES = 150 * 1024 * 1024` and streams attachment downloads to disk through that guard. This is not a Microsoft Graph download requirement; 150 MB is instead a conservative local ceiling that also lines up with upper Outlook/Exchange attachment/message limits in some Microsoft contexts. Most mail providers impose much tighter practical limits, so a normal file attachment reaching this guard should be extremely rare. Retaining it protects against unexpectedly huge downloads/disk usage without materially constraining ordinary email export.
+
+**Next:** classify hitting the guard explicitly as a known connector limit rather than an unexpected failure: the attachment is larger than the connector's 150 MB download limit and should be downloaded directly from Outlook.
 
 ## H27 — Per-folder listing does not report excluded-folder counts
 
