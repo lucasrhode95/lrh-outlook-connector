@@ -110,7 +110,7 @@ The existing import design below remains the fallback if Outlook does not expose
 
 ## W9 — Inbox rules
 
-**Status:** Decided, API proven live; tools not built.
+**Status:** Implemented on this branch; proven OWS contracts, synthetic tool validation complete.
 
 **Current state:** the Outlook Web rule contracts have been captured and replayed successfully through `Ows.call_request`. Reading, creating, editing (including clearing a condition), enabling/disabling, reordering and deleting a throwaway rule all worked live. Graph folder ids are accepted by the write request.
 
@@ -126,7 +126,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 **Safeguard:** every rule write is proposed first, requires user confirmation, is sent once, and is read back. Rules persist and affect future mail, so writes must not be retried automatically.
 
-**Next:** add the service mapping and MCP tools on top of the already-proven OWS calls.
+**Implementation notes:** stateless account/state-bound proposals, one confirmed write and fresh read-back. Enable/disable is a separate update; reordering refuses collections containing unsupported rules to avoid rewriting them. Folder read-back uses the reported name (OWS returns a mailbox path rather than a Graph id). No new live mailbox writes were performed.
 
 # Correctness and reliability
 
