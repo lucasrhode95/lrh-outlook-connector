@@ -600,6 +600,43 @@ They do not prove rename, editing RTF, concurrent-write races, every image forma
 tools, or integration/recipient rendering of automatic signatures in a draft. Graph-first routing
 remains unchanged: these native operations fill the documented roaming-signature gap in Graph.
 
+### 4.9 W7 HTML compatibility matrix (2026-10-07)
+
+**Scope.** Five synthetic messages were created/read back and sent once through the connector's
+own draft-first service, to the owner's work mailbox and previously authorized personal Gmail.
+Cases: HTML fragment, equivalent full document, deliberately unclosed paragraph/list/table markup,
+inline plus head stylesheet CSS, and one static public remote PNG. No signature settings or
+unrelated mail were modified. Saved drafts, Sent Items and received work copies were checked through
+Graph; Outlook Web and Gmail were then inspected in the owner's authenticated Edge tabs using
+rendered DOM/computed styles and screenshots. Native desktop control was unavailable.
+
+| Case | Graph draft/sent/received checks | Outlook Web in Edge | Gmail in Edge |
+|---|---|---|---|
+| Fragment / full document | Both returned 548-character HTML with equal visible-text hashes and matching structure; all expected markers, two NBSPs, table/list/link retained. | Both retained bold, italic, accents/Japanese text, two table rows and two list items. | Same verified structure/formatting; full reading-view screenshot inspected. |
+| Malformed accepted HTML | Saved/sent successfully; paragraph/list/table markup repaired; end marker and all expected text retained. | Three paragraphs, two table rows and two list items; end marker displayed. | Same counts and end marker displayed. |
+| CSS | Inline styles, head rules and classes persisted in draft, sent and received HTML. | Inline and stylesheet styling applied; 2px borders, 12px padding and bold weights retained. Dark theme changed displayed colors. | Intended inline blue box, purple bold text and green box rendered; computed colors/borders/padding matched. |
+| Remote image | Original HTTPS image URL retained; no attachment fabricated. | PNG loaded and displayed at 211 × 71 with the original source URL; initial paint was asynchronous. | PNG loaded at 211 × 71 through Google's image proxy, without changing image preferences. |
+
+All five retained every expected content marker across draft/sent/received work copies, with no
+verification findings. The external Gmail copies included a corporate disclaimer absent from the
+submitted, sent and received work-mailbox bodies, consistent with a transport-added external footer.
+The footer text and addresses are not reproduced here. These observations support recording
+normalization, theme and transport changes rather than requiring byte-identical rendered HTML.
+No generalized body-diff feature is justified by these fixtures.
+
+**Cleanup.** All five drafts were sent; their five Sent Items copies, five received
+work copies and five Gmail copies remain as visual evidence. Gmail's five messages were restored to
+their initial unread state; work-message read states were restored through the connector. The
+temporary Gmail reading window was closed. Synthetic structural results and sanitized browser
+checks/private screenshots are stored outside Git.
+
+**Owner desktop confirmation (2026-10-07).** In response to the Outlook desktop check request, the
+owner confirmed that all five messages looked correct. The desktop version was not supplied.
+This completes W7 validation for the tested fixtures: automated draft/sent/received checks,
+Outlook Web and Gmail in Edge, and owner-confirmed Outlook desktop rendering. No pixel-identical
+cross-client behavior or coverage of every client version/HTML feature is claimed. No further W7
+implementation or validation task is identified, so W7 is removed from the current-work roadmap.
+
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
 - **Works STANDALONE** at `https://outlook.office.com/searchservice/api/v2/query` with the `search` token (§2) and `X-AnchorMailbox: Oid:<oid>@<tid>`.

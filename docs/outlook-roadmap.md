@@ -17,7 +17,6 @@ Snapshot **2026-10-07**.
    missing signatures and dangling defaults.
 3. **Correctness:** H19, H22 and H26.
 4. **Performance and cleanup:** H30–H32 and H34–H38.
-5. **Deferred validation:** W7's remaining HTML/client research; calendar authentication stays Later (X10).
 
 Status wording:
 
@@ -27,17 +26,6 @@ Status wording:
 - **Later** — useful work outside the current build sequence.
 
 # Send and mailbox features
-
-## W7 — Remaining HTML/client validation
-
-**Status:** Later; broader HTML/client comparisons remain.
-
-**Remaining live research:** compare fragments with full HTML documents, malformed-but-accepted
-HTML, CSS, remote images and recipient-client rendering. Record the tested client combinations.
-Revisit body-change detection only if those examples demonstrate a need; normalized visible text
-may be more useful than comparing HTML structure.
-
-Completed draft/send/reply validation is recorded in [research §4.5](outlook-api-research.md#45-connector-live-validation-2026-10-07).
 
 ## W8 — Signatures
 
