@@ -1,6 +1,32 @@
 # Repository agent instructions
 
-`CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex and other agents) are identical. Change both together.
+`CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex and other agents) must be identical. Change both together.
+
+## Shared development rules
+
+### Process and persistence
+
+This is a local, single-user connector unless this repository documents otherwise. Keep processes scoped to their documented entry point or session. Do not add schedulers, sync loops, watchers, warm-up tasks, remote listeners, or multi-user features unless asked.
+
+- Do not assume in-memory state survives across calls or processes. Return what a later call needs or read it from the server.
+- Serve cached data only while it meets the documented freshness policy. If fresh data is required, wait for refresh instead of serving stale data.
+- Shared local files (auth state, caches, indexes, output folders) must tolerate concurrent processes.
+
+### Input boundaries and code structure
+
+Validate untrusted input once at the entry point that receives it, and let internal routines trust the validated contract. Document entry-point validation and internal assumptions in docstrings. When adding a caller to a routine that assumes sanitized input, make sure that caller provides it.
+
+Order modules top-down: public entry points first, then called functions, then private helpers and formatting. Keep calls followable with named functions; prefer explicit branches over string-based dispatch. Import the names used. Keep test-only seams in tests; constructor injection that is part of the design stays.
+
+### Checks, tests, and documentation
+
+Run every check documented for this repository before each commit and fix failures. Never skip, disable, or weaken a check to get a green result. Add or update tests for behavior changes and use synthetic fixtures, never real captures or private user content. Update affected documentation in the same change, and date new live research findings.
+
+### Private data, external effects, and stored formats
+
+Never log or commit credentials, tokens, session cookies, private user content, or real identifiers. Use this repository's documented secure storage for authentication state. Do not perform external writes without the user's explicit request. Make each external write once; do not retry automatically, and report uncertain outcomes.
+
+Treat persisted data as the current format. Do not add backward-compatibility shims, old-format readers, automatic migrations, schema-version frameworks, or fallback behavior for previous application versions unless asked. Keep safeguards that protect current user data and account ownership.
 
 ## The project
 
@@ -13,55 +39,25 @@ A local connector for one user's Exchange Online mailbox: an MCP server for agen
 
 Layers: `surfaces/` (MCP, web) → `service/` (every domain decision) → `remote/` (Graph, OWS; the only code that knows wire formats and ids) and `store/` (SQLite). The service depends on the ports in `remote/ports.py`, never on a concrete adapter.
 
-## Process lifetime: short-lived, local, single user
+## Outlook-specific process and cache rules
 
-This is not a hosted or long-running server. Every entry point is a short-lived local process for one user: the MCP server lives for one agent session (stdio), the web UI until it is closed or idle (127.0.0.1 only), `auth` for one sign-in. Weeks can pass between runs, and several processes may run at once against the same local store and token cache. Design for that:
+The MCP server lives for one agent session (stdio); the web UI stays on `127.0.0.1` until closed or idle; `auth` runs for one sign-in. Weeks can pass between runs, and several processes may use the same local store and token cache. The folder cache is fresh for 10 minutes; otherwise the call waits for refresh. Do not use stale-while-revalidate or background refresh that only helps a later process.
 
-- Assume nothing in memory survives between calls of different sessions; anything a later call needs travels in the result (cursors are self-contained) or comes from the server.
-- Never serve a stale local cache to the call that needs it. A cache may be weeks old when a process starts; it is used only while fresh (the folder cache: 10 minutes), otherwise the call waits for a refresh. No stale-while-revalidate, no background refresh that only helps a later process.
-- No background work that outlives the call: no schedulers, sync loops, watchers or warm-up tasks.
-- Shared local files (store, token cache, output folders) must tolerate concurrent processes: short transactions, cross-process locks, exclusive file creation.
-- Do not add multi-user, remote-access or always-on concerns (auth for other users, network listeners beyond localhost, process supervision) unless the user asks.
+## Checks
 
-## Validate once
-
-Check an input once, at the entry point that receives it (the service method a surface calls, or the
-one that reads it from the server), and let the routines it calls trust it. Do not re-check what a caller
-already guarantees. Write the contract in the docstring: an entry point says what it validates
-("Entry point: ..."), and an internal routine says what it assumes ("Assumes (not re-checked here): ...").
-When you add a caller to a routine that assumes sanitized input, make sure the new caller provides it.
-
-## Code layout and readability
-
-- Order each module top-down: the entry point or public API first (e.g. `main`), then what it calls, then private helpers and formatting. Python looks names up at call time, so only what runs at import time (decorators, base classes, module-level constants and aliases) must come before its use. `if __name__ == "__main__":` stays last.
-- Keep calls followable with go-to-definition (Ctrl+click): call functions by name. Prefer an explicit `match`/`if` over dispatch through data (argparse `set_defaults(handler=...)`, handler dicts, `getattr` by string).
-- Import the names you use (`from x.y import Z`), as the codebase does; import a module only to avoid a name clash. Name functions so they read without their module (`serve_mcp`, not `run`).
-- Keep production code simple; test-only seams belong in the tests (pytest `monkeypatch`), not in production signatures. Constructor injection that is part of the design (ports, transport, token provider) stays.
-
-## Checks: run all four before every commit, and fix what they report
+Run all four before every commit:
 
 ```bash
 uv run ruff check .
-uv run ruff format --check .   # `uv run ruff format .` to fix
+uv run ruff format --check .   # use `uv run ruff format .` to fix
 uv run pyright
 uv run pytest
 ```
 
-Do not commit with a failing check, and never skip, disable or weaken a test to get green. Add or update tests with every behaviour change; they run against the fake mailbox in `tests/fakes/graph_fake.py` (synthetic data only, never real captures).
+Tests use the fake mailbox in `tests/fakes/graph_fake.py`; use synthetic data only, never real captures.
 
-## Compatibility policy
+## Outlook safety and documentation
 
-- Treat this repository as an actively developed application with a fresh current format.
-- Do not add backward-compatibility shims, old-format readers, automatic data migrations, schema-version frameworks, or fallback behavior for previous application versions unless the user explicitly asks for it.
-- When changing a current format, update its producers, consumers, fixtures, and tests together. Do not preserve obsolete formats “just in case.”
-- Keep account-ownership safeguards and current-format validation; these protect present user data and are not format-compatibility layers.
-
-## Safety rules for mail
-
-- Never send mail, or change the real mailbox, without the user's explicit request. Live tests use self-sends and messages the user names.
-- Writes are sent once and never retried automatically; an unclear outcome is reported as unknown.
-- Never log or commit mail content, addresses, tokens or real identifiers. Tokens stay in the encrypted cache.
-
-## Docs
-
-When behaviour changes, update the affected docs in the same change (README, architecture, requirements, roadmap). Record live findings in the roadmap and research docs with their date.
+- Never send mail or change the real mailbox without the user's explicit request. Live tests use self-sends and messages the user names.
+- Never log or commit mail content, addresses, tokens, or real identifiers. Tokens stay in the encrypted cache.
+- When behavior changes, update the affected README, architecture, requirements, and roadmap docs. Record live findings in the roadmap and research docs with their date.
