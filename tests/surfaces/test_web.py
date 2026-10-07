@@ -156,6 +156,15 @@ def test_activity_is_tracked(fake: FakeGraph) -> None:
     assert activity.idle_seconds() < 5
 
 
+def test_search_accepts_mixed_timezone_dates(client: TestClient) -> None:
+    response = client.get(
+        "/api/search",
+        params={"q": "relatório", "since": "2026-09-28T09:30:00", "until": "2026-09-29T09:00:00+02:00"},
+    )
+    assert response.status_code == 200
+    assert [m["id"] for hit in response.json()["conversations"] for m in hit["matching_messages"]] == ["m2"]
+
+
 def test_reader_body_offsets_reconstruct_entire_large_message(client: TestClient, fake: FakeGraph) -> None:
     text = "Start\n" + "x" * 410_000 + "\nEnd"
     fake.messages["m1"].text = text

@@ -34,7 +34,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 | A4 | "Delete all marketing email from last week." | `list_messages`/`search_messages` → `move_messages(target=deleteditems)` | Mutations |
 | A5 | "Move inbound items to their project folders (National Grid, Naturgy, RIE…). If unsure, don't move; list them for me." | `list_folders`, `list_messages`, `get_message`; the agent classifies, then calls `move_messages` per target and reports the unsure items in chat | Mutations |
 | A6 | Agent marks messages read/unread or flags them as part of triage. | `set_read_state`, `set_flag` | Mutations |
-| A7 | Agent sends an email on explicit request. | `send_email` | Send |
+| A7 | Agent sends an email on explicit request. | `send_draft` | Send |
 
 ### Manual (local UI)
 
@@ -97,7 +97,7 @@ Lazy population:
 
 ## 8. Listing, conversations and search
 
-**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by range/conversation export); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
 
@@ -188,18 +188,27 @@ Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` h
 
 ### 11.1 Send (first write phase)
 
-The transport is OWS `CreateItem` with `SendAndSaveCopy` via the write (One Outlook Web) token. It starts as plain text only, with no attachments and no Send As. A reply's text goes as HTML, and a reply is sent only after its draft was checked against the original (text, inline images with the same bytes): the quoted history must arrive exactly as received (W6).
+Agent-authored outgoing mail always enters Outlook Drafts first. `create_draft` accepts exactly
+one of `text_body` and `html_body`; `edit_draft` uses the same explicit fields when changing the body
+and preserves fields not supplied. Replies use `reply_to_message_id` / `reply_all` and retain Outlook's
+quoted history checks. No attachments authoring or Send As is supported.
 
-**Draft first:** `create_draft` saves a message or reply into Drafts and never sends it, so it needs no confirmation; the user sends it from Outlook. Agents prefer it unless the user explicitly asks them to send.
+Text is escaped into minimal HTML, preserving line breaks, indentation, repeated spaces/tabs and
+non-breaking spaces. HTML is intentional pass-through except scripts, embedded active content,
+forms, JavaScript URLs and event handlers. Both routes share one private HTML write engine.
 
-Teams-style safeguards for `send_email`:
+A successful create/edit requires Graph read-back and returns the draft id, server text and HTML,
+and simple findings (empty body, missing known attachments/inline images, reply history).
+Read-back retries are bounded; failure returns a failed result with the reliable saved id, never
+creates another draft, and stores no recovery registry.
 
-- An explicit per-message `user_confirmation`: `propose_email` returns the message exactly as it would be sent and a confirmation code; the agent shows the proposal and passes the code only after the user confirms it.
-- Revalidate the account, From, To/CC/BCC, subject and body against the confirmed proposal before sending: the code is a hash of all of them, recomputed at send time, so any change is refused. The write sign-in must be the bound account.
-- No retry on an ambiguous result. Check Sent Items instead; if the copy is not there, report "unknown" and tell the user to check before anything is sent again.
-- MCP annotations `destructiveHint=true`, `openWorldHint=true`.
-
-Live testing is limited to self-sends to `lucas.rhode@landisgyr.com`.
+The agent shows/uses the server read-back and obtains explicit human approval before calling
+`send_draft(draft_id)`. The connector requires an existing Microsoft draft and checks the bound
+write account; it cannot reconstruct or change the message while sending. No `propose_email`,
+direct `send_email`, custom confirmation token or format guessing remains.
+Ambiguous sends are never retried: read the exact id in Sent Items when possible, otherwise report
+unknown and ask the user to check Sent Items and Outbox. MCP sending annotations remain destructive
+and open-world. Live tests require an explicit user request and use self-sends only.
 
 ### 11.2 Mailbox mutations (second write phase)
 
@@ -224,7 +233,7 @@ Requirements:
 | Phase | Content |
 |---|---|
 | **MVP (read)** | Auth (read client), folders, `list_messages`, `get_conversation`, `get_message`, attachment resources, online search, export (§10), local UI, MCP read surface |
-| **Send** | Write-client sign-in, `send_email` with safeguards |
+| **Send** | Write-client sign-in, `send_draft` with safeguards |
 | **Mutations** | move → delete → read state → flag |
 | **Parked** | Branch-aware conversations (§10.3): rely on Exchange conversations for now |
 
@@ -243,6 +252,37 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
 
+
+### Inbox rules (W9)
+
+List all rules in priority order, marking unsupported rules read-only. First-version conditions:
+From, Sent to, Subject contains and Subject-or-body contains. Actions: Move to folder and Stop
+processing more rules. Partial edits keep omitted fields; null conditions clear them.
+Every create/update/toggle/reorder/delete requires a proposed write, explicit human confirmation,
+a single OWS write and fresh read-back. Confirmation binds account and complete current rule state.
+Enable/disable is a separate update. Reordering refuses collections containing unsupported rules,
+which must never be rewritten. Unknown outcomes must be checked in Outlook before repeating.
+
+H17 mutation result contract: `set_read_state`, `set_flag`, `move_messages` and `delete_messages`
+default to `continue_on_error=true`. Each returns results and counts even when a later chunk fails.
+Clear rejection is failed; successful work is done, already satisfied work is unchanged, ambiguous
+unconfirmed work is unknown (including failed read-back). With false, later chunks are failed with
+`not sent` detail and are never sent. No automatic write retries.
+
+H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
+hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
+messages with other selections; reach/scope filters still govern range and conversation selections.
+Copies remain merged and message limits still apply.
+
+H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
+expands each conversation up to the existing 1,000-message server listing cap and reports truncation
+in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
+messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
+ids and error results remain detailed. Counts cover the entire deduplicated selection.
+
+H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
+to UTC before building the search/window and cursor. MCP and web search pass dates through;
+normalization is authoritative at `Mailbox.search`, shared by both callers.
 
 H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
 unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;

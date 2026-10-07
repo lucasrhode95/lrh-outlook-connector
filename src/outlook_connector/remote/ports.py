@@ -15,10 +15,12 @@ from typing import Any, Literal, Protocol
 from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import (
     Attachment,
-    EmailProposal,
+    DraftMessage,
     Folder,
+    InboxRule,
     Message,
     MessageSummary,
+    RuleChange,
     UserProfile,
 )
 
@@ -132,17 +134,16 @@ class MailWriter(Protocol):
         """Identity claims (tid, oid, upn) of the credential the writes use."""
         ...
 
-    async def create_draft(self, message: EmailProposal) -> str | None:
+    async def create_draft(self, message: DraftMessage) -> str | None:
         """Save into Drafts without sending; the draft's id when the backend reports it."""
         ...
 
-    async def send(self, message: EmailProposal) -> None:
-        """Send and keep a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell."""
+    async def edit_draft(self, draft_id: str, changes: dict[str, Any]) -> None:
+        """Save only validated partial changes, once."""
         ...
 
-    async def send_draft(self, draft_id: str, subject: str) -> None:
-        """Send an existing draft as it is, keeping a copy in Sent Items. Raises
-        WriteOutcomeUnknown when it cannot tell."""
+    async def send_draft(self, draft_id: str) -> None:
+        """Send an existing draft without changing its content, once."""
         ...
 
     # Mutations: {message id: None when done, else the backend's response code}.
@@ -156,3 +157,13 @@ class MailWriter(Protocol):
     async def delete(self, message_ids: list[str]) -> dict[str, str | None]:
         """Move to Deleted Items. There is no hard delete."""
         ...
+
+
+class RuleWriter(Protocol):
+    """OWS rule reads and single-attempt writes; wire formats stay in the adapter."""
+
+    async def list_rules(self) -> list[InboxRule]: ...
+    async def create_rule(self, changes: RuleChange, folder: Folder | None) -> str | None: ...
+    async def update_rule(self, rule: InboxRule, changes: RuleChange, folder: Folder | None) -> None: ...
+    async def reorder_rules(self, rules: list[InboxRule]) -> None: ...
+    async def delete_rule(self, rule: InboxRule) -> None: ...
