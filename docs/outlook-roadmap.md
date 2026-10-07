@@ -2,60 +2,33 @@
 
 Current work only. This is a decision and implementation register, not a changelog: completed work and intentionally parked ideas are omitted.
 
-Snapshot **2026-10-06**, against `main`.
+Snapshot **2026-10-07**, against `main`.
 
 - Product requirements: [Requirements v4](outlook-requirements-v4.md)
 - Build/module map: [architecture §11](architecture.md)
 - API evidence: [API research](outlook-api-research.md)
 
-## Completed in this implementation batch
+## Implementation baseline
 
-Implementation branches started independently from `main`; all were merged into `main` on
-2026-10-06 (conflicts resolved per PR, keeping both sides' behavior). The compact record below is
-retained for this batch's review, overriding the normal omission of completed work.
+The implementation batch and review fixes were merged on 2026-10-06 in PRs #20–#27 and
+[#29](https://github.com/lucasrhode95/lrh-outlook-connector/pull/29). Synthetic checks passed.
+Live evidence and remaining gaps are recorded below and in [API research §4.5](outlook-api-research.md#45-connector-live-validation-2026-10-07).
 
-| Item | PR | Completion note |
-|---|---|---|
-| W7 | [#20](https://github.com/lucasrhode95/lrh-outlook-connector/pull/20) | Explicit text/HTML draft creation/edit, mandatory server read-back, existing-draft-only send; synthetic checks complete, live validation pending. |
-| W9 | [#21](https://github.com/lucasrhode95/lrh-outlook-connector/pull/21) | Supported inbox-rule MCP tools; state-bound proposal/confirmation, one write/read-back; unsupported rules read-only. |
-| H17 | [#22](https://github.com/lucasrhode95/lrh-outlook-connector/pull/22) | Default continuation after chunk errors, per-message outcomes/counts, unknown read-back failures and explicit not-sent results. |
-| H20 | [#23](https://github.com/lucasrhode95/lrh-outlook-connector/pull/23) | Explicit export ids remain authoritative; other sources keep scope filters and copies still merge. |
-| H21 | [#24](https://github.com/lucasrhode95/lrh-outlook-connector/pull/24) | Explicit-only 100 limit, existing 1,000-per-conversation cap, truncation notes and compact bulk results. |
-| H23 | [#25](https://github.com/lucasrhode95/lrh-outlook-connector/pull/25) | Search normalizes naive/aware dates to UTC in the service; redundant MCP search normalization removed. |
-| H25 | [#26](https://github.com/lucasrhode95/lrh-outlook-connector/pull/26) | UI loads the whole body in one request (one server read); no total size cap; late answers for an old selection are ignored. |
-| H27 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Deleted/Junk window exclusions from the existing per-folder count batch, reported once across pages. |
-| H28 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Coverage/docs explicitly say server_total includes meeting mail; no second counting mechanism. |
-| H29 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Neutral NotFound wording for messages, attachments, MIME and export gaps; mailbox GONE text removed. |
-| H33 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Batch-item retries share single-read transient statuses (429/502/503/504). |
-
-All implementation PRs passed lint, formatting, type checks and their full Python test suites;
-H25 also passed behavioral JavaScript tests. No real mailbox was changed. W7's draft/HTML behavior
-still requires explicitly authorized live validation; W9's folder read-back relies on OWS's reported
-name.
-
-**Review fixes (2026-10-06, after the merge).** The PR review found, and one follow-up change fixed:
-
-- W7's send read the draft and then sent it with `AlwaysOverwrite`, so an edit made in Outlook in
-  between could be overwritten or sent unseen. The send now carries the draft's change key with
-  `NeverOverwrite`: a draft changed since it was read is refused and nothing is sent. Live checks
-  (2026-10-06, research §4.2) proved this, and also that W7's empty-`Updates` send works, so that
-  shape stays.
-- W9 proposals serialized every `RuleChange` field, showing omitted conditions as null ("clear it")
-  and breaking a replayed confirmation. Proposals now carry only the supplied fields.
-- H25's reader re-read the whole message from Graph for every 200,000-character chunk. The local web
-  reader now gets the whole body in one request; MCP keeps its chunks.
-- H27 put the Deleted/Junk folders into the listing's count batch, where one failed count (a folder
-  deleted meanwhile) discarded the in-scope counts too. Counts now fail per folder.
-- H20, H21 and the other H items appended their doc notes to the end of README, architecture and
-  requirements, leaving older text contradicting them (export scope; "a result per message"). The
-  notes now live in the sections they change.
+**Live-test cleanup (2026-10-07):** all 105 temporary drafts were moved to Deleted Items and verified
+there; none remain in Drafts. Initial read states were restored, and the eight original inbox rules
+were restored exactly. Four sent test messages and their four received self-copies remain as
+evidence. No permanent deletion was performed.
 
 ## Current priority
 
-1. **W7 → W8:** draft-first text/HTML sending, then signatures.
-2. **W9:** inbox-rule MCP tools; the API contracts are already proven live.
-3. **Correctness and reliability:** H17, H19–H29 and H33.
-4. **Performance and cleanup:** H30–H38.
+1. **W9 live blockers:** distinguish inactive OWS enum values/description metadata from unsupported
+   rule behavior, and reconcile create-response identities with fresh rule-list identities; then
+   repeat the tool lifecycle checks.
+2. **W8:** signatures; Web capture reveals client insertion, corporate templates and inline uploads.
+   Prove an app-owned extraction/reuse route before implementing it.
+3. **Correctness:** H19, H22 and H26.
+4. **Performance and cleanup:** H30–H38 (H33 is already implemented).
+5. **Deferred live research:** HTML/client rendering; calendar authentication remains Later (X10).
 
 Status wording used below:
 
@@ -68,7 +41,9 @@ Status wording used below:
 
 ## W7 — Draft-first text and HTML sending
 
-**Status:** Implemented (merged 2026-10-06); synthetic validation complete, live validation pending.
+**Status:** Implemented (merged 2026-10-06); text drafts, edits and version-bound sending validated
+live on 2026-10-06. HTML drafts and replies exercised on 2026-10-07; the owner confirmed correct
+HTML rendering of the received test emails. Broader recipient-client research remains deferred.
 
 **Goal:** make Outlook drafts the only entry point for agent-authored outgoing mail. The connector must never guess whether a body is plain text or HTML, and it must never reconstruct a message at send time.
 
@@ -103,17 +78,61 @@ For the first version, automatic verification stays deliberately simple and high
 
 **Deferred live-test research, not blockers:** after the basic flow works, test how Outlook/Graph and recipient clients treat fragments vs complete HTML documents, malformed-but-accepted HTML, CSS, remote images and representative formatting. Revisit body-change detection only with real examples; a future approach may compare normalized visible text (entities decoded, whitespace/non-breaking spaces normalized) rather than HTML structure.
 
-**Live checks (2026-10-06, self-sends and probe drafts):** text draft creation, Cc/Bcc clearing with an empty list, subject edit, and existing-draft send with no field updates bound to the draft's change key (sent when current; refused with nothing sent when the draft changed since it was read). See research §4.2.
+**Live checks (2026-10-06, self-sends and probe drafts):** text draft creation, Cc/Bcc clearing with an empty list, subject edit, and existing-draft send with no field updates bound to the draft's change key (sent when current; refused with nothing sent when the draft changed since it was read). Two probe drafts were also moved to Deleted Items through `delete_messages` (`done: 2`). See research §4.2.
 
-**Next:** on explicit owner request, live-test HTML drafts and replies end to end. Deferred HTML/client research remains unchanged.
+**Live checks (2026-10-07, owner-authorized self-sends and personal recipients):** HTML creation,
+body edit and existing-draft send passed. Graph read-back of the saved draft, sent copy and received
+self-copy preserved tables, lists, links, line breaks and non-ASCII text. Text replies and HTML
+reply-all drafts passed the connector's history checks, including quoted structure and inline-image
+bytes; default recipients matched the expected reply behavior. Recipient-only edits retained the
+inline attachment, and both replies were sent once. See research §4.5 for received-copy checks and
+the limits of this validation.
+
+**Owner confirmation (2026-10-07):** the received test emails looked correct and HTML rendered
+properly. The individual recipient/client combinations were not specified. Automated recipient-side
+inspection was unavailable (Gmail connector unauthenticated, browser automation initialization failed).
+
+**Next:** broader HTML/client research remains: full documents, malformed accepted HTML, CSS,
+remote images and a client-specific comparison matrix.
 
 ## W8 — Signatures
 
-**Status:** Postponed until W7 is complete.
+**Status:** Unblocked; server-draft probes and Web capture analysis completed on 2026-10-07.
+Client insertion and a corporate template source are identified; app-owned reuse and implementation remain.
 
-**First investigate server-side signature retrieval:** after W7's draft-first flow is working, create an empty or minimal new-message draft through Outlook and read it back through Graph. Determine whether Outlook inserts the user's configured signature into a server-created draft and, if so, whether the connector can reliably extract and reuse the signature HTML plus any associated inline images/CIDs. Prefer this zero-setup approach if it works reliably, because it would avoid requiring the user to export and provide an Outlook `.htm` signature.
+**Retrieval goal:** reuse the user's configured signature HTML and inline images without requiring
+an Outlook `.htm` export. The server-created minimal-draft route was tested below; Web capture now
+provides the next discovery routes.
 
-The existing import design below remains the fallback if Outlook does not expose the configured signature through draft creation/read-back.
+**Live finding (2026-10-07):** minimal text, repeated minimal HTML and empty HTML server-created
+drafts returned only submitted content (or an empty body), with no extra signature text or images.
+The empty draft correctly returned the empty-body verification finding. This draft-creation route
+did not expose a reusable signature; the run did not inspect the user's configured signature in the
+Outlook UI or exhaust other settings APIs.
+
+**Capture finding (2026-10-07):** the supplied Web HAR contains client-submitted signature HTML,
+four successful inline uploads and a draft save. The officeatwork Mail Signature add-in retrieves a
+SharePoint `.ofawmsig` package (Nunjucks template, metadata and images), profile/group data and extra
+image assets. Its loaded source renders those inputs and uses Office.js `setSignatureAsync` plus
+inline attachment insertion. A selected template pointer is persisted in add-in extension settings.
+This is sufficient evidence of client-supplied signatures for the captured draft; the server-only
+probe cannot trigger this compose flow. See [research §4.6](outlook-api-research.md#46-outlook-web-signature-capture-2026-10-07)
+for endpoint shapes, source/traffic distinctions and authentication limits.
+
+**Extraction finding:** the saved signature block and four matching PNGs were recovered privately
+from the capture. Final OWS `NormalizedBody` substitutes four 42-byte GIF placeholders; use actual
+attachments and CID HTML for extraction. This is one static compose snapshot, not automatic reuse.
+
+**Native settings gap:** the owner reports adding, editing and deleting a signature. The capture's
+106-second window does not expose identifiable native signature CRUD requests; the two configuration
+PATCH writes contain Sales add-in preferences. Do not count them as signature CRUD validation.
+
+**Next:** test read-only discovery with the connector's own authentication: the selected template
+reference and assets, or a user-named Web-created draft and its real inline attachments. Prefer
+extracting a rendered draft if that avoids implementing corporate template/policy behavior. Prove
+inline upload and new-message/reply placement with synthetic fixtures, then implement the chosen
+route. A settings-page load plus add/edit/delete capture is still needed for native signature API
+discovery. Keep import as fallback; no app-owned automatic extraction/reuse has been demonstrated.
 
 **Fallback scope:** exactly one signature for the connector: import it, remove it, enable it or disable it. No multiple-signature selection, routing rules or signature editor.
 
@@ -128,9 +147,10 @@ The existing import design below remains the fallback if Outlook does not expose
 
 ## W9 — Inbox rules
 
-**Status:** Implemented (merged 2026-10-06); proven OWS contracts, synthetic tool validation complete.
+**Status:** Implemented (merged 2026-10-06); synthetic tool validation complete, live tool validation
+on 2026-10-07 exposed blockers.
 
-**Current state:** the Outlook Web rule contracts have been captured and replayed successfully through `Ows.call_request`. Reading, creating, editing (including clearing a condition), enabling/disabling, reordering and deleting a throwaway rule all worked live. Graph folder ids are accepted by the write request.
+**API evidence (2026-10-04):** the Outlook Web rule contracts were captured and replayed successfully through `Ows.call_request`. Reading, creating, editing (including clearing a condition), enabling/disabling, reordering and deleting a throwaway rule all worked live at that layer. Graph folder ids are accepted by the write request. The public-tool blockers found on 2026-10-07 are recorded below.
 
 **First-version scope:**
 
@@ -144,13 +164,28 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 **Safeguard:** every rule write is proposed first, requires user confirmation, is sent once, and is read back. Rules persist and affect future mail, so writes must not be retried automatically.
 
-**Implementation notes:** stateless account/state-bound proposals, one confirmed write and fresh read-back. Enable/disable is a separate update; reordering refuses collections containing unsupported rules to avoid rewriting them. Folder read-back uses the reported name (OWS returns a mailbox path rather than a Graph id). No new live mailbox writes were performed.
+**Implementation notes:** stateless account/state-bound proposals, one confirmed write and fresh read-back. Enable/disable is a separate update; reordering refuses collections containing unsupported rules to avoid rewriting them. Folder read-back uses the reported name (OWS returns a mailbox path rather than a Graph id).
+
+**Live findings (2026-10-07):** all eight existing rules and a newly created throwaway rule were
+classified read-only because description metadata and inactive enum strings such as `NullImportance`
+and `NullInboxRuleMessageType` were treated as unsupported behavior. Creation wrote once, but
+reported `failed`: its returned identity differed from the new rule's identity in `GetInboxRule`.
+The fresh list confirmed the intended conditions and Archive destination. Update was refused as
+read-only; stale create confirmation and reordering the unsupported collection were rejected.
+The throwaway rule was removed once through the underlying adapter for cleanup; all eight original
+rule ids, order, priorities, enabled states and revisions were restored.
+
+**Next:** recognize only the proven per-field inactive enum values and description metadata (keep
+active unsupported settings protected); resolve create identities against fresh read-back. Add
+synthetic fixtures for these shapes, then repeat edit/clear, disable/enable, delete and reorder
+through the public tools. Their complete live lifecycle is not yet validated. See research §4.5.
 
 # Correctness and reliability
 
 ## H17 — Partial mutation failures are reported incorrectly
 
-**Status:** Implemented (merged 2026-10-06); synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06); synthetic validation complete, controlled live
+read-state failure checks passed on 2026-10-07.
 
 **Problem:** mutations are sent in chunks. If a later chunk fails, earlier chunks may already have changed the mailbox while the tool call raises only the later error.
 
@@ -161,6 +196,15 @@ Support only the conditions/actions already proven and used by the mailbox: From
 - With `continue_on_error=false`, later chunks are not sent and are returned as `failed: not sent`.
 - A failed read-back after an unclear write outcome returns `unknown`.
 - The call always returns per-message results and `counts`, so already-completed work is visible.
+
+**Controlled live checks (2026-10-07):** MCP calls on 60 dedicated drafts used real OWS writes and
+local failure injection before the second 20-item chunk. Default continuation returned `done: 40,
+failed: 20`; `continue_on_error=false` returned `done: 20, failed: 40`, including 20 explicitly
+`not sent`. Independent Graph reads matched both outcomes. A real 20-item write followed by injected
+response loss and read-back failure returned `unknown: 20`; an independent read then confirmed the
+actual changes. Initial states were restored. These prove the reporting flow against a real mailbox;
+they do not represent naturally occurring Microsoft outages, and move/delete/flag failure variants
+remain synthetic coverage.
 
 ## H19 — Inline images can disappear from exports without an error
 
@@ -184,11 +228,18 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H21 — Long conversations cannot be marked read/unread cleanly
 
-**Status:** Implemented (merged 2026-10-06); synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06); synthetic validation complete, bulk read-state behavior
+validated live on 2026-10-07.
 
 **Problem:** `set_read_state(conversation_ids=[...])` expands a conversation to messages and then applies the 100-message limit intended for explicit `message_ids`. A long conversation can therefore be rejected even though the caller supplied only one conversation id. Conversations beyond the 1,000-message listing cap also need an explicit truncation note.
 
-**Next:** apply the 100 limit only to explicit `message_ids`. Expand conversation ids up to the existing conversation-listing limit, send changes in normal 20-item write chunks, and report when a conversation was truncated. Keep the response compact for very large conversations by relying on `counts` for ordinary `done`/`unchanged` results if needed.
+**Implemented:** apply the 100 limit only to explicit `message_ids`. Expand conversation ids up to the existing conversation-listing limit, send changes in normal 20-item write chunks, and report when a conversation was truncated. Keep the response compact for very large conversations by relying on `counts` for ordinary `done`/`unchanged` results if needed.
+
+**Live check (2026-10-07):** 101 dedicated unsent reply drafts plus the original's sent and received
+copies formed a 103-message conversation. The MCP `set_read_state` tool marked all 103 unread and
+then read (`done: 103` each); fresh Graph summaries independently confirmed every state. Both
+responses had zero ordinary detailed results and one compact-results note. Every initial read state
+was restored. The 1,000-message truncation boundary remains covered synthetically, not live.
 
 ## H22 — A filter flag alone can turn an export into a whole-mailbox range
 

@@ -1,6 +1,9 @@
 # Outlook API research
 
-**Evidence dates:** 2026-10-01 (first standalone probes) · 2026-10-02 (browser capture review, probe suite) · 2026-10-04 (inbox-rule replay, H7 live check, read-only probes)  
+**Evidence dates:** 2026-10-01 (first standalone probes) · 2026-10-02 (browser capture review, probe suite) ·
+2026-10-04 (inbox-rule replay, H7 live check, read-only probes) · 2026-10-06 (version-bound draft sends) ·
+2026-10-07 (connector HTML/replies, inbox-rule blockers, bulk/partial failures, signature capture analysis)
+
 **Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md)
 
 This is the single record of what Microsoft's APIs allow and how they behave for this tenant (Landis+Gyr, one user mailbox). It keeps evidence and conclusions only. How to re-run the probes and take captures is in `research/README.md`.
@@ -8,7 +11,7 @@ This is the single record of what Microsoft's APIs allow and how they behave for
 | Label | Meaning |
 |---|---|
 | **STANDALONE** | Called by our own process with app-owned tokens. No browser credentials. |
-| **BROWSER** | Seen in an Outlook Web capture (response side only). |
+| **BROWSER** | Seen in an Outlook Web capture. Request/response observations are identified separately where material. |
 | **SOURCE** | Present in Outlook Web JavaScript. Not proof of use. |
 
 ## 1. Summary
@@ -239,6 +242,212 @@ Observed semantics:
 - `RemoveInboxRule`: gone. The final list equals the starting one: 8 rules, same ids, order, priorities and enabled states.
 - Every write was sent once and answered `WasSuccessful: true`; no unclear answer, nothing retried.
 
+### 4.5 Connector live validation (2026-10-07)
+
+Owner-authorized dedicated test messages, self-sends and two personal recipient addresses. The
+production MCP tools and connector service/transport were used with the app's encrypted token cache;
+no browser credentials or plaintext probe-token cache. Live harness output recorded counts, statuses, field names
+and verification booleans only. Private recovery ids were kept in an encrypted, ignored local file.
+
+**W7 — HTML and replies.**
+
+- HTML fragment draft creation and body editing passed mandatory Graph read-back without findings.
+  Tables, lists, links, line breaks, accented and Japanese text were retained in the saved draft,
+  Sent Items and received self-copy. Existing-draft sends returned `sent`, without reconstruction.
+- A dedicated inline-image fixture was saved through `Ows.call("CreateItem", ...)`, using the
+  production new-message mapping plus an `Attachments` array containing a synthetic PNG
+  `FileAttachment:#Exchange` (`Content`, `ContentType`, `ContentId`, `IsInline`). Graph confirmed one
+  inline attachment and the expected body CID. This was fixture setup, not a newly implemented
+  attachment-upload tool. Recipient-only editing through `edit_draft` retained it without findings.
+- Text reply and HTML reply-all drafts through `create_draft` both returned `verified: true` and
+  `history_intact: true`. The connector's existing checks confirmed quoted structure and inline-image
+  bytes. Default reply recipients selected the original's personal To recipient; reply-all also kept
+  its personal Cc recipient and omitted the sending account. The work account was explicitly added
+  back for self-copy inspection before both drafts were sent.
+- All four sent copies and all four received self-copies retained tables and lists. The inline
+  original and both replies in each folder retained matching CIDs and PNG bytes identical to the
+  fixture. The text reply retained a literal angle-bracket expression; the HTML reply retained its
+  own ordered list in addition to the quoted history.
+- The owner subsequently confirmed on 2026-10-07 that the received test emails looked correct and
+  HTML rendered properly. Individual recipient/client combinations were not specified. Automated
+  recipient-side inspection was unavailable: the Gmail connector was unauthenticated and browser
+  automation failed to initialize. Fragment/full-document comparisons, malformed accepted HTML,
+  CSS and remote images remain deferred research. No claim of pixel-for-pixel rendering equivalence
+  is made.
+
+**W8 — signature discovery.** Minimal text, repeated minimal HTML and empty HTML drafts returned
+only the submitted text or an empty body, with no extra signature text or images. The empty draft
+was saved and correctly flagged as empty. Automatic signature extraction through server draft
+creation was not demonstrated. The subsequent owner-supplied Web capture establishes that signature
+HTML and images were supplied by the compose client (§4.6). It also exposes the corporate template
+source and add-in insertion code. Native signature settings retrieval and app-owned reuse remain
+unproven; the import fallback remains available.
+
+**W9 — real rule shapes expose two implementation blockers.**
+
+- `list_rules` marked all eight baseline rules read-only. An authorized throwaway rule with an
+  invalid sender, unique subject marker, Archive destination and stop-processing action was created
+  once and appeared in fresh read-back with the intended conditions and destination.
+- OWS supplies description metadata (`DescriptionTimeFormat`, `DescriptionTimeZone`) and inactive
+  enum strings: `NullInboxRuleMessageFlag` for `FlaggedForAction`, `RequestedAction` and their
+  `ExceptIf` counterparts; `NullInboxRuleMessageType` for `MessageTypeMatches` and its exception;
+  `NullImportance` for `MarkImportance`, `WithImportance` and its exception; `NullSensitivity` for
+  `WithSensitivity` and its exception. The adapter currently treats all 13 fields as unsupported
+  behavior. The throwaway rule therefore became read-only too, preventing its tool update lifecycle.
+- The `NewInboxRule` answer's `RawIdentity` differed from the same rule's `GetInboxRule` identity.
+  `create_rule` retained the creation identity, could not find it in read-back, and returned `failed`
+  even though the rule existed. The write was not retried. Creation needs reconciliation against
+  fresh list identity when the reported identity does not match, not only when no id is returned.
+- Replaying the now-stale creation confirmation was rejected without another write. Reordering the
+  unsupported collection was refused. Complete public-tool edit/clear, disable/enable, delete and
+  successful reorder validation remains pending the fixes.
+- Cleanup removed only the newly created rule through `OwsRules.delete_rule`. Fresh read-back
+  confirmed the original eight rules' ids, relative order, priorities, enabled states and full
+  revisions exactly matched the starting snapshot. Existing rules were never rewritten.
+
+**H21 — conversation expansion beyond 100 messages.** 101 unsent reply drafts plus two original
+copies formed a 103-message conversation. `set_read_state` through the MCP surface returned
+`done: 103` for unread and then read, with zero ordinary detailed results and one compact-results
+note each time. Independent Graph summaries confirmed all 103 states, and initial states were
+restored. No truncation occurred; the 1,000-message boundary remains synthetic coverage.
+
+**H17 — controlled partial failures with real writes.** On 60 dedicated drafts (three chunks), a
+locally injected pre-send error in chunk two yielded `done: 40, failed: 20` with default continuation.
+With `continue_on_error=false`, it yielded `done: 20, failed: 40`, including 20 `not sent`; the third
+chunk was never attempted. Fresh Graph states matched both results. A completed real 20-item write
+followed by injected response loss and failed read-back yielded `unknown: 20`; an independent read
+confirmed the changes. All initial states were restored. These are injected failures, not evidence
+of natural Microsoft outages; flag/move/delete failure variants remain synthetic coverage.
+
+### 4.6 Outlook Web signature capture (2026-10-07)
+
+**Scope and confidence.** Offline review of the owner-supplied HAR: 105 entries, 96 captured response
+bodies, 37 requests with body text and eight with `X-OWA-UrlPostData`. Request start times span
+09:05:00–09:06:47 America/Sao_Paulo (106.407 seconds). No captured credential was replayed and no
+mailbox changes were made during this analysis. Only schema, aggregate counts and conclusions are
+recorded here. Entry numbers below are zero-based positions in the supplied capture.
+
+The owner reports also adding, editing and deleting a signature. Those actions are owner-reported;
+this HAR does not expose an identifiable native signature CRUD sequence. It contains compose,
+add-in settings, template retrieval, inline uploads and draft save traffic. This limits what can be
+claimed about native settings endpoints, without contradicting the owner's actions.
+
+**Main finding — client-supplied signature content.** The initial `CreateItem` request already
+contains HTML with `id="Signature"`; OWS does not generate that block in its response. Later,
+`UpdateItem` submits a signature block with four `cid:` images after four successful inline uploads.
+This directly establishes client-supplied content for the captured draft. The loaded officeatwork
+Mail Signature add-in source contains the rendering and Office.js insertion path described below.
+Attributing every initial text-only signature byte to that add-in, or establishing native signature
+storage, would require additional evidence.
+
+**Useful network contracts (BROWSER, requests and responses):**
+
+| Entry | Operation | Observed result and use |
+|---|---|---|
+| 8 | `GET /ows/v1/OutlookCloudSettings/settings/` | HTTP 200, empty array; no signature content in this response. |
+| 29 | OWS `CreateItem`, `SaveOnly` | Submitted HTML already contains a text-only signature block; saved successfully. |
+| 32, 87, 102 | OWS `GetItem` | Draft read-back before/after inline uploads and body save; final item is still a draft with four inline attachments. |
+| 33 | Outlook beta `translateExchangeIds` | HTTP 200; the compose/add-in flow translates an item identifier. |
+| 50, 64 | `LoadExtensionCustomProperties` | Successful, empty custom-property objects. |
+| 56, 59 | `PATCH /api/beta/users/{user}/mailFolders/Inbox/UserConfigurations/{configuration}` | HTTP 200; `DictionaryData` is serialized XML, not signature HTML. See settings distinction below. |
+| 58 | OWS `SanitizeHtml` | Input HTML 2,471 characters; response is a JSON string containing 1,755 characters of HTML. No standalone sanitization contract tested. |
+| 61, 66, 70, 73 | `POST /owa/service.svc/CreateAttachmentFromLocalFile` | Four HTTP 200 / `NoError` uploads; inline attachment IDs and content IDs returned. |
+| 67 | Vendor `GET /api/appSettings/mailSignature` | HTTP 200; corporate signature configuration, library references, licensing and language settings. |
+| 74 | Graph `GET /v1.0/me` | HTTP 200; profile properties available for template substitution. |
+| 76 | Graph `POST /v1.0/me/getMemberGroups` | HTTP 200; request uses `securityEnabledOnly: false`. Group-based selection is present in the client source; this request alone does not prove its final choice. |
+| 82 | Graph `GET /v1.0/drives/{drive}/list/items` | `$expand=fields,driveItem`, `$filter=fields/DocIcon eq 'ofawmsig'`; one template package returned. |
+| 88 | SharePoint package download | HTTP 200; ZIP-format `.ofawmsig`, 16,815 bytes. |
+| 89 | OWS `SaveExtensionSettings` | Successful; selected template reference persisted in add-in roaming settings. |
+| 90, 91 | Graph `GET /v1.0/shares/{encoded-url}/driveItem?$expand=listItem` | Two image file lookups. The capture uses a doubled slash after `v1.0`; that is observed spelling, not a required contract. |
+| 96, 97 | SharePoint image downloads | Two complete PNG response bodies, 10,836 and 206,953 bytes. |
+| 101 | OWS `UpdateItem`, `SaveOnly` | HTML containing two tables and four CID images saved successfully. No send operation captured. |
+
+**Corporate template pipeline.** The vendor settings response contains three SharePoint library
+definitions and 15 content-language entries. The downloaded package contains `template.njk`
+(7,559 bytes), `metadata.json` (4,385 bytes), `images.json` (671 bytes), and five embedded PNGs.
+This is a Nunjucks template with configuration and assets, rather than a ready-to-send HTML file.
+The client source constructs a context from sender/user profile, language, audience, compose type,
+item type, coercion type and configurable form fields before rendering it.
+
+The template references `user.givenName`, `surname`, `jobTitle`, `companyName`, `streetAddress`,
+`postalCode`, `city`, `country`, `businessPhones[0]`, `mobilePhone` and `mail`. It uses
+`field(...).value`, `image(...).cid`, `mail.isPlainText`, filters such as `removeEmpty`, `join`,
+`lower` and `trim`, and the custom `loadImageFileFromSharePoint(...)` helper for additional images.
+There are country-dependent branches and optional phone/image fields. URLs, field values and
+personal data are deliberately omitted from this record.
+
+The captured metadata has ten form elements: language and audience pickers, switches, single-line
+text fields and a multi-line text field. Its automatic-insertion switches are:
+
+| Event | Configured |
+|---|---|
+| New message, forward, reply | `true` |
+| Recipients changed, sender changed | `true` |
+| New appointment, message send | `false` |
+
+These are template policy values, not independently exercised event tests. They explain why a
+static signature snapshot cannot reproduce all vendor selection/rendering behavior.
+
+**Insertion calls (SOURCE).** The loaded vendor code wraps
+`Office.context.mailbox.item.addFileAttachmentFromBase64Async(..., {isInline: true}, ...)` and
+`Office.context.mailbox.item.body.setSignatureAsync(html, {coercionType: ...}, ...)`; the insertion
+path processes HTML image assets before invoking the signature setter. Microsoft's
+[`Body.setSignatureAsync` documentation](https://learn.microsoft.com/en-us/javascript/api/outlook/office.body?view=outlook-js-preview#outlook-office-body-setsignatureasync-member(1))
+describes this as a compose API that adds or replaces a signature in the item body. It is not a
+mailbox signature-settings read API. The capture shows the resulting upload/save contracts, but
+does not include an Office.js callback/event trace proving each source function executed.
+
+**Settings distinction.** `SaveExtensionSettings.request.Settings` is serialized JSON. Its
+`ofaw.user.signatureFileReference` value requires two further JSON decodes to obtain
+`{sourceId, itemIdentifier:{type, name, driveId, driveItemId, webUrl}}`. This is a selected template
+pointer, not the rendered signature HTML. It may offer a discovery route, but reading it with the
+connector's own token has not been tested.
+
+The two `UserConfigurations` PATCH requests carry `<UserConfiguration><Info .../><Data><e .../>`
+XML in `DictionaryData`. The `18-ExtensionSettings` entry decodes to Sales add-in preference keys:
+`SPTenantId`, `SPUserId`, `isEURegionKey`, `region`, `SPEnvironmentType`, `SPDefaultLocation`.
+Responses also contain `18-OLPrefsVersion`. Neither write stores signature HTML; they must not be
+counted as native signature creation/edit/deletion. Likewise, `SaveExtensionCustomProperties`
+stores `SalesProductivityExternalContacts`, unrelated to the signature template reference.
+
+**Inline upload contract.** The request metadata resides in URL-encoded JSON in
+`X-OWA-UrlPostData`; the request body holds image bytes. The envelope types are
+`CreateAttachmentJsonRequest:#Exchange` → `CreateAttachmentRequest:#Exchange`. Relevant fields are
+`ParentItemId:{Id,ChangeKey}`, `Attachments:[{__type:"FileAttachment:#Exchange", Content:"",
+ContentType:"image/png", IsInline:true, Name, Size, ...}]`, `IncludeContentIdInResponse:true`,
+`SliceNumber:0`, `TotalSlices:1`, and cancellation/IRM flags. Each response attachment includes
+`AttachmentId`, `ContentId`, `LastModifiedTime`, `IsInline`; the returned content IDs match the
+four references in the subsequent saved HTML. No independent app-owned upload replay was done.
+
+**Extraction and read-back trap.** The HAR's upload bodies were decoded lossily as UTF-8, so they
+cannot supply exact original PNG bytes on their own. Complete binary bodies were recoverable from
+the package and SharePoint downloads. Each of the four uploaded assets matched a unique recovered
+PNG by size (10,836, 1,751, 1,000 and 997 bytes), and decoding that PNG as UTF-8 with replacement
+exactly reproduced the HAR upload text. This is strong correlation, not a hash comparison against
+the unavailable original upload bytes.
+
+The final `GetItem.NormalizedBody` instead contains four `data:image/gif;base64,...` sources, each
+decoding to a 42-byte placeholder. Those are not the signature PNGs. Preserve submitted CID HTML
+and retrieve actual attachments; do not treat this display-oriented normalized body as an asset
+export. The private local extraction contains only the saved signature block (1,741 characters),
+four recovered PNGs, the original template and reduced metadata; CID references were replaced with
+local image paths. It is ignored by Git. No credentials, profile JSON or full message was exported.
+
+**Authentication limits.** A successful vendor-resource token response reports scope names
+`Files.Read.All`, `Sites.Read.All`, `User.Read`, but its audience is the vendor resource, not Graph.
+This does not demonstrate those scopes for the connector's clients or prove that the token was
+used for the captured Graph requests. A separate Graph `Files.ReadWrite.AppFolder` request fails
+with `invalid_grant` / `AADSTS65001`; the other template and image reads still succeeded in this
+browser session. These facts are not grounds to copy vendor tokens or add broad permissions.
+
+**W8 next experiments.** First test read-only access with app-owned authentication: selected
+template settings and template/assets, or a user-named Web-created draft with its actual inline
+attachments. A draft snapshot may avoid implementing the vendor's renderer. Then use synthetic
+HTML/images to prove the necessary inline upload path and signature placement on a new message
+and reply, retaining quoted history. Native signature CRUD discovery needs a capture covering
+settings-page load and each add/edit/delete save. W9's public-rule blockers are unchanged: this
+HAR contains no inbox-rule operations. Calendar authentication is also unaddressed.
+
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
 - **Works STANDALONE** at `https://outlook.office.com/searchservice/api/v2/query` with the `search` token (§2) and `X-AnchorMailbox: Oid:<oid>@<tid>`.
@@ -265,6 +474,13 @@ Observed semantics:
 - One synthetic self-send to `lucas.rhode@landisgyr.com` (2026-10-01).
 - 2026-10-02, on four user-named Inbox messages: read and flag toggles, a category set and then cleared, a conversation read toggle, a move round trip, and two soft deletes. Two messages remain in Deleted Items. Sent copies were untouched, and nothing was hard-deleted.
 - 2026-10-04 (W9 replay): one throwaway inbox rule (conditions that match no real mail) created, edited, renamed, disabled, enabled, moved last and first, and removed. The rule list ended as it started.
+- 2026-10-07 (connector validation): four dedicated messages were sent, each with a received
+  self-copy; personal recipients were included as authorized. The sent and received copies remain
+  as evidence. 101 unsent bulk reply drafts and four signature probes were moved to Deleted Items
+  (`done: 105` in total), all locations independently verified; no test drafts remain in Drafts.
+  Bulk and partial-failure read states were restored before cleanup. One throwaway inbox rule was
+  created and removed; the eight original rules ended with identical ids, order, priorities,
+  enabled states and revisions. Nothing was permanently deleted.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.
 
 ## Sources
