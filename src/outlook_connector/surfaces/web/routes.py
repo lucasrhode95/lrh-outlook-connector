@@ -185,6 +185,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         content = await (await context.services()).mailbox.get_message(
             request.path_params["message_id"],
             body=body,
+            offset=_int(request, "offset", 0),
             max_chars=200_000,  # type: ignore[arg-type]
         )
         return _json(content)

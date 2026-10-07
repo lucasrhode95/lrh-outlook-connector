@@ -242,3 +242,11 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
+
+
+H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
+unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
+the service retains its bounded per-request body chunks. No manual continuation button is required.
+A continuation failure reports that the complete message could not be loaded, rather than displaying
+a partial body as complete. Selecting a different message stops scheduling old continuations using
+the existing reader request counter; the request already in flight is allowed to finish.

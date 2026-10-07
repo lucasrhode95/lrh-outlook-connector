@@ -301,7 +301,8 @@ def build_server(context: AppContext) -> FastMCP:
         combine: Annotated[
             CombineMode,
             Field(
-                description="per_conversation: one TXT per conversation; all: one TXT; none: one TXT per message."
+                description="per_conversation: one TXT per conversation; all: one TXT; "
+                "none: one TXT per message."
             ),
         ] = "per_conversation",
         body: Literal["unique", "full"] = "unique",
