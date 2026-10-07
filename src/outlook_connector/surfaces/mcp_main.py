@@ -247,8 +247,8 @@ def build_server(context: AppContext) -> FastMCP:
         grouped by conversation in rank order, with each conversation's message_count."""
         return await (await services()).mailbox.search(
             query,
-            since=_utc(since),
-            until=_utc(until),
+            since=since,
+            until=until,
             folder=folder,
             limit=limit,
             cursor=cursor,

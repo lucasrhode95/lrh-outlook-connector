@@ -430,3 +430,7 @@ expands each conversation up to the existing 1,000-message server listing cap an
 in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
 messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
 ids and error results remain detailed. Counts cover the entire deduplicated selection.
+
+H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
+to UTC before building the search/window and cursor. MCP and web search pass dates through;
+normalization is authoritative at `Mailbox.search`, shared by both callers.

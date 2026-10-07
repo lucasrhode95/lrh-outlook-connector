@@ -191,3 +191,14 @@ async def test_rule_proposal_and_confirmed_mcp_write(server: FastMCP, fake: Fake
     assert result["status"] == "done" and result["rule_id"]
     rules = await call(server, "list_rules")
     assert rules[0]["name"] == "Rule"
+
+
+async def test_search_naive_dates_use_service_normalization(server: FastMCP) -> None:
+    result = await call(
+        server,
+        "search_messages",
+        query="relatório",
+        since="2026-09-28T09:30:00",
+        until="2026-09-29T07:00:00Z",
+    )
+    assert [m["id"] for hit in result["conversations"] for m in hit["matching_messages"]] == ["m2"]
