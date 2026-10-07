@@ -194,11 +194,11 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H25 — The UI silently truncates very long message bodies
 
-**Status:** Pending.
+**Status:** Implemented on this branch; automatic full-body loading validated.
 
 **Problem:** the UI reader asks for a bounded body and ignores `next_offset`, so a message over the current limit can stop mid-body without telling the user.
 
-**Next:** expose the truncation state in the UI and provide a way to load the continuation.
+**Decision for this batch:** automatically follow continuation offsets until the chosen body is complete, without a new total length cap. Switching messages stops scheduling obsolete continuations using the existing reader request counter; no new in-flight cancellation infrastructure.
 
 ## H26 — Oversized attachments are classified as unexpected failures
 
