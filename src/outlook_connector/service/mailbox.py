@@ -353,7 +353,8 @@ class Mailbox:
         """Initial folder offsets and excluded Deleted/Junk counts, from the same count batch.
 
         Assumes (not re-checked here): complete left-out folder ids and a validated listing window.
-        If counting fails, use cached totals only to choose readable folders, never to claim window counts.
+        A folder whose count is unavailable is chosen by its cached total; the excluded count is
+        claimed only when every excluded folder was counted.
         """
         folders = await self.folder_map()
         in_scope = [fid for fid in folders if fid not in left_out]
@@ -366,12 +367,13 @@ class Mailbox:
                 folder_ids=in_scope + excluded_folders, since=since, until=until
             )
         except ConnectorError:
-            counts = None
-        if counts is None:
-            return {fid: 0 for fid in in_scope if folders[fid].total}, {}
-        excluded_count = sum(counts.get(fid, 0) for fid in excluded_folders)
-        excluded = {"deleted_or_junk": excluded_count} if excluded_count else {}
-        return {fid: 0 for fid in in_scope if counts.get(fid)}, excluded
+            counts = {}
+        offsets = {fid: 0 for fid in in_scope if (counts[fid] if fid in counts else folders[fid].total)}
+        excluded: dict[str, int] = {}
+        if all(fid in counts for fid in excluded_folders):
+            excluded_count = sum(counts[fid] for fid in excluded_folders)
+            excluded = {"deleted_or_junk": excluded_count} if excluded_count else {}
+        return offsets, excluded
 
     async def _merged_folders(
         self, offsets: dict[str, int], since: datetime | None, until: datetime | None, limit: int
@@ -441,7 +443,7 @@ class Mailbox:
             counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
         except Exception:  # a courtesy for planning; never fail the listing for it
             return None
-        return sum(counts.values()) if counts is not None else None
+        return sum(counts.values()) if len(counts) == len(set(in_scope)) else None
 
     async def conversation_sizes(
         self, conversation_ids: list[str], *, include_deleted_items: bool = False
@@ -528,18 +530,24 @@ class Mailbox:
         return found
 
     async def get_message(
-        self, message_id: str, *, body: BodyKind = "unique", offset: int = 0, max_chars: int = 20000
+        self,
+        message_id: str,
+        *,
+        body: BodyKind = "unique",
+        offset: int = 0,
+        max_chars: int | None = 20000,
     ) -> MessageContent:
-        """One message's body with offset continuation, and its attachment metadata.
+        """One message's body with offset continuation, and its attachment metadata. ``max_chars=None``
+        returns the whole body from ``offset`` (the local web reader: one server read, no token budget).
 
         Entry point: the authoritative check of ``offset`` and ``max_chars`` (the web routes pass them
         through unchecked). The id is taken as given (ids come from this connector's own results).
         """
-        if offset < 0 or not 1 <= max_chars <= 200_000:
+        if offset < 0 or (max_chars is not None and not 1 <= max_chars <= 200_000):
             raise InvalidRequest("offset must be >= 0 and max_chars between 1 and 200000.")
         message = await self.message(message_id, body=body)
         text = message.body(body)
-        end = min(len(text), offset + max_chars)
+        end = len(text) if max_chars is None else min(len(text), offset + max_chars)
         return MessageContent(
             message=MessageSummary.model_validate(message.model_dump()),
             body_kind=body,

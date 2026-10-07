@@ -65,8 +65,12 @@ Unsupported rules are read-only. Reordering is refused if any unsupported rule i
 OWS resubmits the whole rule list. Enable/disable uses a separate update from field edits.
 
 Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` and
-`delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)
-and return per-message results and counts: done, unchanged, not found, failed or unknown.
+`delete_messages` act on explicit message ids (up to 100 per call) and return per-message results
+and counts: done, unchanged, not found, failed or unknown. `set_read_state` also takes conversation
+ids: each expands to its messages in scope (all copies, up to the 1,000 messages the server lists per
+conversation; `notes` says when one was cut there), and the 100 limit applies to explicit ids only.
+When more than 100 messages are selected that way, `counts` covers them all, while `results` lists
+only explicit ids and the messages that did not end done or unchanged.
 `continue_on_error=true` (default) attempts later chunks after errors. With false, later unsent
 messages return failed with detail `not sent`. Ambiguous writes are read back; failed read-back
 remains unknown. Writes are never retried. Delete moves to
@@ -78,21 +82,28 @@ parent, so a folder you deleted in Outlook counts as Deleted Items). `include_se
 also leaves out Sent Items, Drafts and Outbox (included by default), and
 `include_meeting_mail=false` leaves out invitations, RSVPs and cancellations in list, search and
 range exports (a conversation with real replies still shows through them). Every flag points the
-same way: true shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off. `coverage.excluded` counts what was left out. Copies of one
-message (mail sent to yourself or to a list you are on) are shown once, with `also_in` naming the
-other folders.
+same way: true shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off.
+`coverage.excluded` counts what was left out (a mailbox-wide listing read folder by folder counts
+Deleted Items and Junk for the whole window on its first page). Copies of one message (mail sent to
+yourself or to a list you are on) are shown once, with `also_in` naming the other folders. A `since`
+or `until` without a time zone is taken as UTC.
 
 **Out of reach:** hidden folders, and items outside the mail folders (Teams meeting records,
-settings and other non-mail items), are never listed, searched, counted, grouped into conversations or exported, and
-`list_folders` does not show them. Search covers mail only. List and search results are compact by default (`detail="full"` for every field);
+settings and other non-mail items), are never listed, searched, counted, grouped into conversations
+or picked up by a range or conversation export, and `list_folders` does not show them. Search covers
+mail only. A message id you name is the exception: `get_message` and `export_messages` read it
+wherever it is. List and search results are compact by default (`detail="full"` for every field);
 search hits carry the conversation's message count, and `list_messages(include_total=true)` returns the
-server's count for the window.
+server's count for the window (copies counted separately, and meeting mail included even when
+`include_meeting_mail=false` hides it).
 
 `export_messages` takes conversations, message ids and/or a range (`since`, `until`, `folder`,
 `include_sent_items=false`), up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one
 JSON record per message for agents; `txt` is for people. Every exported message carries its message,
 conversation and Internet ids, and a message that exists in several folders is exported once, with
-`also_in` naming the other folders. Messages selected by id are read from the server: if any of them
+`also_in` naming the other folders. Messages selected by id are exported whatever their folder (also
+hidden folders and Sync Issues), while conversations and ranges keep the scope rules above; ids that
+are copies of a selected message are merged with it. They are read from the server: if any of them
 cannot be read (deleted or moved meanwhile, or still throttled), the export fails, writes nothing and
 says which ones and what to do. Anything else that cannot be exported (a body, an attachment, an
 attachment listing) is marked in place, and the result's `error_summary` (the file header's "Export
@@ -113,10 +124,12 @@ counts them in `body_errors`, so a caller never has to read the text to find out
 
 **Throttling.** Microsoft Graph allows about 4 concurrent requests and 10,000 requests per 10 minutes
 per mailbox; each item of a `$batch` (at most 20) counts. The connector keeps at most 4 requests and
-2 batches in flight, re-sends throttled batch items in new batches of at most 20 after the advised
-delay, and reports items that stay throttled instead of failing the whole call. Agents are told to
-avoid parallel tool calls and to prefer one range export over many small calls. Errors name the
-operation, the Graph error code and message, and the request id. A rejected token (401) is renewed
+2 batches in flight, re-sends throttled or temporarily failing batch items (429, 502, 503, 504) in
+new batches of at most 20 after the advised delay, and reports items that still fail instead of
+failing the whole call. Writes are never re-sent. Agents are told to avoid parallel tool calls and to
+prefer one range export over many small calls. Errors name the operation, the Graph error code and
+message, and the request id; "not found" leaves the cause open (deleted, moved out of reach, or a
+wrong id). A rejected token (401) is renewed
 once before the connector asks you to sign in again; "access denied" (403) never asks for a sign-in.
 
 **You (local UI).** Start it when you need it. It opens a browser tab; an open tab keeps it running, and
@@ -128,7 +141,8 @@ outlook-connector ui
 
 The UI opens on the Inbox. Browse folders or recent mail grouped by conversation (a conversation with one
 message is a plain row; a real conversation shows its message count across all folders, newest message on
-top), search the mailbox, filter what is loaded, read messages and download their attachments, tick
+top), search the mailbox, filter what is loaded, read messages (the whole body, however long, in one
+request) and download their attachments, tick
 conversations or single messages, and export them as one `.txt` or `.zip` (one file per conversation, one for
 everything, or one per message; attachments optional). "export this view" exports the whole current
 folder and date range. Deleted Items and Junk are left out unless you tick "Deleted / Junk"
@@ -149,38 +163,9 @@ uv run ruff format --check .
 uv run pyright
 ```
 
+The web reader's JavaScript tests use Node's built-in runner (Node 18+, no package dependencies) on
+the shipped frontend with a minimal test DOM:
 
-H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
-hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
-messages with other selections; reach/scope filters still govern range and conversation selections.
-Copies remain merged and message limits still apply.
-
-H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
-expands each conversation up to the existing 1,000-message server listing cap and reports truncation
-in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
-messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
-ids and error results remain detailed. Counts cover the entire deduplicated selection.
-
-H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
-to UTC before building the search/window and cursor. MCP and web search pass dates through;
-normalization is authoritative at `Mailbox.search`, shared by both callers.
-
-H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
-unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
-the service retains its bounded per-request body chunks. No manual continuation button is required.
-A continuation failure reports that the complete message could not be loaded, rather than displaying
-a partial body as complete. Selecting a different message stops scheduling old continuations using
-the existing reader request counter; the request already in flight is allowed to finish.
-
-Reader JavaScript regression tests use Node's built-in runner (Node 18+), with no package dependencies:
-`node --test tests/surfaces/message_reader.test.cjs`. They exercise the shipped frontend with a minimal
-test DOM: complete continuation loading, long/short bodies, failures and overlapping selections.
-
-H27/H28 coverage: the first per-folder listing page includes requested-window Deleted/Junk
-exclusion counts (including subfolders) from the existing count batch, without an extra count call.
-Continuation pages do not repeat those full-window exclusions. Unavailable counts are not replaced
-with stale folder totals. `server_total` counts copies separately and includes meeting invitations,
-cancellations and RSVPs even when `include_meeting_mail=false` hides them; no second counting path.
-H29 NotFound text leaves the cause open: deletion, moving out of reach or an incorrect id.
-H33 Graph batch items retry the same transient statuses as single reads (429/502/503/504), only
-resending failed items and retaining the final status on exhaustion. Writes remain single-attempt.
+```bash
+node --test tests/surfaces/message_reader.test.cjs
+```
