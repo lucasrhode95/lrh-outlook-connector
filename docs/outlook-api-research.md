@@ -280,8 +280,8 @@ only the submitted text or an empty body, with no extra signature text or images
 was saved and correctly flagged as empty. Automatic signature extraction through server draft
 creation was not demonstrated. The subsequent owner-supplied Web capture establishes that signature
 HTML and images were supplied by the compose client (§4.6). It also exposes the corporate template
-source and add-in insertion code. Native signature settings retrieval and app-owned reuse remain
-unproven; the import fallback remains available.
+source and add-in insertion code. Native signature list/default/content retrieval was subsequently
+proved with app-owned authentication (§4.7). Automatic draft integration remains unimplemented.
 
 **W9 — real rule shapes expose two implementation blockers.**
 
@@ -440,13 +440,89 @@ used for the captured Graph requests. A separate Graph `Files.ReadWrite.AppFolde
 with `invalid_grant` / `AADSTS65001`; the other template and image reads still succeeded in this
 browser session. These facts are not grounds to copy vendor tokens or add broad permissions.
 
-**W8 next experiments.** First test read-only access with app-owned authentication: selected
-template settings and template/assets, or a user-named Web-created draft with its actual inline
-attachments. A draft snapshot may avoid implementing the vendor's renderer. Then use synthetic
-HTML/images to prove the necessary inline upload path and signature placement on a new message
-and reply, retaining quoted history. Native signature CRUD discovery needs a capture covering
-settings-page load and each add/edit/delete save. W9's public-rule blockers are unchanged: this
-HAR contains no inbox-rule operations. Calendar authentication is also unaddressed.
+**Follow-up:** §4.7 supersedes the native retrieval gap: app-owned list/default/content reads now
+work. App-owned Graph reads also retrieved the first capture's Web-created draft signature and four
+inline PNGs (10,836, 1,751, 1,000 and 997 bytes), with every body CID backed by an attachment.
+Corporate template-settings access and policy execution remain untested. W9's public-rule blockers
+are unchanged: this HAR contains no inbox-rule operations. Calendar authentication is unaddressed.
+
+### 4.7 Native roaming-signature discovery and standalone reads (2026-10-07)
+
+**Discovery (SOURCE).** The second owner-supplied HAR contains 343 entries, including native Outlook
+settings and compose JavaScript. `owa.93987.m.5c7464db.js` defines `signaturehtml`, `signaturetxt`,
+`roaming_signature_list`, `roaming_new_signature` and `roaming_reply_signature`. Its save code uses
+`RoamingSetting` entries scoped to the account, HTML/text secondary keys `htm`/`txt`, and
+`parentSetting: "roaming_signature_list"`. The list is written as comma-joined names (`BlobArray`),
+while the two defaults are separate `String` values. Worker source uses the `x-islargesetting`
+header for large signature settings. These are code observations; the HAR does not contain a full
+native create/edit/delete request lifecycle.
+
+Compose source in `owa.MailComposeActions.m.2ceb7db6.js` selects `defaultSignatureName` for new mail
+and `defaultReplySignatureName` for replies/forwards, then looks up the selected entry in the roaming
+signature map. The older `UserOptions.SignatureHtml`/`SignatureText` path is separate. A standalone
+`GetOwaUserConfiguration` call succeeds with our OWS sign-in but returns null legacy signature
+contents; that does not mean the modern roaming-signature list is empty. One attempted
+`GetUserConfiguration` JSON envelope returned HTTP 400; no general lack of configuration-read
+access is inferred from that malformed/unsupported variant. Microsoft's documented Graph
+[`mailboxSettings` properties](https://learn.microsoft.com/en-us/graph/api/resources/mailboxsettings?view=graph-rest-1.0)
+do not expose this native signature list/default/content model.
+
+**Proven reads (STANDALONE).** All requests below used the connector's existing encrypted, app-owned
+`write` profile (One Outlook Web → Outlook resource), no browser credentials. Reads were sequential
+and did not change mail or signature settings. No extra scopes, vendor authentication or user file
+upload was required. Responses and private snapshots remain outside Git.
+
+| Purpose | Proven request | Result |
+|---|---|---|
+| List and default pointers | `GET /ows/v1/OutlookCloudSettings/settings/?settingname=roaming_signature_list,roaming_new_signature,roaming_reply_signature` | HTTP 200, three settings. List `type: BlobArray`; default settings `type: String`. Every returned `scope` matched the bound account. |
+| Signature contents | Same endpoint, URL-encoded `settingname={name}`, header `x-islargesetting: true` | HTTP 200, per-format entries identified by `secondaryKey`. Default returned `htm`, `rtf`, `txt`; a newly created image signature returned `htm`, `txt`. |
+| Freshness verification | Repeat the list/default GET after retrieving contents | Settings values and timestamps unchanged in the tested read sequence. |
+
+Headers used were `x-outlook-client: owa` and `Accept: application/json`, plus the large-setting flag
+for content reads. No claim is made that all are mandatory. Native entries include `name`, `value`,
+`type`, `source`, `scope`, `metadata`, `parentSetting`, `Timestamp`, `itemClass`, `id`, timestamps and
+`secondaryKey`; large responses also contain `nameBase64Encoded`. For this probe the returned names
+matched the list entries directly. Do not infer an extra decoding step from that flag without
+testing its semantics. Request names must be URL-encoded rather than interpolated into query text.
+
+**Current-default retrieval.** The first read returned two list names. Both the new-message and
+reply/forward pointers selected the same readable entry, with 1,629 characters of HTML, 152 of text
+and an RTF value. That HTML contains no image tags. A fresh list/default read after content retrieval
+returned exactly the same values and `Timestamp` fields. A review-only HTML snapshot was saved
+privately; application composition must perform fresh reads, not use that file as a cache.
+
+**Empty list reference.** The other initial list name returned HTTP 200 with `[]`, both on an
+individual content query and a combined name query. The owner confirmed the native settings UI
+showed one signature. This supports a leftover list reference, but does not establish all deletion
+or tombstone semantics. A reliable list operation must resolve contents and report missing entries;
+a raw name is not proof that a retrievable signature exists. The selected default was readable.
+
+**New signature with image, observed live.** The owner then created a new signature and added an
+image in Outlook. A fresh list read contained the existing and new signatures and no longer contained
+the previous empty reference. Both entries were readable. Both default pointers still selected the
+existing signature: adding a signature did not automatically change the defaults in this test.
+The new entry returned 82,274 characters of HTML, 32 of text and one `<img>` with an embedded
+`data:image/png;base64,...` source. Decoding it produced a 61,483-byte PNG with a valid PNG header.
+Its complete HTML and image were recovered privately through our authentication, without a new HAR.
+No native signature send/recipient rendering or automatic application insertion was tested here.
+
+**Unsuccessful variants.** A content-name URL path (`/settings/{name}`) returned HTTP 404; use the
+proven query route. A guessed `parentsetting=roaming_signature_list` query returned HTTP 403 and
+does not prove inability to read children: exact-name large-setting reads work. No guessed write
+request was sent, and no unsuccessful authentication/client-scope pair was retried.
+
+**Owner-selected W8 design.** Read the current native configuration automatically, expose reliable
+listing/content retrieval, and resolve the correct default per compose operation. Check account
+scope and completeness; respect an explicitly empty default. If a configured default is missing,
+the read fails, or its revision changes during retrieval, report it rather than silently using an
+old snapshot or another signature. HTML image data must become actual inline assets/CIDs during
+composition. Signature selection is done before saving the draft; send still sends that saved draft
+unchanged. API discovery is proved; public read tools and automatic integration are not implemented.
+
+**Separate corporate add-in.** These are the native Outlook defaults. The officeatwork add-in can
+subsequently replace/render a signature using sender, recipient, language and policy context (§4.6).
+Reading native defaults does not reproduce that additional logic. Graph draft extraction is now
+proved, but is a snapshot rather than an always-current corporate-default resolver.
 
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
