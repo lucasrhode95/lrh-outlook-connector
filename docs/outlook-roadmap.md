@@ -35,9 +35,11 @@ name.
 
 **Review fixes (2026-10-06, after the merge).** The PR review found, and one follow-up change fixed:
 
-- W7 sent drafts with an empty `UpdateItem` `Updates` list, a shape never tried live (EWS defines
-  `Updates` as nonempty). Restored the proven send: one `SetItemField` re-setting the draft's own
-  subject (research §4.2). The fake now rejects an empty `Updates` on send.
+- W7's send read the draft and then sent it with `AlwaysOverwrite`, so an edit made in Outlook in
+  between could be overwritten or sent unseen. The send now carries the draft's change key with
+  `NeverOverwrite`: a draft changed since it was read is refused and nothing is sent. Live checks
+  (2026-10-06, research §4.2) proved this, and also that W7's empty-`Updates` send works, so that
+  shape stays.
 - W9 proposals serialized every `RuleChange` field, showing omitted conditions as null ("clear it")
   and breaking a replayed confirmation. Proposals now carry only the supplied fields.
 - H25's reader re-read the whole message from Graph for every 200,000-character chunk. The local web
@@ -101,7 +103,9 @@ For the first version, automatic verification stays deliberately simple and high
 
 **Deferred live-test research, not blockers:** after the basic flow works, test how Outlook/Graph and recipient clients treat fragments vs complete HTML documents, malformed-but-accepted HTML, CSS, remote images and representative formatting. Revisit body-change detection only with real examples; a future approach may compare normalized visible text (entities decoded, whitespace/non-breaking spaces normalized) rather than HTML structure.
 
-**Next:** on explicit owner request, live-test plain-text/HTML creation, partial edit, replies and existing-draft send (the send uses the proven subject-update shape). Also live-test clearing Cc/Bcc with `edit_draft(cc=[])`: it sends a `SetItemField` with an empty recipient list. OWS accepted empty lists in `CreateItem`, but EWS declares recipient collections nonempty, so if Outlook rejects it the edit should use `DeleteItemField` instead. Deferred HTML/client research remains unchanged.
+**Live checks (2026-10-06, self-sends and probe drafts):** text draft creation, Cc/Bcc clearing with an empty list, subject edit, and existing-draft send with no field updates bound to the draft's change key (sent when current; refused with nothing sent when the draft changed since it was read). See research §4.2.
+
+**Next:** on explicit owner request, live-test HTML drafts and replies end to end. Deferred HTML/client research remains unchanged.
 
 ## W8 — Signatures
 
