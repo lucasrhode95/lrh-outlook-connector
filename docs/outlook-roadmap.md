@@ -52,7 +52,10 @@ appends the quote (`NewBodyContent`), so no draft body is ever parsed or rewritt
 
 **Accepted costs:** the draft id changes on every change; body edits the user made to the draft in
 Outlook, and attachments added there, are not carried into the replacement (the old draft remains
-in Deleted Items).
+in Deleted Items). No version check guards the replacement: a user who edits a draft by hand knows
+what they are doing, and an agent may check the draft with the read tools first if it chooses.
+Every change, including recipient- or subject-only ones, is delete-and-recreate: one simple,
+predictable rule.
 
 ## W8 — Signatures
 
