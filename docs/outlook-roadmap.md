@@ -24,8 +24,8 @@ evidence. No permanent deletion was performed.
 1. **W9 live blockers:** distinguish inactive OWS enum values/description metadata from unsupported
    rule behavior, and reconcile create-response identities with fresh rule-list identities; then
    repeat the tool lifecycle checks.
-2. **W8:** signatures; Web capture reveals client insertion, corporate templates and inline uploads.
-   Prove an app-owned extraction/reuse route before implementing it.
+2. **W8:** implement native signature listing/content retrieval and fresh default resolution; these
+   reads now work with app-owned authentication, including an image-bearing signature.
 3. **Correctness:** H19, H22 and H26.
 4. **Performance and cleanup:** H30–H38 (H33 is already implemented).
 5. **Deferred live research:** HTML/client rendering; calendar authentication remains Later (X10).
@@ -97,53 +97,56 @@ remote images and a client-specific comparison matrix.
 
 ## W8 — Signatures
 
-**Status:** Unblocked; server-draft probes and Web capture analysis completed on 2026-10-07.
-Client insertion and a corporate template source are identified; app-owned reuse and implementation remain.
+**Status:** Decided, not built. Native list/default/content reads proved with app-owned authentication
+on 2026-10-07, including a newly added signature image. Reliable enumeration and draft integration remain.
 
-**Retrieval goal:** reuse the user's configured signature HTML and inline images without requiring
-an Outlook `.htm` export. The server-created minimal-draft route was tested below; Web capture now
-provides the next discovery routes.
+**Owner decision (2026-10-07):** automatically use the user's current Outlook default for new
+messages, and list signatures/retrieve contents reliably. Resolve the reply/forward default separately.
+This route does not require a user-supplied file or a frozen imported signature.
 
-**Live finding (2026-10-07):** minimal text, repeated minimal HTML and empty HTML server-created
-drafts returned only submitted content (or an empty body), with no extra signature text or images.
-The empty draft correctly returned the empty-body verification finding. This draft-creation route
-did not expose a reusable signature; the run did not inspect the user's configured signature in the
-Outlook UI or exhaust other settings APIs.
+**Live evidence:** the second Web capture includes Outlook's native roaming-signature settings
+source. Standalone reads using the connector's encrypted `write` sign-in retrieved the name list,
+new-message and reply defaults, and HTML/text/RTF contents through Outlook Cloud Settings. Re-reading
+the settings after content retrieval returned identical values and timestamps. After the owner
+created another signature with an image, fresh reads retrieved its HTML and text plus one embedded
+PNG (61,483 bytes). Both defaults still selected the existing signature. See
+[research §4.7](outlook-api-research.md#47-native-roaming-signature-discovery-and-standalone-reads-2026-10-07).
 
-**Capture finding (2026-10-07):** the supplied Web HAR contains client-submitted signature HTML,
-four successful inline uploads and a draft save. The officeatwork Mail Signature add-in retrieves a
-SharePoint `.ofawmsig` package (Nunjucks template, metadata and images), profile/group data and extra
-image assets. Its loaded source renders those inputs and uses Office.js `setSignatureAsync` plus
-inline attachment insertion. A selected template pointer is persisted in add-in extension settings.
-This is sufficient evidence of client-supplied signatures for the captured draft; the server-only
-probe cannot trigger this compose flow. See [research §4.6](outlook-api-research.md#46-outlook-web-signature-capture-2026-10-07)
-for endpoint shapes, source/traffic distinctions and authentication limits.
+**Missing-reference finding:** the first raw list contained two names, but only the selected default
+returned content; the owner confirmed the settings UI showed one signature. The other entry appears
+to have been a leftover reference. After the owner added the image-bearing signature, a fresh list
+contained the existing and new signatures, both readable; the previous empty entry was absent.
+Resolve contents for each name, report missing references explicitly, and never treat the raw list
+as verified signatures. Exact deletion semantics still need synthetic/controlled coverage.
 
-**Extraction finding:** the saved signature block and four matching PNGs were recovered privately
-from the capture. Final OWS `NormalizedBody` substitutes four 42-byte GIF placeholders; use actual
-attachments and CID HTML for extraction. This is one static compose snapshot, not automatic reuse.
+**Build scope:**
 
-**Native settings gap:** the owner reports adding, editing and deleting a signature. The capture's
-106-second window does not expose identifiable native signature CRUD requests; the two configuration
-PATCH writes contain Sales add-in preferences. Do not count them as signature CRUD validation.
+- Read-only MCP tools `list_signatures` and `get_signature`; results identify the new-message and
+  reply/forward defaults, content availability and any missing references.
+- A remote signature-reader port and Outlook Cloud Settings adapter; resolution and placement stay
+  in the service layer. No signature settings writes or editor are needed.
+- Query the current default and its contents when composing, without a persisted signature/default
+  cache. Recheck the relevant settings revision after retrieval so a changed selection cannot be
+  silently used. An explicit no-default setting means no signature; a missing configured default
+  or failed read is reported rather than choosing another signature or a stale copy.
+- New message placement: body, then signature. Reply placement: new body, signature, then Outlook's
+  quoted history untouched. Body edits must replace the connector-managed signature rather than
+  duplicate it; existing-draft send still sends the stored draft unchanged.
+- Extract native embedded image data into actual inline attachments with matching CID references.
+  The image-bearing read is proved; integration/send rendering still needs validation.
 
-**Next:** test read-only discovery with the connector's own authentication: the selected template
-reference and assets, or a user-named Web-created draft and its real inline attachments. Prefer
-extracting a rendered draft if that avoids implementing corporate template/policy behavior. Prove
-inline upload and new-message/reply placement with synthetic fixtures, then implement the chosen
-route. A settings-page load plus add/edit/delete capture is still needed for native signature API
-discovery. Keep import as fallback; no app-owned automatic extraction/reuse has been demonstrated.
+**Separate corporate mechanism:** officeatwork can render/replace a native signature during Web
+composition using a SharePoint template, profile and recipient/sender policies. Native default
+retrieval does not execute that add-in. The first capture's rendered signature and four PNGs were
+recovered privately; subsequent app-owned Graph reads of that Web-created draft retrieved its HTML
+and all four real inline assets. That proves draft extraction, not fresh corporate policy evaluation.
+Research §4.6 records the template/upload contracts and normalized-body GIF placeholder trap.
 
-**Fallback scope:** exactly one signature for the connector: import it, remove it, enable it or disable it. No multiple-signature selection, routing rules or signature editor.
-
-**Fallback build:**
-
-- MCP tools: `import_signature`, `delete_signature`, `set_signature_active(true|false)`.
-- Import an Outlook-style `.htm` signature and optional `<name>_files/` image folder.
-- Store the one signature under the connector data directory; active by default after import.
-- Send signature images as inline attachments referenced by `cid:`.
-- Placement matches Outlook: new message = body then signature; reply = new text, signature, then Outlook's quoted history untouched.
-- MCP only for now; no UI work required.
+**Next:** implement the proven native read contracts with synthetic fixtures for missing references,
+no default, missing default content, name encoding, changed configuration and account ownership.
+Integrate composition and validate default changes, image handling and new-message/reply placement.
+Native signature create/edit/delete through our own process has not been tested; those writes are
+outside the initial read-only scope.
 
 ## W9 — Inbox rules
 
