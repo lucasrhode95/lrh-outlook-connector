@@ -275,55 +275,61 @@ ADDRESS_PATTERN = r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$"
 
 
 class OutgoingMessage(BaseModel):
-    """A plain-text message to draft or send from the signed-in account (no attachments, no Send As).
+    """New draft or reply with exactly one explicit body representation."""
 
-    As a reply (``reply_to_message_id``), Outlook appends the quoted original below ``body``, and
-    omitted recipients and subject default to Outlook's: the sender (and, with ``reply_all``, the
-    other recipients, minus you unless nobody else is left) and "RE: <subject>".
-    """
+    model_config = ConfigDict(extra="forbid")
 
-    to: list[str] = Field(default_factory=list, description="Email addresses.")
-    cc: list[str] = Field(default_factory=list, description="Email addresses.")
-    bcc: list[str] = Field(default_factory=list, description="Email addresses.")
-    subject: str | None = Field(default=None, max_length=255)
-    body: str = Field(max_length=MAX_BODY_CHARS, description="Plain text.")
-    reply_to_message_id: str | None = Field(default=None, description="Reply to this message.")
+    to: list[str] = Field(default_factory=list)
+    cc: list[str] = Field(default_factory=list)
+    bcc: list[str] = Field(default_factory=list)
+    subject: str | None = None
+    text_body: str | None = None
+    html_body: str | None = None
+    reply_to_message_id: str | None = None
     reply_all: bool = False
 
 
-class EmailProposal(Compact):
-    """Exactly what would be sent, resolved and validated, with the code that confirms it."""
+class DraftEdit(BaseModel):
+    """Only supplied fields change; omitted fields are kept."""
 
-    sender: str  # the signed-in account; there is no Send As
+    model_config = ConfigDict(extra="forbid")
+
+    to: list[str] | None = None
+    cc: list[str] | None = None
+    bcc: list[str] | None = None
+    subject: str | None = None
+    text_body: str | None = None
+    html_body: str | None = None
+
+
+class DraftMessage(Compact):
+    """Private validated HTML write input."""
+
     to: list[str] = Field(default_factory=list)
     cc: list[str] = Field(default_factory=list)
     bcc: list[str] = Field(default_factory=list)
     subject: str
-    body: str
+    html_body: str
     reply_to_message_id: str | None = None
     reply_all: bool = False
-    quotes_original: bool = False  # a reply: Outlook appends the quoted original below the body
-    confirmation: str  # changes with any field above
 
 
 class DraftResult(Compact):
-    id: str  # the draft's Graph immutable id (readable with get_message)
-    folder: str = "Drafts"
-    proposal: EmailProposal  # what the draft holds (its confirmation code is not needed to save)
-    verified: bool  # the draft was read back from the mailbox
-    # replies: the quoted original was checked (its text and inline images as received); a problem
-    # says what differs. send_email refuses to send a reply whose draft fails this check.
+    id: str
+    status: Literal["saved", "failed"]
+    verified: bool
+    message: Message | None = None
+    text_body: str | None = None
+    html_body: str | None = None
+    findings: list[str] = Field(default_factory=list)
     history_intact: bool | None = None
     history_problem: str | None = None
 
 
-SendStatus = Literal["sent", "unknown"]
-
-
 class SendResult(Compact):
-    status: SendStatus  # "unknown": no clear answer and no copy found in Sent Items yet
+    status: Literal["sent", "unknown"]
     detail: str
-    sent_item_id: str | None = None  # the Sent Items copy, when it was looked for and found
+    sent_item_id: str | None = None
 
 
 MAX_MUTATION_ITEMS = 100

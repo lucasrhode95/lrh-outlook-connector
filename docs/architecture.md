@@ -194,7 +194,7 @@ lrh-outlook-connector/
 - `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Used by `OwsRules` through the `RuleWriter` port (W9).
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
-  - `send` (`CreateItem` with `SendAndSaveCopy`), both with the body proven by the self-send. Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;
+  - `edit_draft` (`UpdateItem` / `SaveOnly`, partial field updates). Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;
   - `send_draft` (`UpdateItem` with `SendAndSaveCopy` on an existing draft, the way Outlook Web sends drafts; `SendItem` is not supported over OWS);
   - `set_read` / `set_flag` (`UpdateItem`, one `SetItemField` per message, read receipts suppressed);
   - `move` (`MoveItem`; a well-known target by `DistinguishedFolderId` as proven, any other folder by `FolderId`, pending a live check, V3);
@@ -204,7 +204,7 @@ lrh-outlook-connector/
 
 ### 5.6 `domain/models.py` and `errors.py`
 
-- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies, and `meeting` on meeting mail: kind, start, end, location, out of date; read from Graph's `eventMessage` fields in the same listing, so no extra requests), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ConversationMessage` + `Conversation`, `ConversationSize`, `ExportRequest`, `ExportArtifact`. Send adds `OutgoingMessage` (to/cc/bcc, subject, plain-text body, optional `reply_to_message_id` and `reply_all`), `EmailProposal`, `DraftResult` and `SendResult`; mutations add `ItemResult` and `MutationResult`.
+- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies, and `meeting` on meeting mail: kind, start, end, location, out of date; read from Graph's `eventMessage` fields in the same listing, so no extra requests), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ConversationMessage` + `Conversation`, `ConversationSize`, `ExportRequest`, `ExportArtifact`. Drafts add `OutgoingMessage` (explicit text/HTML and reply context), `DraftEdit`, private `DraftMessage`, `DraftResult` and `SendResult`; mutations add `ItemResult` and `MutationResult`.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
 - `ExportError` (step, status, code, message, request id, likely cause, `retry`, fix) describes a gap in an export or conversation body.
@@ -242,9 +242,17 @@ lrh-outlook-connector/
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`writes.py`:**
-- `propose(message)` resolves the message exactly as it would be sent: the sender is the signed-in account (no Send As), recipients are validated and de-duplicated, and a reply gets Outlook's defaults when recipients or subject are omitted (the sender, or the original recipients for your own message; with reply-all also the original To and Cc; never yourself, unless nobody else is left, as for mail you sent only to yourself; "RE: <subject>"). It returns an `EmailProposal` with a **confirmation code**: a hash of the account fingerprint and every material field. Stateless: nothing is stored between calls.
-- `create_draft` saves the proposal into Drafts and reads it back through Graph; it never sends, so it needs no confirmation.
-- `send(message, user_confirmation)` re-derives the proposal and refuses unless the code matches (any change to the account, recipients, subject or body changes it), checks that the write token's `tid`/`oid` are the bound account, and sends once. A reply is sent through a checked draft (W6): saved as an HTML reply draft, read back and compared with the original (its full text quoted; its formatting kept: at least as many lists, list items, tables, rows, cells, emphasis, links, images and `cid:` image references; every inline image present with the same bytes; no `[cid:…]` text). The reply's own text keeps repeated spaces and tabs as non-breaking spaces, and only then that draft is sent (`send_draft`); a failed check sends nothing and leaves the draft in Drafts. `create_draft` replies report the same check (`history_intact`, `history_problem`). On `WriteOutcomeUnknown` it looks for the message in Sent Items (subject and recipients, from five minutes before the send): found → `sent`; not found → `unknown`, with "do not send again before checking Outlook".
+- `create_draft` validates explicit text/HTML, recipients, subject and reply context; text becomes
+  escaped minimal HTML preserving whitespace and NBSP. Intentional HTML passes through, with only
+  active web content refused. The private writer takes `DraftMessage`, always HTML.
+- `edit_draft` validates partial changes against a current Graph draft. Omitted fields and attachments
+  survive. `UpdateItem` saves only changed fields; no local draft registry.
+- Both require bounded Graph read-back and return `DraftResult`: id, saved/failed, full server text/HTML,
+  message metadata and simple findings. Reply creation retains full quoted-history verification.
+- `send_draft(id)` requires an existing draft and the bound write account, and sends once with
+  `UpdateItem` / `SendAndSaveCopy`, no field updates. It accepts no content arguments and never
+  reconstructs mail. An ambiguous answer reads the exact immutable id: a Sent Items copy proves sent,
+  otherwise unknown. Human approval is the host/agent interaction, not a connector token.
 
 **`rules.py` / `remote/ows_rules.py` (W9):**
 - Service depends on `RuleWriter`; only `OwsRules` knows rule wire fields and identity envelopes.
@@ -266,6 +274,11 @@ lrh-outlook-connector/
 - Flow: read every message's state through Graph (`get_summaries`, one `$batch`): unknown ids → `not_found`, hidden or outside the mail folders → `failed`, already as wanted → `unchanged` (nothing sent). Then send in chunks of 20, with a status per message (`done`, `not_found`, `failed` with the code). On `WriteOutcomeUnknown`, read the chunk back: `done` where the change is visible, `unknown` elsewhere.
 - Categories are not written (parked hard, 2026-10-03: never used). They are still read and returned with each message.
 - `move` resolves the target like `list_folders` (hidden folders refused) and refuses Deleted Items. `delete` moves to Deleted Items and leaves messages already in Deleted Items (or its subfolders) alone, since deleting there again would take them out of the folder view.
+
+- H17: all four mutations accept `continue_on_error=true` by default. Clear chunk failures become
+  per-message failed results; ambiguous outcomes are read back and remain unknown if that read fails.
+  With false, any unresolved/error result in a sent chunk stops subsequent chunks: failed, `not sent`.
+  Earlier done/unchanged results and counts always survive; no write is retried.
 
 **`export/`:**
 - `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `include_sent_items`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. Messages selected by id are read from the server in `$batch`; if any cannot be read, the export fails before writing anything: `NotFound` when they are gone, `Throttled` when any is still throttled after the batch retries, `Upstream` otherwise, with their count, the first few ids and their case, and what to do. It then hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids`, `export_errors` (failures per step) and `error_summary` (the header's "Export errors" line). A body, attachment download or attachment listing that fails during the export becomes an `ExportError` marked in the file; the export still completes.
@@ -316,7 +329,7 @@ The backend split is a **tenant-specific outcome**, not a design preference. The
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (create_draft, send, set_read, set_flag, move, delete). The service depends **only on these ports**, never on a concrete backend.
+- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (create_draft, edit_draft, send_draft, set_read, set_flag, move, delete). The service depends **only on these ports**, never on a concrete backend.
 - **Adapters.** `remote/graph_mail.py` implements `MailReader`. `remote/ows_mail.py` implements `MailWriter`. Each adapter maps its protocol to the same `domain` models, so swapping an adapter never changes the service, surfaces, store or tests above it.
 - **Wiring.** `bootstrap.py` picks one adapter per port, and one token profile per adapter, from `config.py`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
@@ -358,9 +371,9 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `download_attachment(id, attachment_id)` · `save_message_mime(id)` | `files` | read-only (local file) |
 | `auth_status()` | `tokens.status` (offline) | read-only |
 | `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, include_sent_items=True, limit<=2000, format=txt\|jsonl, include_attachments, combine, body, include_deleted_items)` | `export.orchestrator` | read-only (local file) |
-| `create_draft(message)` | `writes.create_draft` | not read-only, not destructive, closed world |
-| `propose_email(message)` | `writes.propose` | read-only |
-| `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
+| `create_draft(..., text_body?, html_body?)` | `writes.create_draft` | not read-only, not destructive, closed world |
+| `edit_draft(draft_id, ...)` | `writes.edit_draft` | not read-only, not destructive, closed world |
+| `send_draft(draft_id)` | `writes.send_draft` | destructive, open-world |
 | `list_rules()` | `rules.list_rules` | read-only, write sign-in |
 | `create_rule(changes, user_confirmation?)` / `update_rule(id, changes, user_confirmation?)` / `reorder_rules(ids, user_confirmation?)` / `delete_rule(id, user_confirmation?)` | `rules` | destructive, non-idempotent, proposed/confirmed, single write |
 | `move_messages(message_ids, folder)` · `delete_messages(message_ids)` | `mutations.move` / `mutations.delete` | destructive, idempotent |
