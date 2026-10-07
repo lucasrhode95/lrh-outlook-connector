@@ -519,6 +519,46 @@ inline PNGs (10,836, 1,751, 1,000 and 997 bytes), with every body CID backed by 
 Corporate template-settings access and policy execution remain untested. W9's public-rule blockers
 are unchanged: this HAR contains no inbox-rule operations. Calendar authentication is unaddressed.
 
+**How Outlook Web finds and replaces the signature in a draft (2026-10-07).** Offline, read-only
+review of the Outlook Web JavaScript bundles in the second owner-supplied capture (247 scripts with
+bodies). Minified names are capture-specific and can change with any Outlook Web release; the
+string constants and behavior below are what matter.
+
+- **The container is client convention, not a server feature.** A shared module defines the id
+  `Signature`, the selector `#Signature` and the attribute `data-signature-name`. The editor's
+  HTML parser reads `data-signature-name` from a container into its model (`signatureName`), and the
+  serializer writes it back, so the name of the inserted signature travels with the block. The
+  captured drafts show `<div id="Signature" class="elementToProof">` (initial `CreateItem`) and
+  `<div id="Signature">` (later `UpdateItem`); the corporate template added its own inner
+  `<span id="LGEmailSignatureBlock">`. OWS stores whatever HTML it is given (§4.6 above).
+- **Which signature is "current":** the compose code walks the body model and takes the **first**
+  `FormatContainer` block whose id is `Signature`, reading its `signatureName`.
+- **Replace or insert (add-in path, captured in full):** the signature HTML is wrapped as
+  `<div id='Signature'><div>{html}</div></div>`; the editor queries `#Signature`. If one exists, the
+  **first match is replaced in place** (the whole node); otherwise the block is inserted with a
+  per-account prefix, at the start of the body for new mail and smart responses, else at the cursor.
+  Plain-text bodies get the signature spliced in after two newlines. A newer path
+  (`insertSignatureWithContentModel`, `insertSignatureForAddinWithContentModel`) lives in a lazily
+  loaded "EditorInsertActions" chunk that is **not in either capture**; its exact rules are
+  unconfirmed, but it is called with the same `Signature` id.
+- **An emptied signature stops being one.** The editor's model fix-up hook takes the **last**
+  `Signature` container and, if it holds nothing but one empty paragraph, removes its id.
+- **Quoted history does not collide.** Exchange prefixes element ids in received HTML with `x_`
+  (`x_Signature`). When loading a reply/forward, the parser strips that prefix only for elements
+  before the reply header (`divRplyFwdMsg`); everything after it keeps `x_`. So the original
+  sender's signature never matches `#Signature`, and only the block in the new part is replaced.
+- **Other markers seen:** `<div id=appendonsend></div>` is a separate placeholder for content the
+  client appends on send (organization disclaimers/add-ins), not the signature.
+
+**Implications for W8 (connector-inserted signatures).** Use the same convention so Outlook (Web,
+and the user's later edits) recognizes the block: one `<div id="Signature"
+data-signature-name="{name}">…</div>` in the new part of the body, above any `divRplyFwdMsg`
+header. For `edit_draft`, a body change must keep or deliberately re-insert that block; changing or
+removing the signature means replacing or dropping only the first `#Signature` element outside the
+quoted part, never one inside it. A later change of the default signature in settings does not
+touch existing drafts (it is a compose-time choice); `data-signature-name` tells which signature a
+draft carries if a refresh is ever wanted.
+
 ### 4.7 Native roaming-signature discovery and standalone reads (2026-10-07)
 
 **Discovery (SOURCE).** The second owner-supplied HAR contains 343 entries, including native Outlook
