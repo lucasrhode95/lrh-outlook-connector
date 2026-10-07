@@ -1,33 +1,14 @@
-"""Drafts and sending (requirements v4 §11.1, architecture §5.8).
-
-Draft first: ``create_draft`` saves into Drafts and never sends, so it needs no confirmation.
-
-Sending is two steps, and the second re-derives everything from scratch (processes are
-short-lived, so nothing is remembered in between):
-
-1. ``propose`` resolves the message exactly as it would be sent (sender, recipients, subject,
-   body, reply defaults) and returns a confirmation code: a hash of all of it and of the account.
-   The agent shows the proposal to the user.
-2. ``send`` takes the same message and the code the user confirmed. It resolves the message
-   again, refuses it unless the code matches (any change to the account, recipients, subject or
-   body changes the code), checks that the write credential is the bound account, and sends
-   once. With no clear answer it looks in Sent Items instead of retrying.
-
-A reply is sent through a draft (W6): the reply is saved into Drafts, read back and compared with
-the original (its whole text quoted, its formatting kept, its inline images kept with the same
-bytes, no image turned into "[cid:...]" text), and only that checked draft is sent.
-``create_draft`` runs the same check on a reply draft and reports it. If the check fails, nothing
-is sent and the draft stays in Drafts for the user to look at.
-"""
+"""Draft-first mail: explicit bodies, mandatory Graph read-back, existing-draft sending."""
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
-import json
 import re
 import tempfile
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from html import escape, unescape
+from html.parser import HTMLParser
 from pathlib import Path
 
 from outlook_connector.auth.tokens import Account
@@ -35,17 +16,17 @@ from outlook_connector.domain.errors import (
     AccountMismatch,
     ConnectorError,
     InvalidRequest,
-    NotFound,
     WriteOutcomeUnknown,
 )
 from outlook_connector.domain.models import (
     ADDRESS_PATTERN,
+    MAX_BODY_CHARS,
     MAX_RECIPIENTS,
     Attachment,
+    DraftEdit,
+    DraftMessage,
     DraftResult,
-    EmailProposal,
     Message,
-    MessageSummary,
     OutgoingMessage,
     Recipient,
     SendResult,
@@ -55,7 +36,6 @@ from outlook_connector.service.conversations import base_subject
 from outlook_connector.service.mailbox import Mailbox
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
-SENT_LOOKBACK = timedelta(minutes=5)
 
 
 class Writes:
@@ -64,16 +44,93 @@ class Writes:
         self.writer = writer
         self.account = account
 
-    # ---------------------------------------------------------------- proposal
+    async def create_draft(self, message: OutgoingMessage) -> DraftResult:
+        """Entry point: validate body, envelope and reply arguments; save once and read back."""
+        resolved = await self._resolve(message)
+        self.check_account()
+        draft_id = await self.writer.create_draft(resolved)
+        if not draft_id:
+            raise WriteOutcomeUnknown(
+                "Outlook did not report a draft id; check Drafts before creating again."
+            )
+        result = await self._read_back(draft_id)
+        if resolved.reply_to_message_id and result.verified:
+            try:
+                problem = await self._reply_problem(draft_id, resolved.reply_to_message_id)
+            except ConnectorError as exc:
+                problem = f"Reply history verification failed: {exc}"
+            result.history_intact, result.history_problem = problem is None, problem
+        return result
 
-    async def propose(self, message: OutgoingMessage) -> EmailProposal:
-        """Exactly what would be sent, validated, with its confirmation code. Changes nothing.
+    async def edit_draft(self, draft_id: str, changes: DraftEdit) -> DraftResult:
+        """Entry point: validate supplied partial fields against an existing draft, then save once."""
+        original = await self._draft(draft_id)
+        supplied = changes.model_dump(exclude_unset=True)
+        body_changed = "text_body" in supplied or "html_body" in supplied
+        page = _body(changes.text_body, changes.html_body) if body_changed else None
+        fields = {k: v for k, v in supplied.items() if k not in ("text_body", "html_body")}
+        if any(value is None for value in fields.values()):
+            raise InvalidRequest(
+                "Draft fields cannot be null; use an empty recipient list to clear recipients."
+            )
+        to = _addresses(
+            changes.to if changes.to is not None else [r.address or "" for r in original.to], "to"
+        )
+        cc = _addresses(
+            changes.cc if changes.cc is not None else [r.address or "" for r in original.cc], "cc"
+        )
+        bcc = _addresses(
+            changes.bcc if changes.bcc is not None else [r.address or "" for r in original.bcc], "bcc"
+        )
+        _validate_envelope(to, cc, bcc, changes.subject if "subject" in fields else original.subject)
+        for key, values in (("to", to), ("cc", cc), ("bcc", bcc)):
+            if key in fields:
+                fields[key] = values
+        if page is not None:
+            fields["html_body"] = page
+        if not fields:
+            raise InvalidRequest("Supply at least one draft field to edit.")
+        expected = await self.mailbox.reader.list_attachments(draft_id)
+        self.check_account()
+        await self.writer.edit_draft(draft_id, fields)
+        return await self._read_back(draft_id, expected=expected)
 
-        Entry point and the only validator of an outgoing message: addresses, recipient count and
-        duplicates, subject, body, reply defaults. ``create_draft``, ``send`` and the writer trust what it
-        returns.
+    async def send_draft(self, draft_id: str) -> SendResult:
+        """Entry point: require a server draft and the bound account. Only an id, no content.
+
+        The host obtains human approval; the connector never reconstructs or retries the message.
         """
-        me = (self.account.username or "").lower()
+        await self._draft(draft_id)
+        self.check_account()
+        try:
+            await self.writer.send_draft(draft_id)
+        except WriteOutcomeUnknown as exc:
+            try:
+                item = await self.mailbox.message(draft_id)
+                sent = await self.mailbox.resolve_folder("sentitems")
+                if item.is_draft is False and item.folder_id == sent.id:
+                    return SendResult(
+                        status="sent", sent_item_id=item.id, detail="The exact draft is in Sent Items."
+                    )
+            except ConnectorError:
+                pass
+            return SendResult(
+                status="unknown", detail=f"{exc} Do not send again before checking Sent Items and Outbox."
+            )
+        return SendResult(status="sent", detail="Sent the existing draft; a copy is kept in Sent Items.")
+
+    async def _draft(self, draft_id: str) -> Message:
+        """Validate a public draft id against current server state."""
+        if not draft_id.strip():
+            raise InvalidRequest("draft_id must not be empty.")
+        message = await self.mailbox.message(draft_id)
+        if not message.is_draft:
+            raise InvalidRequest("The message is not an existing Outlook draft.")
+        return message
+
+    async def _resolve(self, message: OutgoingMessage) -> DraftMessage:
+        """Assumes (not re-checked here): called only by create_draft; validates its outgoing input."""
+        page = _body(message.text_body, message.html_body)
         to, cc, bcc = (
             _addresses(message.to, "to"),
             _addresses(message.cc, "cc"),
@@ -82,131 +139,64 @@ class Writes:
         subject = message.subject
         if message.reply_to_message_id:
             original = await self.mailbox.message(message.reply_to_message_id)
-            if not (to or cc or bcc):  # Outlook's defaults
-                to, cc = _reply_recipients(original, me=me, reply_all=message.reply_all)
+            if not (to or cc or bcc):
+                to, cc = _reply_recipients(
+                    original, me=(self.account.username or "").lower(), reply_all=message.reply_all
+                )
             if subject is None:
                 subject = f"RE: {base_subject(original.subject) or ''}".rstrip()
         elif message.reply_all:
             raise InvalidRequest("reply_all needs reply_to_message_id.")
-        recipients = to + cc + bcc
-        if not recipients:
-            raise InvalidRequest("Name at least one recipient (to, cc or bcc).")
-        if len(recipients) > MAX_RECIPIENTS:
-            raise InvalidRequest(f"At most {MAX_RECIPIENTS} recipients per message.")
-        if len({a.lower() for a in recipients}) < len(recipients):
-            raise InvalidRequest("A recipient is listed twice (across to, cc and bcc).")
-        if not (subject or "").strip():
-            raise InvalidRequest("A new message needs a subject.")
-        if not message.body.strip():
-            raise InvalidRequest("The body is empty.")
-        fields = {
-            "sender": self.account.username or "",
-            "to": to,
-            "cc": cc,
-            "bcc": bcc,
-            "subject": subject or "",
-            "body": message.body,
-            "reply_to_message_id": message.reply_to_message_id,
-            "reply_all": message.reply_all,
-            "quotes_original": bool(message.reply_to_message_id),
-        }
-        return EmailProposal.model_validate({**fields, "confirmation": self._code(fields)})
-
-    def _code(self, fields: dict[str, object]) -> str:
-        material = json.dumps(
-            {"account": self.account.fingerprint, **fields}, sort_keys=True, ensure_ascii=False
+        _validate_envelope(to, cc, bcc, subject)
+        return DraftMessage(
+            to=to,
+            cc=cc,
+            bcc=bcc,
+            subject=subject or "",
+            html_body=page,
+            reply_to_message_id=message.reply_to_message_id,
+            reply_all=message.reply_all,
         )
-        return "SEND-" + hashlib.sha256(material.encode()).hexdigest()[:8].upper()
 
-    # ---------------------------------------------------------------- draft
-
-    async def create_draft(self, message: OutgoingMessage) -> DraftResult:
-        """Save the message (or reply) into Drafts. Nothing is sent.
-
-        Entry point: validates through ``propose`` and checks the account itself; the writer trusts the
-        proposal.
-        """
-        proposal = await self.propose(message)
-        self.check_account()
-        draft_id = await self.writer.create_draft(proposal)
-        if not draft_id:
-            raise WriteOutcomeUnknown(
-                "Outlook saved the draft but did not report its id; look in Drafts before saving it again."
-            )
-        try:
-            await self.mailbox.message(draft_id)
-            verified = True
-        except NotFound:
-            verified = False
-        result = DraftResult(id=draft_id, proposal=proposal, verified=verified)
-        if proposal.reply_to_message_id and verified:
-            problem = await self._reply_problem(draft_id, proposal.reply_to_message_id)
-            result.history_intact, result.history_problem = problem is None, problem
-        return result
-
-    # ---------------------------------------------------------------- send
-
-    async def send(self, message: OutgoingMessage, user_confirmation: str) -> SendResult:
-        """Send a message the user confirmed with its code; once, never retried.
-
-        Entry point: validates through ``propose``, compares the code and checks the account;
-        ``_send_reply`` and the writer trust the proposal.
-        """
-        proposal = await self.propose(message)
-        if user_confirmation.strip().upper() != proposal.confirmation:
-            raise InvalidRequest(
-                "Not sent: user_confirmation does not match this exact message (any change to the "
-                "recipients, subject or body changes the code). Call propose_email, show the proposal "
-                "to the user, and send only the message they confirmed, with its code."
-            )
-        self.check_account()
-        started = datetime.now(UTC)
-        try:
-            if proposal.reply_to_message_id:
-                await self._send_reply(proposal, proposal.reply_to_message_id)
-            else:
-                await self.writer.send(proposal)
-        except WriteOutcomeUnknown as exc:
+    async def _read_back(self, draft_id: str, *, expected: list[Attachment] | None = None) -> DraftResult:
+        """Assumes (not re-checked here): reliable id from a single successful write. Retries reads only."""
+        for attempt in range(3):
             try:
-                found = await self._find_sent(proposal, since=started - SENT_LOOKBACK)
-            except ConnectorError:  # the check failed: stay with "unknown", never a plain error
-                found = None
-            if found:
-                return SendResult(
-                    status="sent", sent_item_id=found.id,
-                    detail="Outlook gave no clear answer, but the message is in Sent Items.",
-                )  # fmt: skip
-            return SendResult(
-                status="unknown",
-                detail=f"{exc} No copy is in Sent Items yet. Do not send again before the user has "
-                "checked Outlook (Sent Items and Outbox).",
-            )
-        return SendResult(status="sent", detail="Sent; a copy is kept in Sent Items.")
-
-    async def _send_reply(self, proposal: EmailProposal, original_id: str) -> None:
-        """Save the reply as a draft, check it against the original, send exactly that draft.
-
-        Assumes (not re-checked here): ``proposal`` comes from ``propose`` in this call, the confirmation
-        code matched and the account was checked (``send``).
-        """
-        try:
-            draft_id = await self.writer.create_draft(proposal)
-        except WriteOutcomeUnknown:
-            raise ConnectorError(
-                "Not sent: Outlook gave no clear answer while saving the reply as a draft. Look in "
-                "Drafts before trying again."
-            ) from None
-        if not draft_id:
-            raise ConnectorError(
-                "Not sent: Outlook saved the reply as a draft but did not report its id. Look in Drafts."
-            )
-        problem = await self._reply_problem(draft_id, original_id)
-        if problem:
-            raise ConnectorError(
-                f"Not sent: the reply draft did not keep the original message intact ({problem}). "
-                f"The draft is in Drafts (id {draft_id}) for the user to check in Outlook."
-            )
-        await self.writer.send_draft(draft_id, proposal.subject)
+                text = await self.mailbox.reader.get_message(draft_id)
+                page = await self.mailbox.reader.get_message(draft_id, body_format="html")
+                findings = []
+                if not (text.body_text or "").strip():
+                    findings.append("The server draft body is empty or missing.")
+                cids = re.findall(r"cid:([^\"' >]+)", page.body_html or "", re.IGNORECASE)
+                if cids or expected:
+                    attachments = await self.mailbox.reader.list_attachments(draft_id)
+                    if expected and Counter(a.name for a in expected) - Counter(a.name for a in attachments):
+                        findings.append("The server draft is missing expected attachments.")
+                    found = await self.mailbox.reader.attachment_content_ids(
+                        {draft_id: [a.id for a in attachments if a.is_inline]}
+                    )
+                    present = set(found.get(draft_id, {}).values())
+                    if any(cid not in present for cid in cids):
+                        findings.append("The server draft references missing inline images.")
+                return DraftResult(
+                    id=draft_id,
+                    status="saved",
+                    verified=True,
+                    message=text,
+                    text_body=text.body_text,
+                    html_body=page.body_html,
+                    findings=findings,
+                )
+            except ConnectorError as exc:
+                if attempt == 2:
+                    return DraftResult(
+                        id=draft_id,
+                        status="failed",
+                        verified=False,
+                        findings=[f"Draft saved, but Graph read-back failed: {exc}"],
+                    )
+                await asyncio.sleep(0.2 * (attempt + 1))
+        raise AssertionError("unreachable")
 
     async def _reply_problem(self, draft_id: str, original_id: str) -> str | None:
         """Why the reply draft does not carry the original as received, or None when it does.
@@ -259,30 +249,6 @@ class Writes:
                 "The write sign-in belongs to a different Microsoft account than the one this "
                 "connector reads; nothing was written."
             )
-
-    async def _find_sent(self, proposal: EmailProposal, *, since: datetime) -> MessageSummary | None:
-        """The proposal's copy in Sent Items: same subject and exactly the same To, Cc and Bcc.
-
-        Assumes (not re-checked here): ``proposal`` comes from ``propose`` (validated, recipients de-
-        duplicated).
-        """
-        sent = await self.mailbox.resolve_folder("sentitems")
-        items, _ = await self.mailbox.reader.list_messages(
-            folder_id=sent.id, since=since, until=None, page_size=50, page=None
-        )
-        candidates = [m.id for m in items if m.subject == proposal.subject]
-        if not candidates:
-            return None
-        fetched = await self.mailbox.reader.get_messages(candidates)  # with Bcc, which summaries lack
-
-        def addresses(recipients: list[Recipient]) -> set[str]:
-            return {r.address.lower() for r in recipients if r.address}
-
-        wanted = [{a.lower() for a in field} for field in (proposal.to, proposal.cc, proposal.bcc)]
-        for message in fetched.messages.values():
-            if message and [addresses(message.to), addresses(message.cc), addresses(message.bcc)] == wanted:
-                return message
-        return None
 
 
 def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[list[str], list[str]]:
@@ -360,3 +326,51 @@ def _unique(addresses: list[str]) -> list[str]:
     for address in addresses:
         first.setdefault(address.lower(), address)
     return list(first.values())
+
+
+def _validate_envelope(to: list[str], cc: list[str], bcc: list[str], subject: str | None) -> None:
+    recipients = to + cc + bcc
+    if not recipients:
+        raise InvalidRequest("Name at least one recipient (to, cc or bcc).")
+    if len(recipients) > MAX_RECIPIENTS:
+        raise InvalidRequest(f"At most {MAX_RECIPIENTS} recipients per message.")
+    if len({a.lower() for a in recipients}) != len(recipients):
+        raise InvalidRequest("A recipient is listed twice (across to, cc and bcc).")
+    if not (subject or "").strip():
+        raise InvalidRequest("A new message needs a subject.")
+    if len(subject or "") > 255:
+        raise InvalidRequest("Subject must be at most 255 characters.")
+
+
+def _body(text: str | None, page: str | None) -> str:
+    if (text is None) == (page is None):
+        raise InvalidRequest("Supply exactly one of text_body or html_body.")
+    value = text if text is not None else page or ""
+    if not value.strip():
+        raise InvalidRequest("The body is empty.")
+    if len(value) > MAX_BODY_CHARS:
+        raise InvalidRequest(f"Body must be at most {MAX_BODY_CHARS} characters.")
+    if text is not None:
+        lines = escape(text).replace("\u00a0", "&nbsp;").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        return "<div>" + "<br>".join(_keep_spaces(line) for line in lines) + "</div>"
+    parser = _PassiveHtml()
+    parser.feed(value)
+    return value
+
+
+def _keep_spaces(line: str) -> str:
+    line = line.replace("\t", "&nbsp;" * 4)
+    line = re.sub(r" {2,}", lambda run: "&nbsp;" * (len(run.group()) - 1) + " ", line)
+    return "&nbsp;" + line[1:] if line.startswith(" ") else line
+
+
+class _PassiveHtml(HTMLParser):
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "iframe", "object", "embed", "form", "input", "button", "textarea", "select"}:
+            raise InvalidRequest(f"Active HTML content is not allowed: {tag}.")
+        for name, value in attrs:
+            compact = re.sub(r"[\s\x00-\x1f]+", "", unescape(value or "")).lower()
+            if name.startswith("on") or compact.startswith(("javascript:", "vbscript:")):
+                raise InvalidRequest("Active HTML URLs and event handlers are not allowed.")
+
+    handle_startendtag = handle_starttag
