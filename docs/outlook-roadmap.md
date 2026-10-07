@@ -24,8 +24,8 @@ evidence. No permanent deletion was performed.
 1. **W9 live blockers:** distinguish inactive OWS enum values/description metadata from unsupported
    rule behavior, and reconcile create-response identities with fresh rule-list identities; then
    repeat the tool lifecycle checks.
-2. **W8:** implement native signature listing/content retrieval and fresh default resolution; these
-   reads now work with app-owned authentication, including an image-bearing signature.
+2. **W8:** implement native signature listing/content retrieval and fresh default resolution.
+   Native CRUD, image edits and default changes are now proven; detect dangling defaults.
 3. **Correctness:** H19, H22 and H26.
 4. **Performance and cleanup:** H30–H38 (H33 is already implemented).
 5. **Deferred live research:** HTML/client rendering; calendar authentication remains Later (X10).
@@ -97,8 +97,8 @@ remote images and a client-specific comparison matrix.
 
 ## W8 — Signatures
 
-**Status:** Decided, not built. Native list/default/content reads proved with app-owned authentication
-on 2026-10-07, including a newly added signature image. Reliable enumeration and draft integration remain.
+**Status:** Decided, not built. Native reads, create/edit/delete, image edits and independent
+default changes proved with app-owned authentication on 2026-10-07. Public tools and draft integration remain.
 
 **Owner decision (2026-10-07):** automatically use the user's current Outlook default for new
 messages, and list signatures/retrieve contents reliably. Resolve the reply/forward default separately.
@@ -118,19 +118,34 @@ created another signature with an image, fresh reads retrieved its HTML and text
 PNG (61,483 bytes). Both defaults still selected the existing signature. See
 [research §4.7](outlook-api-research.md#47-native-roaming-signature-discovery-and-standalone-reads-2026-10-07).
 
+**Lifecycle validation:** dedicated temporary signatures were created, read, edited with an embedded
+PNG, edited to remove the image, and deleted. New-message and reply defaults were switched
+independently; fresh retrieval followed the selected default, and an explicit empty new-message
+default was accepted. Existing signature records stayed unchanged, all four temporary signatures
+were deleted, and the original list/default values were restored. No message writes or sends were
+performed. Defaults' revision timestamps advanced as expected when their values were changed and
+restored. See [research §4.8](outlook-api-research.md#48-native-signature-crud-and-default-lifecycle-2026-10-07).
+
 **Missing-reference finding:** the first raw list contained two names, but only the selected default
 returned content; the owner confirmed the settings UI showed one signature. The other entry appears
 to have been a leftover reference. After the owner added the image-bearing signature, a fresh list
 contained the existing and new signatures, both readable; the previous empty entry was absent.
 Resolve contents for each name, report missing references explicitly, and never treat the raw list
-as verified signatures. Exact deletion semantics still need synthetic/controlled coverage.
+as verified signatures. Direct native deletion removed the tested signature and its list reference;
+the earlier empty reference's origin remains unproven.
+
+**Dangling-default finding:** deleting a temporary signature while it was the new-message default
+left that default pointing to its now-missing contents. The reply default stayed unchanged. Reading
+the default pointer alone is insufficient: confirm that the selected contents exist. Cleanup repaired
+the temporary dangling pointer and restored the original default.
 
 **Build scope:**
 
 - Read-only MCP tools `list_signatures` and `get_signature`; results identify the new-message and
   reply/forward defaults, content availability and any missing references.
 - A remote signature-reader port and Outlook Cloud Settings adapter; resolution and placement stay
-  in the service layer. No signature settings writes or editor are needed.
+  in the service layer. Native write capability is proven; exposing signature-management writes is
+  a separate scope choice from the initial read/default-composition feature. No editor is needed.
 - Query the current default and its contents when composing, without a persisted signature/default
   cache. Recheck the relevant settings revision after retrieval so a changed selection cannot be
   silently used. An explicit no-default setting means no signature; a missing configured default
@@ -139,7 +154,9 @@ as verified signatures. Exact deletion semantics still need synthetic/controlled
   quoted history untouched. Body edits must replace the connector-managed signature rather than
   duplicate it; existing-draft send still sends the stored draft unchanged.
 - Extract native embedded image data into actual inline attachments with matching CID references.
-  The image-bearing read is proved; integration/send rendering still needs validation.
+  Native image retrieval, addition and removal are proved; draft integration/send rendering still
+  needs validation. Cloud Settings normalizes saved HTML (wrappers, line breaks and id prefixes);
+  compare visible text and decoded image bytes rather than expecting byte-identical HTML.
 
 **Separate corporate mechanism:** officeatwork can render/replace a native signature during Web
 composition using a SharePoint template, profile and recipient/sender policies. Native default
@@ -150,9 +167,9 @@ Research §4.6 records the template/upload contracts and normalized-body GIF pla
 
 **Next:** implement the proven native read contracts with synthetic fixtures for missing references,
 no default, missing default content, name encoding, changed configuration and account ownership.
-Integrate composition and validate default changes, image handling and new-message/reply placement.
-Native signature create/edit/delete through our own process has not been tested; those writes are
-outside the initial read-only scope.
+Integrate composition and validate image attachment handling, new-message/reply placement and
+recipient rendering. Native CRUD/default discovery is complete for the tested fixture shapes;
+public-tool behavior, rename, RTF edits and concurrent-write races were not tested live.
 
 ## W9 — Inbox rules
 
