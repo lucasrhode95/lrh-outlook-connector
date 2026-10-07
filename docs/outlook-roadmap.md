@@ -52,7 +52,7 @@ Status wording used below:
 
 ## W7 — Draft-first text and HTML sending
 
-**Status:** Decided, not built.
+**Status:** Implemented on this branch; synthetic validation complete, live validation pending.
 
 **Goal:** make Outlook drafts the only entry point for agent-authored outgoing mail. The connector must never guess whether a body is plain text or HTML, and it must never reconstruct a message at send time.
 
@@ -87,7 +87,7 @@ For the first version, automatic verification stays deliberately simple and high
 
 **Deferred live-test research, not blockers:** after the basic flow works, test how Outlook/Graph and recipient clients treat fragments vs complete HTML documents, malformed-but-accepted HTML, CSS, remote images and representative formatting. Revisit body-change detection only with real examples; a future approach may compare normalized visible text (entities decoded, whitespace/non-breaking spaces normalized) rather than HTML structure.
 
-**Next:** replace the current `create_draft` / `propose_email` / `send_email` surface and write service with the draft-first API above, update models/tests/docs together, and live-test both plain-text and HTML creation/edit/reply/send flows.
+**Next:** on explicit owner request, live-test plain-text/HTML creation, partial edit, replies and existing-draft send. The no-field-update `UpdateItem` send shape needs live confirmation; earlier evidence used a subject update. Deferred HTML/client research remains unchanged.
 
 ## W8 — Signatures
 

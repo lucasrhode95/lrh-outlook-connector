@@ -23,8 +23,8 @@ from outlook_connector.domain.models import (
     CombineMode,
     Conversation,
     Detail,
+    DraftEdit,
     DraftResult,
-    EmailProposal,
     ExportArtifact,
     ExportFormat,
     ExportRequest,
@@ -86,17 +86,12 @@ status, likely_cause, retry, fix).
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
 many small ones. On a throttling error, wait at least a minute before retrying.
-- Drafts: create_draft saves a plain-text message or reply into Drafts and never sends it (a reply \
-reports history_intact: whether Outlook quoted the original exactly as received); the user \
-reviews and sends it from Outlook. Prefer it whenever the user has not explicitly asked you to send.
-- Sending, only when the user explicitly asks to send: (1) propose_email with the message; (2) show \
-the user the whole proposal (from, to, cc, bcc, subject, full body; a reply also carries the quoted \
-original, added by Outlook; a reply is sent only if its draft keeps the original exactly as \
-received, otherwise nothing is sent) and ask them to confirm it; (3) only after they confirm, \
-send_email with the same message and the proposal's confirmation code as user_confirmation. \
-Never confirm on the user's behalf. A message changed after confirmation is refused: propose and \
-confirm again. If send_email returns status "unknown", do not send again; ask the user to check \
-Sent Items and Outbox.
+- Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
+edit_draft changes only supplied fields. Both return the Microsoft draft id and full server text/HTML,
+with verification findings. Show/use that server read-back before sending.
+- Sending: only after the user explicitly asks, call send_draft with the existing Microsoft draft id.
+Never confirm on the user's behalf. It sends the stored draft without changing it, once.
+On status "unknown", ask the user to check Sent Items and Outbox before any further send.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
 set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
@@ -355,33 +350,59 @@ def build_server(context: AppContext) -> FastMCP:
         return await (await services()).exports.export(request)
 
     @mcp.tool(annotations=DRAFT)
-    async def create_draft(message: OutgoingMessage) -> DraftResult:
-        """Save a plain-text message, or a reply (reply_to_message_id), into Drafts. Never sends.
+    async def create_draft(
+        to: list[str] | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        subject: str | None = None,
+        text_body: str | None = None,
+        html_body: str | None = None,
+        reply_to_message_id: str | None = None,
+        reply_all: bool = False,
+    ) -> DraftResult:
+        """Save a new message or reply with exactly one body representation; return server read-back."""
+        return await (await services()).writes.create_draft(
+            OutgoingMessage(
+                to=to or [],
+                cc=cc or [],
+                bcc=bcc or [],
+                subject=subject,
+                text_body=text_body,
+                html_body=html_body,
+                reply_to_message_id=reply_to_message_id,
+                reply_all=reply_all,
+            )
+        )
 
-        The user can review, edit and send it from Outlook. Returns the draft's id and what it holds."""
-        return await (await services()).writes.create_draft(message)
-
-    @mcp.tool(annotations=READ_ONLY)
-    async def propose_email(message: OutgoingMessage) -> EmailProposal:
-        """Step 1 of sending: the message exactly as it would be sent, and its confirmation code.
-
-        Changes nothing. Show the whole proposal to the user and ask them to confirm it."""
-        return await (await services()).writes.propose(message)
+    @mcp.tool(annotations=DRAFT)
+    async def edit_draft(
+        draft_id: str,
+        to: list[str] | None = None,
+        cc: list[str] | None = None,
+        bcc: list[str] | None = None,
+        subject: str | None = None,
+        text_body: str | None = None,
+        html_body: str | None = None,
+    ) -> DraftResult:
+        """Edit only supplied draft fields; an empty recipient list clears that field. Return read-back."""
+        fields = {
+            k: v
+            for k, v in {
+                "to": to,
+                "cc": cc,
+                "bcc": bcc,
+                "subject": subject,
+                "text_body": text_body,
+                "html_body": html_body,
+            }.items()
+            if v is not None
+        }
+        return await (await services()).writes.edit_draft(draft_id, DraftEdit.model_validate(fields))
 
     @mcp.tool(annotations=SEND)
-    async def send_email(
-        message: OutgoingMessage,
-        user_confirmation: Annotated[
-            str,
-            Field(description="The confirmation code of the proposal the user confirmed (SEND-…)."),
-        ],
-    ) -> SendResult:
-        """Step 2 of sending: send the message the user confirmed, once, from their account.
-
-        Only with the user's explicit confirmation of this exact message (propose_email). Refused if
-        the message differs from the confirmed proposal. Never retried: on status "unknown", ask the
-        user to check Sent Items and Outbox instead of sending again."""
-        return await (await services()).writes.send(message, user_confirmation)
+    async def send_draft(draft_id: str) -> SendResult:
+        """Send this existing server draft unchanged, once, only on the user's explicit send request."""
+        return await (await services()).writes.send_draft(draft_id)
 
     @mcp.tool(annotations=CHANGE)
     async def set_read_state(
