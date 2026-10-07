@@ -57,9 +57,18 @@ class OwsMailWriter(MailWriter):
         with operation("editing a draft"):
             await self._ows.call("UpdateItem", _draft_update(draft_id, updates, "SaveOnly"))
 
-    async def send_draft(self, draft_id: str) -> None:
-        """Send only this existing draft; no message fields changed, no automatic retry."""
+    async def send_draft(self, draft_id: str, revision: str) -> None:
+        """Send only this existing draft, unchanged: ``UpdateItem`` with ``SendAndSaveCopy`` and no
+        field updates (``SendItem`` is not supported over OWS). The item id carries the change key
+        the draft was read at, with ``NeverOverwrite``: if the draft changed since (edited in Outlook
+        meanwhile), Outlook refuses with ``ErrorIrresolvableConflict`` and sends nothing. Both proven
+        live 2026-10-06. Sent once, never retried.
+
+        Assumes (not re-checked here): ``revision`` is the draft's version as ``Writes`` read it.
+        """
         body = _draft_update(draft_id, [], "SendAndSaveCopy")
+        body["ItemChanges"][0]["ItemId"]["ChangeKey"] = revision
+        body["ConflictResolution"] = "NeverOverwrite"
         body["SavedItemFolderId"] = {
             "__type": "TargetFolderId:#Exchange",
             "BaseFolderId": {"__type": "DistinguishedFolderId:#Exchange", "Id": "sentitems"},

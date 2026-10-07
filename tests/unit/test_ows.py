@@ -56,9 +56,12 @@ async def test_send_uses_send_and_save_copy(fake: FakeGraph) -> None:
     writer = writer_for(fake)
     draft_id = await writer.create_draft(proposal())
     assert draft_id
-    await writer.send_draft(draft_id)
-    assert fake.ows_calls[-1][1]["MessageDisposition"] == "SendAndSaveCopy"
-    assert fake.ows_calls[-1][1]["ItemChanges"][0]["Updates"] == []
+    read_at = fake.messages[draft_id].change_key()
+    await writer.send_draft(draft_id, read_at)
+    body = fake.ows_calls[-1][1]
+    assert body["MessageDisposition"] == "SendAndSaveCopy" and body["ConflictResolution"] == "NeverOverwrite"
+    (change,) = body["ItemChanges"]
+    assert change["ItemId"]["ChangeKey"] == read_at and change["Updates"] == []  # no field changed
     assert fake.sent_drafts == [draft_id]
 
 
@@ -92,10 +95,21 @@ async def test_replies_reference_the_original_with_ows_ids(fake: FakeGraph) -> N
 async def test_item_errors_name_the_code(fake: FakeGraph) -> None:
     fake.ows_next = [{"ResponseClass": "Error", "ResponseCode": "ErrorInvalidRecipients", "MessageText": "x"}]
     with pytest.raises(Upstream, match="ErrorInvalidRecipients"):
-        await writer_for(fake).send_draft("test-draft")
+        await writer_for(fake).send_draft("test-draft", "k")
     fake.ows_next = [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
     with pytest.raises(NotFound):
         await writer_for(fake).create_draft(proposal(reply_to_message_id="gone"))
+
+
+async def test_a_draft_changed_since_it_was_read_is_refused_and_not_sent(fake: FakeGraph) -> None:
+    writer = writer_for(fake)
+    draft_id = await writer.create_draft(proposal())
+    assert draft_id
+    read_at = fake.messages[draft_id].change_key()
+    fake.messages[draft_id].subject = "Edited in Outlook meanwhile"
+    with pytest.raises(Upstream, match="changed in Outlook after it was read.*nothing was changed or sent"):
+        await writer.send_draft(draft_id, read_at)
+    assert fake.sent_drafts == [] and fake.messages[draft_id].is_draft
 
 
 async def test_no_answer_or_server_error_is_an_unknown_outcome_never_retried(fake: FakeGraph) -> None:
@@ -103,7 +117,7 @@ async def test_no_answer_or_server_error_is_an_unknown_outcome_never_retried(fak
         fake.ows_calls.clear()
         fake.ows_next = [script]
         with pytest.raises(WriteOutcomeUnknown, match="not retried"):
-            await writer_for(fake).send_draft("test-draft")
+            await writer_for(fake).send_draft("test-draft", "k")
         assert len(fake.ows_calls) == 1
 
 
@@ -111,13 +125,13 @@ async def test_a_success_without_readable_results_is_an_unknown_outcome(fake: Fa
     for script in ("no-items", "not-json"):
         fake.ows_next = [script]
         with pytest.raises(WriteOutcomeUnknown):
-            await writer_for(fake).send_draft("test-draft")
+            await writer_for(fake).send_draft("test-draft", "k")
 
 
 async def test_throttled_write_is_not_retried(fake: FakeGraph) -> None:
     fake.ows_next = [429]
     with pytest.raises(Throttled):
-        await writer_for(fake).send_draft("test-draft")
+        await writer_for(fake).send_draft("test-draft", "k")
     assert len(fake.ows_calls) == 1
 
 
@@ -125,7 +139,7 @@ async def test_rejected_token_is_renewed_once_before_the_write_is_sent(fake: Fak
     tokens = StaticTokens()
     fake.reject_tokens = 1  # refused before OWS processed anything: safe to send again
     fake.messages["m1"].is_draft = True
-    await writer_for(fake, tokens).send_draft("m1")
+    await writer_for(fake, tokens).send_draft("m1", fake.messages["m1"].change_key())
     assert tokens.renewals == [{"force_refresh": True}] and len(fake.ows_calls) == 1
 
 
@@ -139,7 +153,7 @@ async def test_anchor_mailbox_is_the_write_account(fake: FakeGraph) -> None:
 
     fake.handle_ows = spy  # type: ignore[method-assign]
     fake.messages["m1"].is_draft = True
-    await writer_for(fake).send_draft("m1")
+    await writer_for(fake).send_draft("m1", fake.messages["m1"].change_key())
     assert headers == ["AAD-SMTP:me@example.com"]
 
 

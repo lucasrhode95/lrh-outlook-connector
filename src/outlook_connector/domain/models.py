@@ -9,7 +9,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SerializerFunctionWrapHandler, model_serializer
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    field_serializer,
+    model_serializer,
+)
 
 BodyKind = Literal["unique", "full", "html"]
 CombineMode = Literal["per_conversation", "all", "none"]
@@ -121,6 +128,9 @@ class Message(MessageSummary):
     body_html: str | None = None
     unique_body_html: str | None = None
     attachments: list[Attachment] = Field(default_factory=list)
+    # The server's version of the item when it was read (opaque). Internal: binds a draft send to
+    # the draft that was read, so a change made meanwhile refuses the send. Never serialized.
+    revision: str | None = Field(default=None, exclude=True)
 
     def body(self, kind: BodyKind) -> str:
         if kind == "html":
@@ -391,3 +401,9 @@ class RuleWriteResult(Compact):
     rule_ids: list[str] = Field(default_factory=list)
     rules: list[InboxRule] = Field(default_factory=list)
     detail: str | None = None
+
+    @field_serializer("changes")
+    def _supplied_changes(self, changes: RuleChange | None) -> dict[str, Any] | None:
+        """Only the fields the request supplied: an omitted field stays as it is, while a null means
+        "clear it", so the proposal must not show omitted fields as null."""
+        return changes.model_dump(exclude_unset=True) if changes is not None else None

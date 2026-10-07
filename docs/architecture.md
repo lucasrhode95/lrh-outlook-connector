@@ -168,7 +168,7 @@ lrh-outlook-connector/
 - Batches with **`$batch`**, up to 20 sub-requests per call. Used to hydrate conversations and exports, count conversation sizes and list attachments, instead of N sequential GETs. Rules:
   - batch request ids are numbers assigned per batch and mapped back. Graph compares them case-insensitively, and immutable ids can differ only by case;
   - at most 2 batches in flight per process, shared by all concurrent callers (each sub-request counts against the mailbox's concurrency limit);
-  - throttled (429) sub-requests are re-sent in new batches of at most 20 after the advised `Retry-After`, for up to 4 rounds;
+  - throttled or temporarily failing sub-requests (429/502/503/504, the statuses single reads retry) are re-sent in new batches of at most 20 after the advised `Retry-After`, for up to 4 rounds; an item that still fails keeps its last status;
   - results are per item: what is still throttled or failed is returned to the caller, which reports it per message instead of failing the whole call.
 
 **`graph_mail.py`** implements `MailReader`. Operations:
@@ -177,7 +177,7 @@ lrh-outlook-connector/
 - `get_message(id, body_format)` and `get_messages(ids)` (batched; per-item failures returned).
 - `conversation(conversation_id)`, which returns all folders, leaves sorting to the caller (`$orderby` is rejected with this filter) and reports truncation past 1,000 messages.
 - `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
-- `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. The service sums the reachable folders in scope; H7's count-guided listing will reuse it.
+- `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. A folder whose sub-request fails is left out of the answer, so one failure (e.g. a folder deleted since the folder list was read) never hides the other counts. The server total needs every in-scope folder counted; the per-folder listing chooses an uncounted folder by its cached total and claims the excluded count only when every excluded folder was counted.
 - `search(query)`: `$search`, field-scoped queries passed through. `$search` returns regular ids, so each page's ids are converted with one `POST /me/translateExchangeIds` call into the immutable ids every other call uses (if that call fails, the page keeps its search ids rather than failing).
 - `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`, for the inline images of every message of an export at once: one `$batch` item per image, 20 per batch across messages).
 - `download_attachment(id, att_id)` and `download_mime(id)` stream to a file. They are retried like other GETs (429/503 after `Retry-After`, gateway errors, a connection that fails or drops mid-download), each time from scratch; what still fails is a domain error (`Upstream` with no status for a lost connection), so an export marks that one attachment instead of failing.
@@ -195,7 +195,7 @@ lrh-outlook-connector/
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `edit_draft` (`UpdateItem` / `SaveOnly`, partial field updates). Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;
-  - `send_draft` (`UpdateItem` with `SendAndSaveCopy` on an existing draft, the way Outlook Web sends drafts; `SendItem` is not supported over OWS);
+  - `send_draft` (`UpdateItem` with `SendAndSaveCopy` and no field updates on an existing draft, its `ItemId` carrying the change key the draft was read at, `NeverOverwrite`; `SendItem` is not supported over OWS);
   - `set_read` / `set_flag` (`UpdateItem`, one `SetItemField` per message, read receipts suppressed);
   - `move` (`MoveItem`; a well-known target by `DistinguishedFolderId` as proven, any other folder by `FolderId`, pending a live check, V3);
   - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**).
@@ -223,9 +223,9 @@ lrh-outlook-connector/
 - `list_folders` and every scope decision use the folder cache only while it is younger than 10 minutes (whichever process saved it; within a long process the map is reloaded at the same age). An older or empty cache, or `refresh=true`, waits for Graph, whose folder levels are fetched in parallel (under a second). Decided 2026-10-04: processes are short-lived and often start after days idle, so the former stale-while-revalidate served a weeks-old tree to the call that needed it, which missed folders created meanwhile (fatal for the per-folder listing below). One refresh at a time per process.
 - **Scope rules, shared by list, search, conversations, sizes and export:** each folder gets a category from itself and its parents (`folder_categories`): `hidden` (also Sync Issues) > `deleted_or_junk` > `outgoing`. Deleted Items and Junk Email (with their subfolders; a folder deleted in Outlook sits inside Deleted Items) are left out unless `include_deleted_items` (a folder named in the request is always included); Sent Items, Drafts and Outbox are left out when `include_sent_items` is false; list, search and range exports also leave out meeting mail (invitations, RSVPs, cancellations; `excluded.meeting_mail`) when `include_meeting_mail` is false, per message, so a conversation that is only meeting traffic disappears and one with real replies shows through them, while conversations stay whole (every flag: true shows more mail, false filters more); `coverage.excluded` counts what was left out, per reason.
 - **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in `SkypeSpacesData/TeamsMeetings`), are always dropped (`excluded.hidden`): from lists, search, conversations, conversation sizes, totals and range/conversation exports. `list_folders` omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues and its subfolders (classic Outlook's conflict and failure copies) are out of reach too, recognized by their well-known names since Graph does not always mark them hidden (decided 2026-10-04). **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a received copy; `also_in` names the other folders.
-- `list_messages(selection, include_sent_items, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. A mailbox-wide scope (no `folder`) is listed one of two ways, chosen on every first page (H7, decided 2026-10-04): when the folders the scope leaves out (Junk Email, Deleted Items and their subfolders, hidden folders, and Sent Items, Drafts and Outbox with `include_sent_items=false`) hold at least two thirds of the mailbox's messages (`PER_FOLDER_SHARE`, from the cached folder counts, no request), it lists **folder by folder**: one `$count` batch picks the in-scope folders with mail in the window, each is read newest first from its position in small chunks that grow as the merge takes from it (folders that need more are read in parallel, within the transport's limit of 4), and the merge returns the newest `limit`. The cursor carries each folder's position (`offsets`, folder id → messages returned), and `coverage.notes` says the listing was per folder and why. Otherwise it lists `/me/messages` and the folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). Both return the same messages in the same order; a cursor keeps the method its first page chose. Folder views (a named `folder`) are always one listing. `include_total` adds `server_total`. `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
-- `get_message(id, offset, max_chars, body)` returns a bounded body with continuation; a message deleted on the server is `NotFound`.
-- `search(query, since?, until?, folder?, include_sent_items, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`.
+- `list_messages(selection, include_sent_items, include_deleted_items, include_total, detail)` fetches from remote and returns `MessagePage` + `Coverage`. A mailbox-wide scope (no `folder`) is listed one of two ways, chosen on every first page (H7, decided 2026-10-04): when the folders the scope leaves out (Junk Email, Deleted Items and their subfolders, hidden folders, and Sent Items, Drafts and Outbox with `include_sent_items=false`) hold at least two thirds of the mailbox's messages (`PER_FOLDER_SHARE`, from the cached folder counts, no request), it lists **folder by folder**: one `$count` batch picks the in-scope folders with mail in the window, each is read newest first from its position in small chunks that grow as the merge takes from it (folders that need more are read in parallel, within the transport's limit of 4), and the merge returns the newest `limit`. The same count batch also counts the window's Deleted Items and Junk (with subfolders), reported in `coverage.excluded` on the first page only (continuation pages do not repeat the full-window count); an excluded count is reported only when every excluded folder was counted. The cursor carries each folder's position (`offsets`, folder id → messages returned), and `coverage.notes` says the listing was per folder and why. Otherwise it lists `/me/messages` and the folder filters apply after paging, so a filtered page can hold fewer than `limit` messages; a page that the filters empty entirely is skipped (bounded). Both return the same messages in the same order; a cursor keeps the method its first page chose. Folder views (a named `folder`) are always one listing. `include_total` adds `server_total` (copies counted separately; meeting mail included even when `include_meeting_mail=false` hides it, and a coverage note says so). `detail=compact` (the MCP default) drops recipients, categories and Internet ids.
+- `get_message(id, offset, max_chars, body)` returns a bounded body with continuation; `max_chars=None` returns the whole body (the local web reader: one server read, where chunks would each re-read the message). An unreadable id is `NotFound`, worded without guessing the cause (deleted, moved out of reach, or a wrong id).
+- `search(query, since?, until?, folder?, include_sent_items, include_deleted_items, detail)` runs Graph `$search` and groups hits by `conversationId`, each hit with the conversation's `message_count`. `since`/`until` are normalized once here for every caller (naive dates are UTC, aware dates converted to UTC) before the window and the cursor are built. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact `since`/`until`.
 - `conversation_sizes(conversation_ids)` counts each conversation's messages the way `get_conversation` lists them (copies once), for the UI and search hits.
 
 **`conversations.py`:**
@@ -250,7 +250,9 @@ lrh-outlook-connector/
 - Both require bounded Graph read-back and return `DraftResult`: id, saved/failed, full server text/HTML,
   message metadata and simple findings. Reply creation retains full quoted-history verification.
 - `send_draft(id)` requires an existing draft and the bound write account, and sends once with
-  `UpdateItem` / `SendAndSaveCopy`, no field updates. It accepts no content arguments and never
+  `UpdateItem` / `SendAndSaveCopy` and no field updates, bound to the draft's change key as read
+  (`NeverOverwrite`): a draft changed since then is refused with nothing sent (proven live, research
+  §4.2). It accepts no content arguments and never
   reconstructs mail. An ambiguous answer reads the exact immutable id: a Sent Items copy proves sent,
   otherwise unknown. Human approval is the host/agent interaction, not a connector token.
 
@@ -270,18 +272,18 @@ lrh-outlook-connector/
   Mailbox. Target read-back compares the reported folder name; duplicated names cannot prove exact identity.
 
 **`mutations.py`:**
-- `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call. The write sign-in must be the bound account.
+- `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call, checked at each entry point before anything is read. The write sign-in must be the bound account.
+- Conversations given to `set_read` expand without that limit, up to the 1,000 messages the server lists per conversation; `notes` names a conversation cut there. When the selection has more than 100 messages, `counts` covers all of it and `results` keeps only explicit ids and messages that did not end `done` or `unchanged`.
 - Flow: read every message's state through Graph (`get_summaries`, one `$batch`): unknown ids → `not_found`, hidden or outside the mail folders → `failed`, already as wanted → `unchanged` (nothing sent). Then send in chunks of 20, with a status per message (`done`, `not_found`, `failed` with the code). On `WriteOutcomeUnknown`, read the chunk back: `done` where the change is visible, `unknown` elsewhere.
 - Categories are not written (parked hard, 2026-10-03: never used). They are still read and returned with each message.
 - `move` resolves the target like `list_folders` (hidden folders refused) and refuses Deleted Items. `delete` moves to Deleted Items and leaves messages already in Deleted Items (or its subfolders) alone, since deleting there again would take them out of the folder view.
-
-- H17: all four mutations accept `continue_on_error=true` by default. Clear chunk failures become
-  per-message failed results; ambiguous outcomes are read back and remain unknown if that read fails.
-  With false, any unresolved/error result in a sent chunk stops subsequent chunks: failed, `not sent`.
-  Earlier done/unchanged results and counts always survive; no write is retried.
+- All four accept `continue_on_error=true` by default. Clear chunk failures become per-message
+  failed results; ambiguous outcomes are read back and remain unknown if that read fails. With false,
+  any unresolved/error result in a sent chunk stops subsequent chunks: failed, `not sent`. Earlier
+  done/unchanged results and counts always survive; no write is retried.
 
 **`export/`:**
-- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `include_sent_items`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. Messages selected by id are read from the server in `$batch`; if any cannot be read, the export fails before writing anything: `NotFound` when they are gone, `Throttled` when any is still throttled after the batch retries, `Upstream` otherwise, with their count, the first few ids and their case, and what to do. It then hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids`, `export_errors` (failures per step) and `error_summary` (the header's "Export errors" line). A body, attachment download or attachment listing that fails during the export becomes an `ExportError` marked in the file; the export still completes.
+- `orchestrator.py` resolves a selection: conversations, individual messages and/or a range (`since`, `until`, `folder`, `include_sent_items`, paged through `list_messages` with the same scope rules), then merges copies across the whole selection. The range is paged with `skip_returned_copies=False`, so copies on different pages reach that merge and `also_in` names every folder. The selection is refused above `limit` (at most 2,000) with its count. Messages selected by id are authoritative, like `get_message(id)`: they are exported wherever Graph can read them (hidden folders and Sync Issues included) and only labeled and merged with the rest, while conversations and ranges keep the scope rules. They are read from the server in `$batch`; if any cannot be read, the export fails before writing anything: `NotFound` when they are gone, `Throttled` when any is still throttled after the batch retries, `Upstream` otherwise, with their count, the first few ids and their case, and what to do. It then hydrates through `$batch` (reusing bodies fetched while selecting), formats, attaches and packages, and returns an `ExportArtifact` with `messages_excluded`, `unavailable_message_ids`, `export_errors` (failures per step) and `error_summary` (the header's "Export errors" line). A body, attachment download or attachment listing that fails during the export becomes an `ExportError` marked in the file; the export still completes.
 - `formatter.py` renders **TXT** (for people): a header (counts, date span, what was left out, and the "Export errors" summary), then per-message headers with the message, conversation and internet ids, `Also in:` for merged copies, `uniqueBody` by default and `full` optional, plus attachment lines and `[EXPORT ERROR]` blocks for what failed; people are separated by `; ` (display names are often "Last, First"). Or **JSONL** (`format=jsonl`, for agents): one record per message with ids, dates, folder, `also_in`, people, the body (or `body: null` and an `export_error` object), attachment records (with the file path inside the ZIP when attachments are included, or their own `export_error`), and `attachments_export_error` when the attachments could not be listed.
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
@@ -307,7 +309,7 @@ lrh-outlook-connector/
   - a conversation-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, conversations show an accurate count. An expanded conversation spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
   - an "Invites / RSVPs" switch in the list header, off by default (meeting mail hidden), applied to the list, search and "export this view";
   - a "Deleted / Junk" switch in the list header, applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date range). The folder list shows only reachable folders;
-  - attachment download buttons in the reader;
+  - a reader that shows the whole chosen body in one request (no size cap; an answer for a message no longer selected is ignored), with attachment download buttons;
   - your display name and profile photo in the header (Graph `/me` and `/me/photos/48x48/$value`, read once per process and kept in memory; initials when no photo is set);
   - a folder picker and a "recent, all mail" view;
   - an online search box;
@@ -418,35 +420,3 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 |---|---|---|
 | A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache (a separate file in the data directory) is available during development. |
 | A2 | Package / CLI name | **`outlook_connector` / `outlook-connector`** |
-
-
-H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
-hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
-messages with other selections; reach/scope filters still govern range and conversation selections.
-Copies remain merged and message limits still apply.
-
-H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
-expands each conversation up to the existing 1,000-message server listing cap and reports truncation
-in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
-messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
-ids and error results remain detailed. Counts cover the entire deduplicated selection.
-
-H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
-to UTC before building the search/window and cursor. MCP and web search pass dates through;
-normalization is authoritative at `Mailbox.search`, shared by both callers.
-
-H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
-unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
-the service retains its bounded per-request body chunks. No manual continuation button is required.
-A continuation failure reports that the complete message could not be loaded, rather than displaying
-a partial body as complete. Selecting a different message stops scheduling old continuations using
-the existing reader request counter; the request already in flight is allowed to finish.
-
-H27/H28 coverage: the first per-folder listing page includes requested-window Deleted/Junk
-exclusion counts (including subfolders) from the existing count batch, without an extra count call.
-Continuation pages do not repeat those full-window exclusions. Unavailable counts are not replaced
-with stale folder totals. `server_total` counts copies separately and includes meeting invitations,
-cancellations and RSVPs even when `include_meeting_mail=false` hides them; no second counting path.
-H29 NotFound text leaves the cause open: deletion, moving out of reach or an incorrect id.
-H33 Graph batch items retry the same transient statuses as single reads (429/502/503/504), only
-resending failed items and retaining the final status on exhaustion. Writes remain single-attempt.

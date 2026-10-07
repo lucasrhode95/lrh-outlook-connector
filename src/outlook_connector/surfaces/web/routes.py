@@ -184,9 +184,8 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             raise InvalidRequest("body must be unique or full.")
         content = await (await context.services()).mailbox.get_message(
             request.path_params["message_id"],
-            body=body,
-            offset=_int(request, "offset", 0),
-            max_chars=200_000,  # type: ignore[arg-type]
+            body=body,  # type: ignore[arg-type]
+            max_chars=None,  # the whole body in one response: fetched from the server once
         )
         return _json(content)
 

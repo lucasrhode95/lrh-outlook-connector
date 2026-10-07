@@ -32,7 +32,7 @@ MEETING_KINDS: dict[str, MeetingKind] = {
     "meetingDeclined": "declined",
 }
 NEW_REQUEST = (None, "none", "newMeetingRequest")
-MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody"
+MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody,changeKey"
 FOLDER_FIELDS = "id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount,isHidden"
 ATTACHMENT_FIELDS = "id,name,contentType,size,isInline"
 
@@ -130,7 +130,10 @@ def _content(value: Any) -> str | None:
 def message(data: dict[str, Any], *, html: bool) -> Message:
     """A full message. ``html`` says which body format the request asked for."""
     body, unique = _content(data.get("body")), _content(data.get("uniqueBody"))
-    fields: dict[str, Any] = _summary_fields(data) | {"bcc": recipients(data.get("bccRecipients"))}
+    fields: dict[str, Any] = _summary_fields(data) | {
+        "bcc": recipients(data.get("bccRecipients")),
+        "revision": data.get("changeKey") if isinstance(data.get("changeKey"), str) else None,
+    }
     if html:
         return Message(**fields, body_html=body, unique_body_html=unique)
     return Message(**fields, body_text=body, unique_body_text=unique)

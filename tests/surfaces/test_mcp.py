@@ -187,6 +187,7 @@ async def test_rule_proposal_and_confirmed_mcp_write(server: FastMCP, fake: Fake
     }
     proposal = await call(server, "create_rule", changes=changes)
     assert proposal["status"] == "proposed" and not fake.inbox_rules
+    assert proposal["changes"] == {**changes, "move_to_folder": proposal["changes"]["move_to_folder"]}
     result = await call(server, "create_rule", changes=changes, user_confirmation=proposal["confirmation"])
     assert result["status"] == "done" and result["rule_id"]
     rules = await call(server, "list_rules")

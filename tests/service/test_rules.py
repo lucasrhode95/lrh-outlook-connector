@@ -194,3 +194,15 @@ async def test_reorder_preserves_disabled_rules(rules: Rules, fake: FakeGraph) -
     proposal = await rules.reorder_rules([first, second])
     result = await rules.reorder_rules([first, second], proposal.confirmation)
     assert result.status == "done" and not result.rules[0].enabled
+
+
+async def test_proposal_shows_only_supplied_fields(rules: Rules, fake: FakeGraph) -> None:
+    created = await rules.create_rule(changes())
+    await rules.create_rule(changes(), created.confirmation)
+    rule_id = (await rules.list_rules())[0].id
+    proposal = await rules.update_rule(rule_id, RuleChange(name="Renamed", subject_contains=None))
+    shown = proposal.model_dump(mode="json")["changes"]
+    assert shown == {"name": "Renamed", "subject_contains": None}  # omitted fields are not "clear"
+    replayed = RuleChange.model_validate(shown)  # a later call can resend exactly what was shown
+    result = await rules.update_rule(rule_id, replayed, proposal.confirmation)
+    assert result.status == "done"
