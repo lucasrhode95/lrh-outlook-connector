@@ -16,6 +16,7 @@ from outlook_connector.domain.errors import (
     AccountMismatch,
     ConnectorError,
     InvalidRequest,
+    Upstream,
     WriteOutcomeUnknown,
 )
 from outlook_connector.domain.models import (
@@ -101,9 +102,11 @@ class Writes:
         The host obtains human approval; the connector never reconstructs or retries the message.
         """
         draft = await self._draft(draft_id)
+        if not draft.revision:
+            raise Upstream("Outlook did not report the draft's version, so it was not sent.")
         self.check_account()
         try:
-            await self.writer.send_draft(draft_id, draft.subject or "")
+            await self.writer.send_draft(draft_id, draft.revision)
         except WriteOutcomeUnknown as exc:
             try:
                 item = await self.mailbox.message(draft_id)

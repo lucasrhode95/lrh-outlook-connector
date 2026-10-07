@@ -8,6 +8,7 @@ on the same mailbox, so a write can be read back through Graph. All data is synt
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
@@ -57,6 +58,11 @@ class FakeMessage:
     internet_id: str | None = None  # copies of one message (e.g. sent to yourself) share it
     meeting: dict[str, Any] = field(default_factory=dict)  # eventMessage fields of meeting mail
 
+    def change_key(self) -> str:
+        """Like Exchange's change key: a new value whenever the item changes."""
+        state = (self.subject, self.folder, self.to, self.cc, self.bcc, self.text, self.html, self.is_draft)
+        return hashlib.sha256(repr(state).encode()).hexdigest()[:16]
+
     def json(self, *, text_body: bool) -> dict[str, Any]:
         body = self.text if text_body else self.html
         unique = (
@@ -84,6 +90,7 @@ class FakeMessage:
             "flag": {"flagStatus": "flagged" if self.flagged else "notFlagged"},
             "bodyPreview": self.text[:50],
             "internetMessageId": self.internet_id or f"<{self.id}@example.com>",
+            "changeKey": self.change_key(),
             "body": {"contentType": kind, "content": body},
             "uniqueBody": {"contentType": kind, "content": unique},
             **self.meeting,
@@ -314,10 +321,12 @@ class FakeGraph:
         assert body["SuppressReadReceipts"] is True
         if body["MessageDisposition"] == "SendAndSaveCopy":  # Outlook Web sends a draft this way
             (change,) = body["ItemChanges"]
-            assert change["Updates"], "UpdateItem's Updates must be nonempty (EWS schema)"
+            assert body["ConflictResolution"] == "NeverOverwrite" and change["ItemId"].get("ChangeKey")
             draft = self._ows_target(change["ItemId"])
             if draft is None or not draft.is_draft:
                 return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
+            if change["ItemId"]["ChangeKey"] != draft.change_key():  # changed since it was read
+                return [{"ResponseClass": "Error", "ResponseCode": "ErrorIrresolvableConflict"}]
             draft.folder, draft.is_draft = self.aliases["sentitems"], False
             self.sent_drafts.append(draft.id)
             return [{"ResponseClass": "Success", "ResponseCode": "NoError"}]

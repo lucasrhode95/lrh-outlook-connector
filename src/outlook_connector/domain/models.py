@@ -128,6 +128,9 @@ class Message(MessageSummary):
     body_html: str | None = None
     unique_body_html: str | None = None
     attachments: list[Attachment] = Field(default_factory=list)
+    # The server's version of the item when it was read (opaque). Internal: binds a draft send to
+    # the draft that was read, so a change made meanwhile refuses the send. Never serialized.
+    revision: str | None = Field(default=None, exclude=True)
 
     def body(self, kind: BodyKind) -> str:
         if kind == "html":

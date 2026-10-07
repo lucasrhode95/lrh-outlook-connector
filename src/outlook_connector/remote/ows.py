@@ -139,6 +139,11 @@ def item_error(item: dict[str, Any], action: str) -> Exception:
     detail = f"{action}: {item.get('ResponseClass') or 'Error'}, {code}" + (f": {text}" if text else "")
     if code in ("ErrorItemNotFound", "ErrorInvalidIdMalformed", "ErrorInvalidIdNotAnItemAttachmentId"):
         return NotFound(f"Outlook did not find the item ({detail}).")
+    if code == "ErrorIrresolvableConflict":
+        return Upstream(
+            f"The item changed in Outlook after it was read, so nothing was changed or sent ({detail}). "
+            "Read it again before retrying."
+        )
     return Upstream(f"Outlook refused the change ({detail}).")
 
 

@@ -12,6 +12,7 @@ from outlook_connector.domain.errors import (
     InvalidRequest,
     NotFound,
     Throttled,
+    Upstream,
 )
 from outlook_connector.domain.models import DraftEdit, OutgoingMessage
 from outlook_connector.remote.graph import Graph
@@ -202,10 +203,26 @@ async def test_send_uses_only_the_stored_draft(writes: Writes, fake: FakeGraph) 
     result = await writes.send_draft(draft.id)
     assert result.status == "sent" and fake.sent_drafts == [draft.id]
     assert saved.subject == "Edited in Outlook" and saved.html == "<b>Edited on server</b>"
-    (update,) = fake.ows_calls[-1][1]["ItemChanges"][0]["Updates"]
-    assert update["Item"]["Subject"] == "Edited in Outlook"  # re-sets the server's own subject
+    assert fake.ows_calls[-1][1]["ItemChanges"][0]["Updates"] == []
     with pytest.raises(InvalidRequest, match="not an existing"):
         await writes.send_draft(draft.id)
+
+
+async def test_a_draft_edited_after_the_send_read_it_is_not_sent(
+    writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    draft = await writes.create_draft(reply())
+    read = writes.mailbox.message
+
+    async def read_then_edited_in_outlook(*args: Any, **kwargs: Any) -> Any:
+        message = await read(*args, **kwargs)
+        fake.messages[draft.id].subject = "Edited in Outlook meanwhile"
+        return message
+
+    monkeypatch.setattr(writes.mailbox, "message", read_then_edited_in_outlook)
+    with pytest.raises(Upstream, match="nothing was changed or sent"):
+        await writes.send_draft(draft.id)
+    assert fake.sent_drafts == [] and fake.messages[draft.id].subject == "Edited in Outlook meanwhile"
 
 
 async def test_non_drafts_cannot_edit_or_send(writes: Writes, fake: FakeGraph) -> None:

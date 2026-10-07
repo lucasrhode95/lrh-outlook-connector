@@ -195,7 +195,7 @@ lrh-outlook-connector/
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `edit_draft` (`UpdateItem` / `SaveOnly`, partial field updates). Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;
-  - `send_draft` (`UpdateItem` with `SendAndSaveCopy` on an existing draft, the way Outlook Web sends drafts; `SendItem` is not supported over OWS);
+  - `send_draft` (`UpdateItem` with `SendAndSaveCopy` and no field updates on an existing draft, its `ItemId` carrying the change key the draft was read at, `NeverOverwrite`; `SendItem` is not supported over OWS);
   - `set_read` / `set_flag` (`UpdateItem`, one `SetItemField` per message, read receipts suppressed);
   - `move` (`MoveItem`; a well-known target by `DistinguishedFolderId` as proven, any other folder by `FolderId`, pending a live check, V3);
   - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**).
@@ -250,9 +250,9 @@ lrh-outlook-connector/
 - Both require bounded Graph read-back and return `DraftResult`: id, saved/failed, full server text/HTML,
   message metadata and simple findings. Reply creation retains full quoted-history verification.
 - `send_draft(id)` requires an existing draft and the bound write account, and sends once with
-  `UpdateItem` / `SendAndSaveCopy` and one `SetItemField` that re-sets the subject the draft already
-  has (the shape proven live, research §4.2; `UpdateItem` needs a nonempty `Updates`, and an empty
-  one was never proven). It accepts no content arguments and never
+  `UpdateItem` / `SendAndSaveCopy` and no field updates, bound to the draft's change key as read
+  (`NeverOverwrite`): a draft changed since then is refused with nothing sent (proven live, research
+  §4.2). It accepts no content arguments and never
   reconstructs mail. An ambiguous answer reads the exact immutable id: a Sent Items copy proves sent,
   otherwise unknown. Human approval is the host/agent interaction, not a connector token.
 
