@@ -250,7 +250,9 @@ lrh-outlook-connector/
 - Both require bounded Graph read-back and return `DraftResult`: id, saved/failed, full server text/HTML,
   message metadata and simple findings. Reply creation retains full quoted-history verification.
 - `send_draft(id)` requires an existing draft and the bound write account, and sends once with
-  `UpdateItem` / `SendAndSaveCopy`, no field updates. It accepts no content arguments and never
+  `UpdateItem` / `SendAndSaveCopy` and one `SetItemField` that re-sets the subject the draft already
+  has (the shape proven live, research §4.2; `UpdateItem` needs a nonempty `Updates`, and an empty
+  one was never proven). It accepts no content arguments and never
   reconstructs mail. An ambiguous answer reads the exact immutable id: a Sent Items copy proves sent,
   otherwise unknown. Human approval is the host/agent interaction, not a connector token.
 

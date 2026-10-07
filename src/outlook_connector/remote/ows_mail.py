@@ -57,9 +57,20 @@ class OwsMailWriter(MailWriter):
         with operation("editing a draft"):
             await self._ows.call("UpdateItem", _draft_update(draft_id, updates, "SaveOnly"))
 
-    async def send_draft(self, draft_id: str) -> None:
-        """Send only this existing draft; no message fields changed, no automatic retry."""
-        body = _draft_update(draft_id, [], "SendAndSaveCopy")
+    async def send_draft(self, draft_id: str, subject: str) -> None:
+        """Send only this existing draft, the way Outlook Web does: ``UpdateItem`` with
+        ``SendAndSaveCopy`` and one ``SetItemField`` that re-sets the subject the draft already has
+        (the shape proven live 2026-10-04; ``SendItem`` is not supported over OWS). Sent once, never
+        retried.
+
+        Assumes (not re-checked here): ``subject`` is the draft's current subject, read by ``Writes``.
+        """
+        update = {
+            "__type": "SetItemField:#Exchange",
+            "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": "item:Subject"},
+            "Item": {"__type": "Message:#Exchange", "Subject": subject},
+        }
+        body = _draft_update(draft_id, [update], "SendAndSaveCopy")
         body["SavedItemFolderId"] = {
             "__type": "TargetFolderId:#Exchange",
             "BaseFolderId": {"__type": "DistinguishedFolderId:#Exchange", "Id": "sentitems"},

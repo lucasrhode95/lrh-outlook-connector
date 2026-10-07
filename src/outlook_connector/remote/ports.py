@@ -142,8 +142,9 @@ class MailWriter(Protocol):
         """Save only validated partial changes, once."""
         ...
 
-    async def send_draft(self, draft_id: str) -> None:
-        """Send an existing draft without changing its content, once."""
+    async def send_draft(self, draft_id: str, subject: str) -> None:
+        """Send an existing draft without changing its content, once. ``subject`` is the draft's
+        current subject, re-set as the send's one field update."""
         ...
 
     # Mutations: {message id: None when done, else the backend's response code}.
