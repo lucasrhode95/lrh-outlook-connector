@@ -213,8 +213,9 @@ class GraphMailReader(MailReader):
     @_named("counting messages")
     async def count_messages(
         self, *, folder_ids: list[str], since: datetime | None, until: datetime | None
-    ) -> dict[str, int] | None:
-        """Messages in the window per folder (that folder only, not its subfolders), in $batch."""
+    ) -> dict[str, int]:
+        """Messages in the window per folder (that folder only, not its subfolders), in $batch. A
+        folder whose sub-request fails (e.g. deleted since the folder list was read) is left out."""
         params = {"$count": "true", "$top": 1, "$select": "id", "$filter": _window(since, until)}
         requests = {
             str(index): relative(f"/me/mailFolders/{fid}/messages", params)
@@ -224,9 +225,8 @@ class GraphMailReader(MailReader):
         counts: dict[str, int] = {}
         for key, response in responses.items():
             count = response.body.get("@odata.count")
-            if not response.ok or not isinstance(count, int):
-                return None
-            counts[folder_ids[int(key)]] = count
+            if response.ok and isinstance(count, int):
+                counts[folder_ids[int(key)]] = count
         return counts
 
     @_named("reading a message")
