@@ -56,7 +56,10 @@ to check before anything is sent again.
 
 Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` and
 `delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)
-and return a result per message: done, unchanged, not found, failed or unknown. Delete moves to
+and return per-message results and counts: done, unchanged, not found, failed or unknown.
+`continue_on_error=true` (default) attempts later chunks after errors. With false, later unsent
+messages return failed with detail `not sent`. Ambiguous writes are read back; failed read-back
+remains unknown. Writes are never retried. Delete moves to
 Deleted Items and never deletes permanently.
 
 Every tool follows the same scope rules: Deleted Items and Junk Email are left out unless
