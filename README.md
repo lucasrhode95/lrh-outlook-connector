@@ -1,6 +1,6 @@
 # Outlook connector
 
-A local connector for one user's Exchange Online mailbox. It has two surfaces: an MCP server for agents and a small local web UI for exports. Both run as short-lived local processes started on demand (one per agent session; the UI until closed or idle), not as a hosted, long-running MCP or HTTP server. Reads go through Microsoft Graph. Writes (drafts, sending and mailbox changes) go through Outlook Web, because Graph write access is unavailable to the usable Microsoft first-party clients.
+A local connector for one user's Exchange Online mailbox. It has two surfaces: an MCP server for agents and a small local web UI for exports. Both run as short-lived local processes started on demand (one per agent session; the UI until closed or idle), not as a hosted, long-running MCP or HTTP server. Reads go through Microsoft Graph. Writes (drafts, sending and mailbox changes) go through Outlook Web, because the tested deployment did not grant Graph writes to the selected Microsoft first-party clients. Other deployments should rerun the configurable [research probes](research/README.md) before choosing their authentication profiles and backends.
 
 - **What it must do:** [docs/outlook-requirements-v4.md](docs/outlook-requirements-v4.md)
 - **How it is built:** [docs/architecture.md](docs/architecture.md)

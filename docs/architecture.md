@@ -326,7 +326,7 @@ lrh-outlook-connector/
 
 ## 6. Capability routing and portability
 
-The backend split is a **tenant-specific outcome**, not a design preference. The rule is: **use documented Graph for every capability it can serve; fill only the remaining gaps with OWS.** For Landis+Gyr on 2026-10-02 the probes established (research §2):
+The backend split is a **tenant-specific outcome**, not a design preference. The rule is: **use documented Graph for every capability it can serve; fill only the remaining gaps with OWS.** For the tested environment on 2026-10-02 the probes established (research §2):
 
 | Capability | Graph available? | Backend used | Token profile |
 |---|---|---|---|

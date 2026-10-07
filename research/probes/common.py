@@ -24,46 +24,24 @@ import urllib.parse
 import urllib.request
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Iterator
 
-ROOT = Path(__file__).resolve().parents[2]
-LOCAL = ROOT / ".local"
+from config import LOCAL, ROOT, SETTINGS
+
 TOKEN_FILE = LOCAL / "probe-tokens.json"
-TENANT = "organizations"
-AUTHORITY = f"https://login.microsoftonline.com/{TENANT}/oauth2/v2.0"
-EXPECTED_USER = "lucas.rhode@landisgyr.com"
-
-GRAPH = "https://graph.microsoft.com/v1.0"
-OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
+TENANT = SETTINGS["tenant"]
+AUTHORITY = SETTINGS["authority"]
+EXPECTED_USER = SETTINGS["expected_user"]  # optional local account restriction
+GRAPH = SETTINGS["graph_url"].rstrip("/")
+GRAPH_RESOURCE = SETTINGS["graph_resource"].rstrip("/")
+OWS_URL = SETTINGS["ows_url"]
 IMMUTABLE = 'IdType="ImmutableId"'
-
-READ_CLIENT = "27922004-5251-4030-b22d-91ecd9a37ea4"   # Outlook Mobile (Candidate C)
-WRITE_CLIENT = "9199bf20-a13f-4107-85dc-02114787ef48"  # One Outlook Web (Candidate A)
-
-# profile -> (client_id, resource scope)
-PROFILES: dict[str, tuple[str, str]] = {
-    "read": (READ_CLIENT, "https://graph.microsoft.com/Mail.Read"),
-    "write": (WRITE_CLIENT, "https://outlook.office.com/.default"),
-    "search": (WRITE_CLIENT, "https://outlook.office.com/search/.default"),
-}
-# Recorded AADSTS65002 denials. Never request these again.
-DENIED = {
-    ("d3590ed6-52b3-4102-aeff-aad2292ab01c", "https://graph.microsoft.com/Mail.Read"),
-    (READ_CLIENT, "https://graph.microsoft.com/Mail.Send"),
-    (READ_CLIENT, "https://graph.microsoft.com/Mail.ReadWrite"),          # 2026-10-02
-    (READ_CLIENT, "https://graph.microsoft.com/Mail.ReadWrite.Shared"),   # 2026-10-02
-    (WRITE_CLIENT, "https://graph.microsoft.com/Mail.Read"),              # 2026-10-02
-    (WRITE_CLIENT, "https://graph.microsoft.com/Mail.ReadWrite"),         # 2026-10-02
-    (WRITE_CLIENT, "https://graph.microsoft.com/Mail.Send"),              # 2026-10-02
-}
-ALLOWED_HOSTS = {
-    "graph.microsoft.com",
-    "outlook.office.com",
-    "outlook.cloud.microsoft",
-    "substrate.office.com",
-    "login.microsoftonline.com",
-}
+PROFILES = {name: tuple(pair) for name, pair in SETTINGS["profiles"].items()}
+READ_CLIENT = PROFILES["read"][0]
+WRITE_CLIENT = PROFILES["write"][0]
+# Only denials explicitly configured for the current environment are skipped.
+DENIED = {tuple(pair) for pair in SETTINGS["denied_pairs"]}
+ALLOWED_HOSTS = SETTINGS["allowed_hosts"]
 _SALT = secrets.token_bytes(16)  # per-process: hashes correlate within one run only
 
 
@@ -214,7 +192,7 @@ def _load() -> dict[str, Any]:
 
 
 def _save(store: dict[str, Any]) -> None:
-    LOCAL.mkdir(exist_ok=True)
+    LOCAL.mkdir(parents=True, exist_ok=True)
     tmp = TOKEN_FILE.with_suffix(".tmp")
     tmp.write_text(json.dumps(store, indent=1), encoding="utf-8")
     os.replace(tmp, TOKEN_FILE)
@@ -239,17 +217,21 @@ def _account(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _store_result(profile: str, client_id: str, scope: str, result: dict[str, Any]) -> dict[str, Any]:
+def _store_result(profile: str, client_id: str, scope: str, result: dict[str, Any], *, refresh_account: dict[str, Any] | None = None) -> dict[str, Any]:
     store = _load()
     previous = store.get(profile, {})
+    identity = _account(result)
+    if refresh_account and not (identity.get("tid") and identity.get("oid")):
+        identity = refresh_account
     entry = {
         "client_id": client_id,
         "scope": scope,
         "access_token": result["access_token"],
         "expires_at": int(time.time()) + int(result.get("expires_in", 3600)),
-        "refresh_token": result.get("refresh_token") or previous.get("refresh_token"),
-        "account": _account(result) if result.get("id_token") else previous.get("account") or _account(result),
+        "refresh_token": result.get("refresh_token") or (previous.get("refresh_token") if previous.get("client_id") == client_id else None),
+        "account": identity,
     }
+    _checked(profile, entry)
     store[profile] = entry
     _save(store)
     return entry
@@ -286,6 +268,12 @@ def device_code_sign_in(profile: str) -> dict[str, Any]:
 
 
 def _refresh(profile: str, client_id: str, scope: str, refresh_token: str) -> dict[str, Any] | None:
+    refresh_account = None
+    for name, cached in _load().items():
+        if cached.get("client_id") == client_id and cached.get("refresh_token") == refresh_token:
+            _checked(name, cached)
+            refresh_account = cached["account"]
+            break
     res = http("POST", f"{AUTHORITY}/token", form={
         "grant_type": "refresh_token",
         "client_id": client_id,
@@ -294,7 +282,7 @@ def _refresh(profile: str, client_id: str, scope: str, refresh_token: str) -> di
     })
     body = res.payload if isinstance(res.payload, dict) else {}
     if body.get("access_token"):
-        return _store_result(profile, client_id, scope, body)
+        return _store_result(profile, client_id, scope, body, refresh_account=refresh_account)
     if body.get("error"):
         print(f"[auth] refresh for '{profile}' failed: {body.get('error')} {body.get('error_codes')}", file=sys.stderr)
     return None
@@ -306,13 +294,17 @@ def get_token(profile: str) -> str:
     _guard(client_id, scope)
     store = _load()
     entry = store.get(profile)
+    if entry and (entry.get("client_id"), entry.get("scope")) != (client_id, scope):
+        entry = None
     if entry and entry.get("expires_at", 0) > time.time() + 120:
         return _checked(profile, entry)
     candidates = []
     if entry and entry.get("refresh_token"):
+        _checked(profile, entry)
         candidates.append(entry["refresh_token"])
     for other, data in store.items():
         if other != profile and data.get("client_id") == client_id and data.get("refresh_token"):
+            _checked(other, data)
             candidates.append(data["refresh_token"])
     for rt in candidates:
         fresh = _refresh(profile, client_id, scope, rt)
@@ -323,16 +315,30 @@ def get_token(profile: str) -> str:
 
 def _checked(profile: str, entry: dict[str, Any]) -> str:
     upn = (entry.get("account") or {}).get("upn") or ""
-    if upn.casefold() != EXPECTED_USER.casefold():
+    if EXPECTED_USER and upn.casefold() != EXPECTED_USER.casefold():
         raise SystemExit(f"Token for '{profile}' does not belong to the expected account; refusing to use it.")
+    identity = ((entry.get("account") or {}).get("tid"), (entry.get("account") or {}).get("oid"))
+    if not all(identity):
+        raise SystemExit("Probe token carries no tenant/account identity; refusing to use it.")
+    token_identity = claims(entry["access_token"])
+    if token_identity.get("tid") and token_identity.get("oid") and identity != (token_identity["tid"], token_identity["oid"]):
+        raise SystemExit("Token identity differs from its cached account; refusing to use it.")
+    for cached in _load().values():
+        account_identity = cached.get("account") or {}
+        if identity != (account_identity.get("tid"), account_identity.get("oid")):
+            raise SystemExit("Probe profiles belong to different accounts. Use a separate OUTLOOK_PROBE_HOME.")
     return entry["access_token"]
 
 
 def try_scope(client_id: str, scope: str) -> dict[str, Any]:
     """Ask for an extra resource scope with a stored refresh token of the same client. Nothing is stored."""
-    if (client_id, scope) in DENIED:
+    if (client_id, "*") in DENIED or (client_id, scope) in DENIED:
         return {"result": "skipped_recorded_denial"}
-    rts = [d["refresh_token"] for d in _load().values() if d.get("client_id") == client_id and d.get("refresh_token")]
+    rts = []
+    for profile, entry in _load().items():
+        if entry.get("client_id") == client_id and entry.get("refresh_token"):
+            _checked(profile, entry)
+            rts.append(entry["refresh_token"])
     if not rts:
         return {"result": "no_refresh_token_for_client"}
     res = http("POST", f"{AUTHORITY}/token", form={
@@ -344,6 +350,8 @@ def try_scope(client_id: str, scope: str) -> dict[str, Any]:
         scp = (c.get("scp") or "").split()
         return {"result": "granted", "audience": c.get("aud"), "scope_count": len(scp),
                 "mail_scopes": sorted(x for x in scp if x.startswith("Mail."))}
+    if not body.get("error"):
+        return {"result": "inconclusive", **res.summary()}
     codes = body.get("error_codes") or []
     return {"result": "denied", "error": body.get("error"), "aadsts": [f"AADSTS{c}" for c in codes]}
 
@@ -364,7 +372,7 @@ def token_status() -> dict[str, Any]:
             "mail_scopes": sorted(s for s in scp if s.startswith("Mail.") or "Search" in s),
             "expires_in_s": int(entry.get("expires_at", 0) - time.time()),
             "refresh_token_present": bool(entry.get("refresh_token")),
-            "account_matches_expected": ((entry.get("account") or {}).get("upn") or "").casefold() == EXPECTED_USER.casefold(),
+            "account_matches_expected": (((entry.get("account") or {}).get("upn") or "").casefold() == EXPECTED_USER.casefold()) if EXPECTED_USER else None,
         }
     return out
 
@@ -426,9 +434,29 @@ def _cv() -> str:
     return "".join(secrets.choice(alphabet) for _ in range(22)) + ".0"
 
 
+def signed_in_account(token: str) -> dict[str, Any]:
+    """Resolve identity from the checked sign-in cache, or from token claims."""
+    for profile, cached in _load().items():
+        if cached.get("access_token") == token:
+            _checked(profile, cached)
+            return cached["account"]
+    return _account({"access_token": token})
+
+
 def ows(token: str, action: str, body_type: str, body: dict[str, Any], *,
-        version: str = "V2018_01_08", anchor: str = EXPECTED_USER) -> Resp:
+        version: str = "V2018_01_08", anchor: str | None = None) -> Resp:
     """Bearer-only OWS call using the envelope proven in the 2026-10-01 probes."""
+    if anchor is None:
+        identity = signed_in_account(token)
+        email = identity.get("upn")
+        if email:
+            anchor = f"AAD-SMTP:{email}"
+        elif identity.get("oid") and identity.get("tid"):
+            anchor = f"Oid:{identity['oid']}@{identity['tid']}"
+        else:
+            raise SystemExit("Token has no mailbox identity for OWS routing.")
+    else:
+        anchor = f"AAD-SMTP:{anchor}"
     envelope = {
         "__type": f"{action}JsonRequest:#Exchange",
         "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": version},
@@ -443,7 +471,7 @@ def ows(token: str, action: str, body_type: str, body: dict[str, Any], *,
         "X-OWA-CorrelationId": str(uuid.uuid4()),
         "MS-CV": _cv(),
         "Prefer": IMMUTABLE,
-        "X-AnchorMailbox": f"AAD-SMTP:{anchor}",
+        "X-AnchorMailbox": anchor,
     }
     url = f"{OWS_URL}?action={urllib.parse.quote(action)}&app=Mail"
     if len(encoded) <= 2048:
@@ -466,12 +494,17 @@ def ows_result(r: Resp) -> dict[str, Any]:
     return {**r.summary(), "response_class": first.get("ResponseClass"), "response_code": first.get("ResponseCode")}
 
 
-def ows_message(subject: str, text: str, disposition: str) -> dict[str, Any]:
+def ows_message(subject: str, text: str, disposition: str, *, token: str) -> dict[str, Any]:
     """CreateItem body proven by the 2026-10-01 self-send (disposition SendAndSaveCopy).
 
+    The recipient comes from the caller's signed-in token; no account is hardcoded.
     ``SaveOnly`` creates a draft without sending.
     """
-    me = {"__type": "EmailAddress:#Exchange", "EmailAddress": EXPECTED_USER, "RoutingType": "SMTP"}
+    identity = signed_in_account(token)
+    email = identity.get("upn")
+    if not email:
+        raise SystemExit("Self-send requires an email identity in the signed-in token.")
+    me = {"__type": "EmailAddress:#Exchange", "EmailAddress": email, "RoutingType": "SMTP"}
     message = {
         "__type": "Message:#Exchange",
         "Body": {"__type": "BodyContentType:#Exchange", "BodyType": "Text", "Value": text},

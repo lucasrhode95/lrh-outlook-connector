@@ -784,7 +784,7 @@ async function loadProfile() {
   } catch { /* the address stays */ }
 }
 
-// "Rhode, Lucas" (Outlook's "Last, First") or "Lucas Rhode" -> "LR"
+// "Doe, Jane" (Outlook's "Last, First") or "Jane Doe" -> "JD"
 function initials(name) {
   const parts = name.includes(",") ? name.split(",").reverse() : name.split(/\s+/);
   return parts.map((part) => part.trim()[0] || "").join("").slice(0, 2).toUpperCase();

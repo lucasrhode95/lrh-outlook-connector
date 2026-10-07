@@ -1,7 +1,7 @@
 """OWS write contracts (read state, flag, categories, conversation read state, move, soft delete).
 
-Graph cannot write mail with the usable first-party clients (research §2), so these
-contracts are exercised through OWS with the 'write' profile and verified read-only
+The recorded environment lacked Graph mail writes (research §2). These probes
+exercise the alternative contracts through OWS with the 'write' profile and verified read-only
 through Graph with the 'read' profile.
 
     python research/probes/ows_mutations.py \\

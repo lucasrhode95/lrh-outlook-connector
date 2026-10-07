@@ -56,6 +56,20 @@ uv run pytest
 
 Tests use the fake mailbox in `tests/fakes/graph_fake.py`; use synthetic data only, never real captures.
 
+## Portability and research
+
+Keep source, documentation, comments and fixtures free of real personal names, account
+addresses and organization identifiers. Use fictional examples. Deployment-specific URLs,
+clients, scopes and optional expected-account checks belong in named configuration settings,
+not scattered literals. Microsoft public endpoints and first-party client IDs may be defaults.
+
+The research folder is a portable investigation toolkit and an anonymized, dated evidence
+record. Its standalone helpers must work before the app does. Never treat one environment's
+grants or denials as universal restrictions; allow users to configure and reassess them.
+Preserve same-account safeguards while deriving routing and self-send identity from sign-in.
+Record any genuinely organization-exclusive endpoint or account dependency for the user's
+decision before changing it. Run the research offline checks when changing probe behavior.
+
 ## Outlook safety and documentation
 
 - Never send mail or change the real mailbox without the user's explicit request. Live tests use self-sends and messages the user names.

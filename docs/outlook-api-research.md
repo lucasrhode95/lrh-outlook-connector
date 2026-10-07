@@ -7,11 +7,15 @@
 **Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md)
 
 This records tenant-specific access, live observations, unresolved questions and private API
-contracts for Landis+Gyr's single-user connector. Microsoft's official documentation is the
+contracts for the tested environment's single-user connector. Microsoft's official documentation is the
 authority for public Graph routes, parameters and response schemas; links below replace local
 copies of that reference material. A successful documented call belongs here only when it
 settles an authentication, integration or coverage question. How to re-run probes and take
 captures is in `research/README.md`.
+
+This is an anonymized compendium from a tested environment, not a universal capability
+matrix. Tenant policy, account grants, clients and Microsoft endpoints can change. Forks
+should configure and rerun the probes before adopting the routing choices below.
 
 | Label | Meaning |
 |---|---|
@@ -45,8 +49,8 @@ reference alone. Probes used the `organizations` authority.
 | **B** Outlook desktop / M365 `d3590ed6-52b3-4102-aeff-aad2292ab01c` | Graph `Mail.Read` | **Denied: AADSTS65002** |
 | D older Outlook Web `bc59ab01-8403-45c6-8796-ac3ef710b3e3` | — | Not tested |
 
-- [`AADSTS65002`](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes) means the client is not preauthorized for that resource. It is final for that client/scope pair. Denied pairs are listed in `research/probes/common.py` `DENIED` and are never requested again.
-- **Conclusion:** no usable client can write mail through Graph. The Graph/OWS split in [architecture §6](architecture.md) follows from this table and must be re-derived for another tenant.
+- [`AADSTS65002`](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes) means the client is not preauthorized for that resource. The recorded denial applies to the tested client/resource configuration at that time. The production baseline preserves its denied pairs; portable probes skip only pairs configured locally for the current environment.
+- **Conclusion for the tested environment:** none of the tested usable clients could write mail through Graph. The Graph/OWS split in [architecture §6](architecture.md) follows from this table and must be re-derived for another tenant.
 
 ## 3. Microsoft Graph: reads (STANDALONE, client C)
 

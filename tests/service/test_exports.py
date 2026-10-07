@@ -394,8 +394,8 @@ async def test_empty_request_is_rejected(exports: Exports) -> None:
 
 def test_recipients_are_separated_by_semicolons() -> None:
     # display names are often "Last, First", so commas cannot separate people
-    names = [Recipient(name="Rhode, Lucas", address="lr@example.com"), Recipient(name="Garcia, Felipe")]
-    assert people(names) == "Rhode, Lucas <lr@example.com>; Garcia, Felipe"
+    names = [Recipient(name="Doe, Jane", address="jane@example.com"), Recipient(name="Smith, Alex")]
+    assert people(names) == "Doe, Jane <jane@example.com>; Smith, Alex"
 
 
 def test_safe_names() -> None:
