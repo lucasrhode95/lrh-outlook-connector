@@ -284,12 +284,11 @@ H23 search dates: the service interprets naive `since`/`until` as UTC and conver
 to UTC before building the search/window and cursor. MCP and web search pass dates through;
 normalization is authoritative at `Mailbox.search`, shared by both callers.
 
-H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
-unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
-the service retains its bounded per-request body chunks. No manual continuation button is required.
-A continuation failure reports that the complete message could not be loaded, rather than displaying
-a partial body as complete. Selecting a different message stops scheduling old continuations using
-the existing reader request counter; the request already in flight is allowed to finish.
+H25 UI reader: selecting a message loads the whole chosen unique/full body in one request, with no
+total body-size ceiling: the web endpoint asks the service for the whole body (`max_chars=None`), so
+the message is read from the server once. MCP `get_message` keeps its bounded chunks and `next_offset`
+(an agent's token budget). A failure reports that the complete message could not be loaded, never a
+partial body; an answer for a message no longer selected is ignored.
 
 H27/H28 coverage: the first per-folder listing page includes requested-window Deleted/Junk
 exclusion counts (including subfolders) from the existing count batch, without an extra count call.

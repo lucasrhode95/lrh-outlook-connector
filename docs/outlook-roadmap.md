@@ -22,7 +22,7 @@ omission of completed work. Each implementation branch contains its own affected
 | H20 | [#23](https://github.com/lucasrhode95/lrh-outlook-connector/pull/23) | Explicit export ids remain authoritative; other sources keep scope filters and copies still merge. |
 | H21 | [#24](https://github.com/lucasrhode95/lrh-outlook-connector/pull/24) | Explicit-only 100 limit, existing 1,000-per-conversation cap, truncation notes and compact bulk results. |
 | H23 | [#25](https://github.com/lucasrhode95/lrh-outlook-connector/pull/25) | Search normalizes naive/aware dates to UTC in the service; redundant MCP search normalization removed. |
-| H25 | [#26](https://github.com/lucasrhode95/lrh-outlook-connector/pull/26) | UI automatically follows all body offsets; no total size cap; obsolete continuation scheduling stops on selection change. |
+| H25 | [#26](https://github.com/lucasrhode95/lrh-outlook-connector/pull/26) | UI loads the whole body in one request (one server read); no total size cap; late answers for an old selection are ignored. |
 | H27 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Deleted/Junk window exclusions from the existing per-folder count batch, reported once across pages. |
 | H28 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Coverage/docs explicitly say server_total includes meeting mail; no second counting mechanism. |
 | H29 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Neutral NotFound wording for messages, attachments, MIME and export gaps; mailbox GONE text removed. |
@@ -198,7 +198,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 **Problem:** the UI reader asks for a bounded body and ignores `next_offset`, so a message over the current limit can stop mid-body without telling the user.
 
-**Decision for this batch:** automatically follow continuation offsets until the chosen body is complete, without a new total length cap. Switching messages stops scheduling obsolete continuations using the existing reader request counter; no new in-flight cancellation infrastructure.
+**Decision for this batch:** load the complete chosen body without a new total length cap. The first version followed `next_offset` in 200,000-character chunks, but each chunk re-read the whole message (and its attachment list) from Graph, so an L-character body cost about L/200,000 full downloads (review of #26). The local web reader now asks for the whole body in one request; MCP keeps its bounded chunks.
 
 ## H26 — Oversized attachments are classified as unexpected failures
 
