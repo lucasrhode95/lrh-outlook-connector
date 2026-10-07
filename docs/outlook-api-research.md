@@ -6,7 +6,12 @@
 
 **Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md)
 
-This is the single record of what Microsoft's APIs allow and how they behave for this tenant (Landis+Gyr, one user mailbox). It keeps evidence and conclusions only. How to re-run the probes and take captures is in `research/README.md`.
+This records tenant-specific access, live observations, unresolved questions and private API
+contracts for Landis+Gyr's single-user connector. Microsoft's official documentation is the
+authority for public Graph routes, parameters and response schemas; links below replace local
+copies of that reference material. A successful documented call belongs here only when it
+settles an authentication, integration or coverage question. How to re-run probes and take
+captures is in `research/README.md`.
 
 | Label | Meaning |
 |---|---|
@@ -25,7 +30,10 @@ This is the single record of what Microsoft's APIs allow and how they behave for
 
 ## 2. Authentication (STANDALONE)
 
-Device-code sign-in against `login.microsoftonline.com/organizations`, then refresh tokens. A client's refresh token can request other resources it is preauthorized for. `.default` reveals the full preauthorized Graph scope set.
+The [MSAL token-acquisition guide](https://learn.microsoft.com/en-us/entra/msal/python/getting-started/acquiring-tokens)
+describes the public authentication flow. The evidence below establishes which Microsoft-owned
+clients are preauthorized in this tenant; those grants cannot be inferred from Graph's permission
+reference alone. Probes used the `organizations` authority.
 
 | Client | Resource / scope | Result |
 |---|---|---|
@@ -42,29 +50,40 @@ Device-code sign-in against `login.microsoftonline.com/organizations`, then refr
 
 ## 3. Microsoft Graph: reads (STANDALONE, client C)
 
-Every call sent `Prefer: IdType="ImmutableId"`.
+Public contracts: [mail overview](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0),
+[list/filter messages](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0),
+[read messages and MIME](https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0),
+[attachments](https://learn.microsoft.com/en-us/graph/api/message-list-attachments?view=graph-rest-1.0),
+[search](https://learn.microsoft.com/en-us/graph/search-query-parameter),
+[immutable IDs](https://learn.microsoft.com/en-us/graph/outlook-immutable-id),
+[ID translation](https://learn.microsoft.com/en-us/graph/api/user-translateexchangeids?view=graph-rest-1.0),
+[folder delta](https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0),
+[message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0)
+and [batching](https://learn.microsoft.com/en-us/graph/json-batching).
+Use those references for route syntax, query ordering, pagination and standard response fields.
+The tested product read routes succeeded with client C; the findings below capture integration
+details and exceptions. Probes requested immutable IDs unless otherwise noted.
 
-### 3.1 Proven routes
+### 3.1 Live compatibility findings
 
-| Route | Result / note |
-|---|---|
-| `/me/mailFolders` (+ recursive `childFolders`, `includeHiddenFolders=true`) and 11 well-known aliases | 200. `archive` is the normal Archive folder, not Online Archive. |
-| `/me/messages`, `/me/mailFolders/{id}/messages` with `$select`, `$filter` (date, sender), `$top`, `$orderby` | 200. `$orderby` requires the ordered property to appear first in `$filter` (otherwise `InefficientFilter`). |
-| `/me/messages?$count=true` with `ConsistencyLevel: eventual` | 200 |
-| `GET /me/messages/{id}`: text and HTML body, `uniqueBody`, `internetMessageHeaders` | 200. Reading does not change `isRead`. |
-| `/me/messages/{id}/$value` (MIME) | 200 |
-| `/me/messages?$filter=conversationId eq '…'` | 200, across all folders (§3.4) |
-| `$search` (`subject:`, `from:`, `to:`, body, `attachment:`, `received:`) | 200. Field terms must be quoted. **Ignores `Prefer: IdType="ImmutableId"`** (live 2026-10-03): hits carry the regular id (`AQMk…`), not the immutable one (`AAkALg…`) that listings return; a GET by a regular id returns it unchanged (the header does not convert it; live 2026-10-03), but `POST /me/translateExchangeIds` (`restId` → `restImmutableEntryId`) does, with the read sign-in. Outlook Web accepted the regular id as a reply target. |
-| `POST /search/query` (message entity) | 200. Gives a server `total`. |
-| Attachments: list, item (`$select` must not include `@odata.type`), `$value`, `$select=microsoft.graph.fileAttachment/contentId` | 200. The cast also works on the list: `/me/messages/{id}/attachments?$select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId` returns each file attachment's `contentId` in one request (live 2026-10-04, §3.5). |
-| `/me/mailFolders/{id}/messages?$count=true&$top=1&$select=receivedDateTime&$orderby=receivedDateTime desc&$filter=receivedDateTime ge …` in one `$batch`, `ConsistencyLevel: eventual` | 200 for 16 of 16 folders in one request (0.9 s): each sub-response carries `@odata.count` and, when the count is not 0, the newest message's `receivedDateTime` (5 of 5). One batch gives each folder's count and newest date (live 2026-10-04, H30). |
-| `$filter` by message type, for counts without meeting mail | **400** (live 2026-10-04, H28): `not isof('microsoft.graph.eventMessage')` → `ErrorInvalidUrlQueryFilter`; `meetingMessageType eq 'none'` → property not found on `microsoft.graph.message`. Same with a `receivedDateTime` window added. A `$count` cannot leave out meeting mail. |
-| `/me/mailFolders/delta`, `/me/mailFolders/{id}/messages/delta` (`odata.maxpagesize`) | 200, `deltaLink`, no-change replay returns 0 |
-| `/me/translateExchangeIds` | 200. Converts the regular ids `$search` returns (`AQMk…` and `AAMk…`) into immutable ids (live 2026-10-03, read sign-in); the results equal the ids listings return (3 of 3, live 2026-10-04). An input that is already immutable fails the whole call (HTTP 400 `InvalidArgument`, expected `EntryId`). Not needed for OWS (§4.2). |
+- **Search ID exception (2026-10-03/04):** `$search` ignored the immutable-ID preference and
+  returned regular IDs. GET by a regular ID also left it unchanged. Explicit translation from
+  `restId` to `restImmutableEntryId` worked with the read sign-in and matched listing IDs (3/3).
+  Passing an already immutable ID as `restId` failed the whole translation call with HTTP 400
+  `InvalidArgument` (expected `EntryId`). Translate only search IDs; OWS acceptance is in §4.2.
+- **Folder-count optimization (2026-10-04, H30):** combining each folder's date-window count
+  and newest message in one Graph batch worked for 16/16 folders in 0.9 s. All five nonempty
+  responses supplied the newest date. The documented operations can replace a second count
+  pass in this tenant; timing is a sample, not a service guarantee.
+- **Meeting-mail count gap (2026-10-04, H28):** `not isof('microsoft.graph.eventMessage')`
+  failed with `ErrorInvalidUrlQueryFilter`; `meetingMessageType eq 'none'` was not a property
+  of `message`. Adding a date window did not help. Neither attempted filter yields a count
+  excluding meeting mail; no alternative server-side filter is proven.
 
 **Sign-in (live 2026-10-03):** `auth write` asked for its own device code right after `auth read`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The read token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`; re-checked 2026-10-04: `Content.Process.User`, `Family.Read`, `FileStorageContainer.Selected`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Read.Shared`, `People.Read`, `People.Read.All`, `Presence.Read.All`, `ProtectionScopes.Compute.User`, `Sites.ReadWrite.All`, `User.Read`, `User.Read.All`, `User.ReadBasic.All`, `UserAuthenticationMethod.ReadWrite`, `email`, `openid`, `profile`; **no `Calendars.*`**, so `/me/calendarView` was not tried, roadmap X10); the write token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
 
-Not tested: shared mailboxes (no target supplied). Online Archive: the account reports `HasArchive=false`, and Graph does not support it.
+Not tested: shared mailboxes (no target supplied). The account reports `HasArchive=false`, so
+there is no tenant-specific Online Archive evidence; consult the public mail limitations.
 
 ### 3.2 Mailbox size and catalog cost (`catalog.py`)
 
@@ -136,12 +155,15 @@ Sample: 25 recent conversations, 192 messages.
 |---|---|
 | Types | `fileAttachment` 168, `itemAttachment` 8, `referenceAttachment` 0 |
 | Inline | 125 of 168 file attachments. All are referenced as `cid:` in the full body; only 47 in `uniqueBody`. |
-| `$value` | Works for file attachments, and for item attachments (returns MIME → `.eml`) |
 | Sizes | median 11 KB, max 27.5 MB |
 
 **Conclusion:** export non-inline attachments by default. Include inline images only when the rendered body references them.
 
-**Content ids in the listing (2026-10-04, read-only, one message from the last 30 days with an inline image):** `GET /me/messages/{id}/attachments?$select=id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId` → 200; `contentId` came back on the inline file attachment (1 of 1), alongside `@odata.type`, `@odata.mediaContentType` and the selected fields. One listing request per message gives every image's content id, so the separate per-attachment lookup (`attachment_content_ids`) is unnecessary (roadmap H37, H19).
+**Listing integration check (2026-10-04):** the documented file-attachment cast returned the
+inline attachment's `contentId` in the normal listing (1/1). This settles the reason for a separate
+per-attachment lookup: it is unnecessary for that case (H37, H19). See the public
+[fileAttachment schema](https://learn.microsoft.com/en-us/graph/api/resources/fileattachment?view=graph-rest-1.0)
+for field selection; broader attachment-type samples remain in the table above.
 
 ### 3.6 Delta around moves and deletes (`delta_moves.py`)
 
@@ -153,6 +175,43 @@ Snapshot taken before the §4.2 mutations, checked after them.
 | Inbox | 2× changed | Property edits, and a move out and back (net: a change) |
 | Archive | 0 | The round trip netted out. Delta reports net state, not history. |
 | Deleted Items | 2× added | The same immutable ids, so moves are matched by id |
+
+### 3.7 File and cross-category search feasibility (2026-10-07)
+
+Public contracts: [site resolution](https://learn.microsoft.com/en-us/graph/api/site-getbypath?view=graph-rest-1.0),
+[file download](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0),
+[sharing links](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0),
+[file search and filters](https://learn.microsoft.com/en-us/graph/search-concept-files),
+[search request parameters](https://learn.microsoft.com/en-us/graph/api/resources/searchrequest?view=graph-rest-1.0),
+[mail search limitations](https://learn.microsoft.com/en-us/graph/search-concept-messages),
+[people search](https://learn.microsoft.com/en-us/graph/search-concept-person)
+and [calendar search](https://learn.microsoft.com/en-us/graph/search-concept-events).
+Use those for request/response schemas, pagination, query filters and redirect handling.
+
+**Authentication evidence:** the existing encrypted Outlook `read` sign-in resolved an
+owner-supplied workbook, obtained its metadata, and read the beginning of its download with
+HTTP 200 and an XLSX-compatible header. No new scopes or interactive sign-in were required.
+The full file was not downloaded, so complete-content integrity is unverified.
+
+| Probe with the same sign-in | Observed result | Remaining uncertainty |
+|---|---|---|
+| Known workbook filename search (`driveItem`) | HTTP 200; expected workbook found | No exhaustive recall or pagination test |
+| Generic file search without a location restriction | HTTP 200; results from multiple SharePoint sites and OneDrive | No proof of complete coverage of all accessible files |
+| Known colleague name (`person`) | HTTP 200; two hits | Wider person/group coverage untested |
+| Mail keyword, subject and body searches | HTTP 200; hits returned | Product folder exclusions were not applied; use official count limitations |
+| Calendar event search (`event`) | HTTP 403 `Forbidden`, requiring `Calendars.Read` or `Calendars.ReadWrite` | Current read token lacks these scopes; another approved auth route is unproven |
+| Site search and a folder-only file query | HTTP 200; zero hits | No known-hit validation; zero hits establish neither complete coverage nor lack of support |
+
+The sharing-link resolver was not tested: the workbook was addressed through its site/library
+path. Do not infer that arbitrary sharing URLs, guest resources or other tenants work.
+No file, sharing permission or mailbox was changed; credentials and private results were not
+retained in Git.
+
+**Related evidence:** the Teams roadmap records successful Graph OneDrive reads and
+`driveItem` search on 2026-10-01 (`scrape-teams-chat/docs/teams-exporter-roadmap.md`, G1).
+This is evidence from that repo, not a repeated Teams sign-in test. Its heterogeneous private
+Substrate Search v2 discovery remains pending; Graph results do not validate that contract.
+Product scope and implementation decisions belong in roadmap X11.
 
 ## 4. OWS (`/owa/service.svc`): writes (STANDALONE, client A)
 
@@ -463,19 +522,15 @@ signature map. The older `UserOptions.SignatureHtml`/`SignatureText` path is sep
 `GetOwaUserConfiguration` call succeeds with our OWS sign-in but returns null legacy signature
 contents; that does not mean the modern roaming-signature list is empty. One attempted
 `GetUserConfiguration` JSON envelope returned HTTP 400; no general lack of configuration-read
-access is inferred from that malformed/unsupported variant. Microsoft's documented Graph
-[`mailboxSettings` properties](https://learn.microsoft.com/en-us/graph/api/resources/mailboxsettings?view=graph-rest-1.0)
-do not expose this native signature list/default/content model.
+access is inferred from that malformed/unsupported variant.
 
-**Graph-first decision (2026-10-07).** The owner prefers Graph because its contracts are documented.
-Microsoft's current [`PostponeRoamingSignaturesUntilLater` documentation](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater)
-explicitly says it has no plans to support roaming-signature management in Graph and recommends
-the Office.js signature API/event hooks for vendors. The documented Graph beta
-[`userSettings`](https://learn.microsoft.com/en-us/graph/api/resources/usersettings?view=graph-rest-beta)
-model also does not expose native signature list/default/content properties. These are documentation
-findings, not proof that every possible undocumented Graph route fails. Use OWA only for this native
-configuration gap; keep Graph for message/draft and attachment reads. Revisit if Graph gains a
-documented equivalent rather than treating OWA as the preferred general backend.
+**Public API boundary (checked 2026-10-07):** consult Microsoft's
+[roaming-signature guidance](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater),
+[mailboxSettings](https://learn.microsoft.com/en-us/graph/api/resources/mailboxsettings?view=graph-rest-1.0)
+and [beta userSettings](https://learn.microsoft.com/en-us/graph/api/resources/usersettings?view=graph-rest-beta)
+for Graph's current signature-management gap. This is why the native signature work uses Cloud
+Settings. It does not prove that every undocumented Graph route fails; recheck for a documented
+equivalent before expanding the private implementation.
 
 **Proven reads (STANDALONE).** All requests below used the connector's existing encrypted, app-owned
 `write` profile (One Outlook Web → Outlook resource), no browser credentials. Reads were sequential
@@ -648,9 +703,9 @@ implementation or validation task is identified, so W7 is removed from the curre
 ## 6. Rejected alternatives
 
 - **Browser-token tools** (`outlook-cli`, `owa-piggy`) offer useful route vocabulary, but their authentication model is unacceptable. [outlook-cli](https://github.com/yusufaltunbicak/outlook-cli) · [owa-piggy](https://github.com/damsleth/owa-piggy)
-- **Outlook REST v2** is decommissioned as a public API. [Comparison](https://learn.microsoft.com/en-us/outlook/rest/compare-graph)
+- **Outlook REST v2:** see the official [Graph comparison and retirement guidance](https://learn.microsoft.com/en-us/outlook/rest/compare-graph); do not build a new backend on this route.
 - **`GetAccessTokenForResource` via OWS** is a historical token-minting path. Do not use it. [Black Hat 2019](https://i.blackhat.com/USA-19/Thursday/us-19-Jaiswal-Preventing-Authentication-Bypass-A-Tale-Of-Two-Researchers.pdf)
-- **EWS:** Exchange Online disablement runs October 2026 → April 2027. [EWS retirement](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online)
+- **EWS:** follow Microsoft's current [retirement guidance](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online); public lifecycle dates are not maintained here.
 
 ## 7. Identifiers worth knowing
 
@@ -660,7 +715,7 @@ implementation or validation task is identified, so W7 is removed from the curre
 
 ## 8. Mailbox side effects of research
 
-- One synthetic self-send to `lucas.rhode@landisgyr.com` (2026-10-01).
+- One synthetic self-send to the signed-in mailbox (2026-10-01).
 - 2026-10-02, on four user-named Inbox messages: read and flag toggles, a category set and then cleared, a conversation read toggle, a move round trip, and two soft deletes. Two messages remain in Deleted Items. Sent copies were untouched, and nothing was hard-deleted.
 - 2026-10-04 (W9 replay): one throwaway inbox rule (conditions that match no real mail) created, edited, renamed, disabled, enabled, moved last and first, and removed. The rule list ended as it started.
 - 2026-10-07 (connector validation): four dedicated messages were sent, each with a received
@@ -676,10 +731,3 @@ implementation or validation task is identified, so W7 is removed from the curre
   the original baseline, both original signature records were unchanged, and all temporary contents
   were absent. No message writes or sends occurred in these signature tests.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.
-
-## Sources
-
-- [MSAL Python](https://learn.microsoft.com/en-us/entra/msal/python/getting-started/acquiring-tokens) · [Entra error codes](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes)
-- [Graph mail overview](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0) · [List messages](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) · [Get message / MIME](https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0) · [Attachments](https://learn.microsoft.com/en-us/graph/api/message-list-attachments?view=graph-rest-1.0)
-- [Immutable IDs](https://learn.microsoft.com/en-us/graph/outlook-immutable-id) · [Folder delta](https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0) · [Message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0)
-- [`$search`](https://learn.microsoft.com/en-us/graph/search-query-parameter) · [Microsoft Search for messages](https://learn.microsoft.com/en-us/graph/search-concept-messages) · [JSON batching](https://learn.microsoft.com/en-us/graph/json-batching)
