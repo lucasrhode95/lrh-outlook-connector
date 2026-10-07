@@ -49,10 +49,10 @@ async def test_folders_are_walked_recursively_with_aliases(fake: FakeGraph) -> N
         "f-junk",
         "f-archive",
         "f-proj",
-        "f-rie",
+        "f-project",
     }
     assert folders["f-inbox"].well_known == "inbox"
-    assert folders["f-rie"].parent_id == "f-proj" and folders["f-rie"].well_known is None
+    assert folders["f-project"].parent_id == "f-proj" and folders["f-project"].well_known is None
 
 
 async def test_list_messages_newest_first_with_date_window_and_paging(fake: FakeGraph) -> None:
@@ -76,7 +76,7 @@ async def test_list_messages_in_one_folder(fake: FakeGraph) -> None:
 
 async def test_conversation_spans_folders_and_never_uses_orderby(fake: FakeGraph) -> None:
     messages, truncated = await reader_for(fake).conversation("c-rel")
-    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-rie", "f-junk"} and not truncated
+    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-project", "f-junk"} and not truncated
 
 
 async def test_large_conversation_reports_truncation(
@@ -89,7 +89,7 @@ async def test_large_conversation_reports_truncation(
 
 async def test_conversation_folders_in_one_batch(fake: FakeGraph) -> None:
     result = await reader_for(fake).conversation_folders(["c-rel", "c-lunch", "c-none"])
-    assert sorted(folder for folder, _ in result["c-rel"][0]) == ["f-inbox", "f-junk", "f-rie", "f-sent"]
+    assert sorted(folder for folder, _ in result["c-rel"][0]) == ["f-inbox", "f-junk", "f-project", "f-sent"]
     assert result["c-lunch"] == ([("f-inbox", "<m5@example.com>")], False) and result["c-none"] == ([], False)
     assert fake.calls == ["POST /v1.0/$batch"]
 

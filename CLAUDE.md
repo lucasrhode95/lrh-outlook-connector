@@ -59,7 +59,7 @@ Tests use the fake mailbox in `tests/fakes/graph_fake.py`; use synthetic data on
 ## Portability and research
 
 Keep source, documentation, comments and fixtures free of real personal names, account
-addresses and organization identifiers. Use fictional examples. Deployment-specific URLs,
+addresses, real customer/project names and organization identifiers. Use fictional examples. Deployment-specific URLs,
 clients, scopes and optional expected-account checks belong in named configuration settings,
 not scattered literals. Microsoft public endpoints and first-party client IDs may be defaults.
 

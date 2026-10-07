@@ -58,12 +58,12 @@ def zip_text(path: str, name: str) -> str:
 async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
     assert artifact.filename.endswith(".zip") and artifact.message_count == 3
-    stem = "2026-09-28 Relatório BE semanal"
+    stem = "2026-09-28 Relatório de exemplo semanal"
     # numbers.xlsx (regular) and image001.png (inline, referenced by the unique body) are in;
     # logo.png (inline signature, not referenced) is out; junk m4 is excluded by default.
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/image001.png", f"{stem}/numbers.xlsx"]
     text = zip_text(artifact.path, f"{stem}.txt")
-    assert "Attachment: 2026-09-28 Relatório BE semanal/numbers.xlsx" in text
+    assert "Attachment: 2026-09-28 Relatório de exemplo semanal/numbers.xlsx" in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
     assert "> First report" not in text  # unique body by default
     assert "buy now" not in text
@@ -71,8 +71,9 @@ async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(expo
 
 async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
-    assert artifact.filename == "2026-09-28 Relatório BE semanal.txt" and artifact.content_type.startswith(
-        "text/plain"
+    assert (
+        artifact.filename == "2026-09-28 Relatório de exemplo semanal.txt"
+        and artifact.content_type.startswith("text/plain")
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
     assert "Attachment: numbers.xlsx" in text and "image001.png" not in text  # inline images are not listed
@@ -100,7 +101,10 @@ async def test_combine_all_is_one_txt_with_sections(exports: Exports) -> None:
 
 async def test_combine_none_is_one_file_per_message_in_a_zip(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(message_ids=["m1", "m5"], combine="none"))
-    assert zip_names(artifact.path) == ["2026-09-28 Relatório BE semanal.txt", "2026-09-30 Lunch_.txt"]
+    assert zip_names(artifact.path) == [
+        "2026-09-28 Relatório de exemplo semanal.txt",
+        "2026-09-30 Lunch_.txt",
+    ]
 
 
 async def test_selected_messages_join_their_conversation_file(exports: Exports) -> None:
@@ -112,7 +116,7 @@ async def test_failed_download_becomes_an_export_error_block(exports: Exports, f
     fake.messages["m3"].attachments[0].broken = True  # its download answers 503
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
     assert artifact.export_errors == {"downloading an attachment": 1}
-    text = zip_text(artifact.path, "2026-09-29 Relatório BE semanal.txt")
+    text = zip_text(artifact.path, "2026-09-29 Relatório de exemplo semanal.txt")
     assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
     assert "  Step:   downloading an attachment\n" in text
     assert "  Error:  HTTP 503 ServiceUnavailable, request-id req-" in text
@@ -290,7 +294,7 @@ async def test_range_export_without_sent_items_but_with_deleted_items(exports: E
 
 
 async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(folder="inbox/projects/rie", message_ids=["m5"]))
+    artifact = await exports.export(ExportRequest(folder="inbox/projects/project alpha", message_ids=["m5"]))
     assert artifact.message_count == 2
 
 
@@ -452,7 +456,7 @@ async def test_save_mime_names_the_file_after_the_subject_from_one_light_read(
     files = Files(exports.mailbox)
     fake.calls.clear()
     saved = await files.save_mime("m3")
-    assert saved.name == "RE_ Relatório BE semanal.eml"
+    assert saved.name == "RE_ Relatório de exemplo semanal.eml"
     assert Path(saved.path).read_bytes().startswith(b"Subject:")
     # one summary read (in a $batch) and the download: no body, no attachment listing
     assert fake.calls == ["POST /v1.0/$batch", "GET /v1.0/me/messages/m3/$value"]

@@ -185,7 +185,7 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_folders(refresh: bool = False) -> list[Folder]:
-        """Mail folders with paths (e.g. Inbox/Projects/RIE), well-known aliases and counts.
+        """Mail folders with paths (e.g. Inbox/Projects/Project Alpha), well-known aliases and counts.
 
         Hidden folders are out of reach and not listed."""
         return await (await services()).mailbox.folders(refresh=refresh)

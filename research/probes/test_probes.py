@@ -13,6 +13,14 @@ from unittest.mock import patch
 
 _ISOLATED = tempfile.TemporaryDirectory()
 os.environ["OUTLOOK_PROBE_HOME"] = _ISOLATED.name
+_TEMPLATE = json.loads(
+    (Path(__file__).resolve().parents[1] / "probe-config.example.json").read_text(
+        encoding="utf-8"
+    )
+)
+(Path(_ISOLATED.name) / "probe-config.json").write_text(
+    json.dumps(_TEMPLATE), encoding="utf-8"
+)
 
 import common
 import config
@@ -192,15 +200,16 @@ class ConfigurationChecks(unittest.TestCase):
 
     def configure(self, values):
         (config.LOCAL / "probe-config.json").write_text(
-            json.dumps(values), encoding="utf-8"
+            json.dumps(_TEMPLATE | values), encoding="utf-8"
         )
 
-    def test_defaults_have_no_expected_account_or_historical_denials(self):
+    def test_template_has_no_expected_account_or_historical_denials(self):
+        self.configure({})
         settings = config.load_config()
         self.assertEqual(settings["expected_user"], "")
         self.assertEqual(settings["denied_pairs"], [])
 
-    def test_overrides_include_endpoints_and_host_allowlist(self):
+    def test_configured_values_determine_endpoints_and_host_allowlist(self):
         self.configure(
             {
                 "tenant": "tenant-a",
@@ -212,6 +221,21 @@ class ConfigurationChecks(unittest.TestCase):
         self.assertIn("/tenant-a/oauth2/v2.0", settings["authority"])
         self.assertIn("graph.example.com", settings["allowed_hosts"])
         self.assertEqual(settings["expected_user"], "user@example.com")
+
+    def test_missing_file_requires_explicit_configuration(self):
+        with self.assertRaisesRegex(SystemExit, "Missing probe configuration"):
+            config.load_config()
+
+    def test_missing_setting_is_not_filled_from_a_default(self):
+        values = dict(_TEMPLATE)
+        del values["graph_url"]
+        (config.LOCAL / "probe-config.json").write_text(
+            json.dumps(values), encoding="utf-8"
+        )
+        with self.assertRaisesRegex(
+            SystemExit, "Missing probe configuration settings: graph_url"
+        ):
+            config.load_config()
 
     def test_unsafe_url_is_rejected(self):
         self.configure({"ows_url": "https://user:secret@example.com/owa"})

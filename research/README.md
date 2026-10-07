@@ -26,9 +26,12 @@ How to act on them is in [`docs/architecture.md` §6](../docs/architecture.md) (
 
 ## Configure the environment
 
-The checked-in defaults target Microsoft's public cloud and Microsoft-owned clients.
-They are starting points, not promised grants. Copy research/probe-config.example.json
-to .local/probe-config.json and edit only the settings your environment needs:
+The configuration file is required; the code supplies no endpoint, client, scope or
+account defaults. Copy research/probe-config.example.json to .local/probe-config.json
+and configure your environment before running a probe. Keep every listed setting;
+missing or unknown settings cause an error before authentication or network access.
+The example targets Microsoft's public cloud and Microsoft-owned clients as starting
+points, not promised grants:
 
 - tenant: organizations, a tenant ID, or a verified tenant domain.
 - expected_user: optional sign-in email check; empty means no fixed email restriction.
@@ -38,7 +41,7 @@ to .local/probe-config.json and edit only the settings your environment needs:
   settings. URLs must use HTTPS; requests are restricted to their configured hosts.
   Changing a hostname alone does not establish compatibility with another Microsoft cloud.
 - denied_pairs: client/scope pairs to skip in this environment, with "*" for all scopes
-  of a client. Empty by default: historical denials do not block a new investigation.
+  of a client. Empty in the example: historical denials do not block a new investigation.
 
 Use a separate token/config/results folder for each account or environment by setting
 OUTLOOK_PROBE_HOME to a private directory; the default is .local/. Never commit that

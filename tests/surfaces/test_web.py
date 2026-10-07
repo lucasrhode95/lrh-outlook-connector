@@ -84,7 +84,7 @@ def test_foreign_host_header_is_refused(client: TestClient) -> None:
 
 
 def test_folders_messages_search_conversation_and_message(client: TestClient) -> None:
-    assert any(f["path"] == "Inbox/Projects/RIE" for f in client.get("/api/folders").json())
+    assert any(f["path"] == "Inbox/Projects/Project Alpha" for f in client.get("/api/folders").json())
     page = client.get("/api/messages", params={"folder": "inbox", "limit": 10}).json()
     assert [m["id"] for m in page["items"]] == ["m5", "m1"]
     found = client.get("/api/search", params={"q": "relatório"}).json()

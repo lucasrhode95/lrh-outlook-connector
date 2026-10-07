@@ -74,9 +74,9 @@ async def test_flag(mutations: Mutations, fake: FakeGraph) -> None:
 
 
 async def test_move_to_a_folder_by_path_or_alias(mutations: Mutations, fake: FakeGraph) -> None:
-    result = await mutations.move(["m1", "m5"], "Inbox/Projects/RIE")
-    assert statuses(result) == {"m1": "done", "m5": "done"} and fake.messages["m1"].folder == "f-rie"
-    assert statuses(await mutations.move(["m1"], "f-rie")) == {"m1": "unchanged"}
+    result = await mutations.move(["m1", "m5"], "Inbox/Projects/Project Alpha")
+    assert statuses(result) == {"m1": "done", "m5": "done"} and fake.messages["m1"].folder == "f-project"
+    assert statuses(await mutations.move(["m1"], "f-project")) == {"m1": "unchanged"}
     await mutations.move(["m1"], "archive")
     assert fake.messages["m1"].folder == "f-archive"
 
