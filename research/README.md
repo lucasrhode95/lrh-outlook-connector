@@ -9,6 +9,21 @@ APIs actually behave. They are independent of the `outlook_connector` package on
 Findings go to [`docs/outlook-api-research.md`](../docs/outlook-api-research.md) (sanitized).
 How to act on them is in [`docs/architecture.md` §6](../docs/architecture.md) (capability routing and portability).
 
+## What belongs in the findings
+
+- Link to official Microsoft documentation for public API routes, schemas, parameters,
+  permissions, limits and lifecycle guidance. Do not copy that reference material here.
+- Keep dated client/tenant authentication results, unexpected behavior, integration checks
+  that settle a design question, measured costs, failed variants and unresolved coverage.
+  A documented route returning 200 is useful when it proves our existing sign-in can use it;
+  it is not a reason to reproduce the API walkthrough or every returned field.
+- For private OWS/Substrate APIs, retain the discovered request and response contracts,
+  authentication audience, evidence source, tested variants and failure behavior. Separate
+  browser/source observations from successful standalone calls.
+- State the sample and what it does not prove. An empty search is not proof that the feature
+  is unsupported; a few hits are not proof of exhaustive recall. Keep implementation choices
+  in the roadmap and architecture rather than expanding the research record into a plan.
+
 ## Running
 
 From the repo root, with any Python ≥ 3.11. On Windows, set `PYTHONUTF8=1` so non-ASCII query
