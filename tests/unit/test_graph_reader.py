@@ -311,3 +311,43 @@ async def test_search_keeps_its_ids_when_translation_fails(fake: FakeGraph) -> N
     fake.fail[r"/me/translateExchangeIds"] = 500
     hits, _ = await reader_for(fake).search(query="relatório", folder_id=None, page_size=25, page=None)
     assert hits and all(m.id.startswith("rest.") for m in hits)  # the search itself still works
+
+
+@pytest.mark.parametrize("status", [429, 502, 503, 504])
+async def test_batch_retries_only_transient_items_preserving_successes(
+    fake: FakeGraph, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    reader = reader_for(fake)
+    original = fake.route
+    seen = {"/me/messages/m1": 0, "/me/messages/m5": 0}
+
+    def transient(method, path, params, prefer, request):  # type: ignore[no-untyped-def]
+        if path in seen:
+            seen[path] += 1
+            if path == "/me/messages/m1" and seen[path] == 1:
+                return status, {"error": {"code": "SyntheticTransient"}}, None
+        return original(method, path, params, prefer, request)
+
+    monkeypatch.setattr(fake, "route", transient)
+    result = await reader.get_messages(["m1", "m5"])
+    assert not result.failed and result.messages["m1"] and result.messages["m5"]
+    assert seen == {"/me/messages/m1": 2, "/me/messages/m5": 1}
+    assert fake.batch_sizes == [2, 1]
+
+
+@pytest.mark.parametrize("status", [400, 403, 404, 500])
+async def test_batch_does_not_retry_nontransient_items(fake: FakeGraph, status: int) -> None:
+    fake.fail[r"/me/messages/m1"] = status
+    result = await reader_for(fake).get_messages(["m1"])
+    assert fake.batch_sizes == [1]
+    if status == 404:
+        assert result.messages["m1"] is None
+    else:
+        assert result.failed["m1"].status == status
+
+
+@pytest.mark.parametrize("status", [429, 502, 503, 504])
+async def test_batch_exhaustion_retains_final_transient_status(fake: FakeGraph, status: int) -> None:
+    fake.fail[r"/me/messages/m1"] = status
+    result = await reader_for(fake).get_messages(["m1"])
+    assert result.failed["m1"].status == status and fake.batch_sizes == [1] * 5

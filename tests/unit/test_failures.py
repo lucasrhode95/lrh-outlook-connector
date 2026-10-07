@@ -14,7 +14,12 @@ from outlook_connector.service.failures import describe, error_from, error_summa
         (500, "Microsoft service or network problem", True, "retry later"),
         (None, "Microsoft service or network problem", True, "retry later"),
         (403, "access denied for this item", False, "retrying will not help"),
-        (404, "deleted or moved in Outlook during the export", False, "refresh and select it again"),
+        (
+            404,
+            "not found: may have been deleted, moved out of reach, or the id may be wrong",
+            False,
+            "refresh and select it again",
+        ),
         (400, "unexpected error", False, "report it with the request id"),
     ],
 )

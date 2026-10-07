@@ -32,10 +32,10 @@ DENIED = (
     "access denied",
 )
 GONE = (
-    "deleted or moved in Outlook during the export",
+    "not found: may have been deleted, moved out of reach, or the id may be wrong",
     False,
     "refresh and select it again",
-    "deleted or moved",
+    "not found",
 )
 UNEXPECTED = ("unexpected error", False, "report it with the request id", "unexpected error")
 LABELS = {cause: label for cause, _, _, label in (THROTTLED, SERVICE, DENIED, GONE, UNEXPECTED)}

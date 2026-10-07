@@ -13,7 +13,14 @@ from typing import Any
 from urllib.parse import quote, urlencode
 
 from outlook_connector.domain.errors import ConnectorError, Failure, InvalidRequest, Upstream
-from outlook_connector.remote.transport import Transport, describe_failure, request_id, service_error, shorten
+from outlook_connector.remote.transport import (
+    RETRY_STATUSES,
+    Transport,
+    describe_failure,
+    request_id,
+    service_error,
+    shorten,
+)
 
 GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 PREFER_IMMUTABLE = 'IdType="ImmutableId"'
@@ -21,7 +28,7 @@ PREFER_TEXT_BODY = 'outlook.body-content-type="text"'
 PROFILE = "read"  # Graph calls use the read sign-in
 BATCH_LIMIT = 20  # Graph JSON batching maximum per request
 BATCH_CONCURRENCY = 2  # batches in flight; each sub-request counts against the mailbox's 4 concurrent
-BATCH_RETRIES = 4  # rounds of re-sending throttled sub-requests
+BATCH_RETRIES = 4  # rounds of re-sending transient sub-requests
 DEFAULT_RETRY_WAIT = 5.0
 MAX_RETRY_WAIT = 30.0
 MAX_DOWNLOAD_BYTES = 150 * 1024 * 1024
@@ -123,8 +130,8 @@ class Graph:
         - At most BATCH_LIMIT requests per batch and BATCH_CONCURRENCY batches in flight across all
           concurrent calls, because
           Exchange Online throttles more than a few concurrent requests per mailbox (sub-requests count).
-        - Throttled sub-requests (429) are re-sent in new batches of at most BATCH_LIMIT after the
-          advised delay, up to BATCH_RETRIES rounds. What is still throttled is returned as 429.
+        - Transient sub-requests (429/502/503/504) are re-sent in new batches of at most BATCH_LIMIT after the
+          advised delay, up to BATCH_RETRIES rounds. Persistent failures retain their final HTTP status.
         """
         results: dict[str, SubResponse] = {}
         pending = list(requests)
@@ -137,7 +144,7 @@ class Graph:
             chunks = [pending[i : i + BATCH_LIMIT] for i in range(0, len(pending), BATCH_LIMIT)]
             for part in await asyncio.gather(*(send(c) for c in chunks)):
                 results.update(part)
-            pending = [k for k in pending if results[k].status == 429]
+            pending = [k for k in pending if results[k].status in RETRY_STATUSES]
             if not pending or attempt == BATCH_RETRIES:
                 break
             await self._transport.sleep(max(_retry_after(results[k].headers) for k in pending))

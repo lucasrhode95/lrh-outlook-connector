@@ -290,3 +290,12 @@ the service retains its bounded per-request body chunks. No manual continuation 
 A continuation failure reports that the complete message could not be loaded, rather than displaying
 a partial body as complete. Selecting a different message stops scheduling old continuations using
 the existing reader request counter; the request already in flight is allowed to finish.
+
+H27/H28 coverage: the first per-folder listing page includes requested-window Deleted/Junk
+exclusion counts (including subfolders) from the existing count batch, without an extra count call.
+Continuation pages do not repeat those full-window exclusions. Unavailable counts are not replaced
+with stale folder totals. `server_total` counts copies separately and includes meeting invitations,
+cancellations and RSVPs even when `include_meeting_mail=false` hides them; no second counting path.
+H29 NotFound text leaves the cause open: deletion, moving out of reach or an incorrect id.
+H33 Graph batch items retry the same transient statuses as single reads (429/502/503/504), only
+resending failed items and retaining the final status on exhaustion. Writes remain single-attempt.
