@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Awaitable, Callable
 
-from outlook_connector.domain.errors import InvalidRequest, WriteOutcomeUnknown
+from outlook_connector.domain.errors import ConnectorError, InvalidRequest, WriteOutcomeUnknown
 from outlook_connector.domain.models import (
     MAX_MUTATION_ITEMS,
     ItemResult,
@@ -47,6 +47,7 @@ class Mutations:
         *,
         conversation_ids: list[str] | None = None,
         include_deleted_items: bool = False,
+        continue_on_error: bool = True,
     ) -> MutationResult:
         """Entry point: bound explicit ids to 100; expand each conversation under its server limit."""
         explicit = _message_ids(message_ids, allow_empty=bool(conversation_ids))
@@ -70,6 +71,7 @@ class Mutations:
             ids,
             lambda m: m.is_read is is_read,
             lambda chunk: self.writer.set_read(chunk, is_read),
+            continue_on_error=continue_on_error,
         )
         if conversation_ids and len(ids) > MAX_MUTATION_ITEMS:
             result.results = [
@@ -82,16 +84,21 @@ class Mutations:
         result.notes = notes
         return result
 
-    async def set_flag(self, message_ids: list[str], flagged: bool) -> MutationResult:
+    async def set_flag(
+        self, message_ids: list[str], flagged: bool, *, continue_on_error: bool = True
+    ) -> MutationResult:
         """Entry point: validate explicit ids (1–100 unique messages) before changing flags."""
         return await self._apply(
             "flag" if flagged else "unflag",
             _message_ids(message_ids),
             lambda m: m.flagged is flagged,
             lambda chunk: self.writer.set_flag(chunk, flagged),
+            continue_on_error=continue_on_error,
         )
 
-    async def move(self, message_ids: list[str], folder: str) -> MutationResult:
+    async def move(
+        self, message_ids: list[str], folder: str, *, continue_on_error: bool = True
+    ) -> MutationResult:
         """Entry point: validate explicit ids and resolve a permitted destination."""
         message_ids = _message_ids(message_ids)
         target = await self.mailbox.resolve_folder(folder)  # hidden folders are refused
@@ -103,9 +110,10 @@ class Mutations:
             message_ids,
             lambda m: m.folder_id == target.id,
             lambda chunk: self.writer.move(chunk, destination),
+            continue_on_error=continue_on_error,
         )
 
-    async def delete(self, message_ids: list[str]) -> MutationResult:
+    async def delete(self, message_ids: list[str], *, continue_on_error: bool = True) -> MutationResult:
         """Entry point: validate explicit ids; move to Deleted Items, leaving messages already there alone."""
         deleted: set[str] = set()
 
@@ -121,6 +129,7 @@ class Mutations:
             lambda m: m.folder_id in deleted,
             self.writer.delete,
             prepare=classify,
+            continue_on_error=continue_on_error,
         )
 
     # ---------------------------------------------------------------- shared flow
@@ -150,6 +159,7 @@ class Mutations:
         send: Send,
         *,
         prepare: Callable[[], Awaitable[None]] | None = None,
+        continue_on_error: bool = True,
     ) -> MutationResult:
         """Read state, send the change once per chunk, report a result per message.
 
@@ -177,21 +187,29 @@ class Mutations:
                 results[mid] = ItemResult(id=mid, status="unchanged")
             else:
                 pending.append(mid)
+        stopped = False
         for start in range(0, len(pending), CHUNK):
             chunk = pending[start : start + CHUNK]
+            if stopped:
+                results.update({mid: ItemResult(id=mid, status="failed", detail="not sent") for mid in chunk})
+                continue
             try:
                 outcomes = await send(chunk)
             except WriteOutcomeUnknown as exc:
                 results |= await self._recheck(chunk, already, str(exc))
-                continue
-            for mid in chunk:
-                code = outcomes.get(mid)
-                if code is None:
-                    results[mid] = ItemResult(id=mid, status="done")
-                elif code == "ErrorItemNotFound":
-                    results[mid] = ItemResult(id=mid, status="not_found", detail=code)
-                else:
-                    results[mid] = ItemResult(id=mid, status="failed", detail=code)
+            except ConnectorError as exc:
+                results.update({mid: ItemResult(id=mid, status="failed", detail=str(exc)) for mid in chunk})
+            else:
+                for mid in chunk:
+                    code = outcomes.get(mid)
+                    if code is None:
+                        results[mid] = ItemResult(id=mid, status="done")
+                    elif code == "ErrorItemNotFound":
+                        results[mid] = ItemResult(id=mid, status="not_found", detail=code)
+                    else:
+                        results[mid] = ItemResult(id=mid, status="failed", detail=code)
+            if not continue_on_error and any(results[mid].status != "done" for mid in chunk):
+                stopped = True
         ordered = [results[mid] for mid in ids]
         return MutationResult(action=action, results=ordered, counts=dict(Counter(r.status for r in ordered)))
 
@@ -200,7 +218,13 @@ class Mutations:
 
         Assumes (not re-checked here): ``chunk`` is one ``_apply`` already sent, with no clear answer.
         """
-        after = await self.mailbox.reader.get_summaries(chunk)
+        try:
+            after = await self.mailbox.reader.get_summaries(chunk)
+        except ConnectorError as exc:
+            return {
+                mid: ItemResult(id=mid, status="unknown", detail=f"{reason} Read-back failed: {exc}")
+                for mid in chunk
+            }
         out = {}
         for mid in chunk:
             summary = after.summaries.get(mid)

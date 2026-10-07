@@ -44,19 +44,32 @@ claude mcp add lrh-outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scr
 
 The client starts one `outlook-connector mcp` process per session. Read tools: `list_folders`,
 `list_messages`, `search_messages`, `get_conversation`, `get_message`, `list_attachments`,
-`download_attachment`, `save_message_mime`, `export_messages`, `auth_status`, `propose_email`. Reading
+`download_attachment`, `save_message_mime`, `export_messages`, `auth_status`. Reading
 never changes the mailbox, not even read state.
 
-Write tools (they need `outlook-connector auth write`): `create_draft` saves a plain-text message or
-reply into Drafts and never sends it. `send_email` sends only a message you confirmed: the agent calls
-`propose_email`, shows you the exact message and its confirmation code, and passes that code once you
-confirm; any change to the recipients, subject or body afterwards is refused. A send is never
-retried; if Outlook gives no clear answer, the connector looks in Sent Items and otherwise tells you
-to check before anything is sent again.
+Write tools (they need `outlook-connector auth write`): `create_draft` accepts exactly one of
+`text_body` or `html_body`, for new mail and replies. `edit_draft` updates only supplied fields.
+Both save once and require Graph read-back, returning the Microsoft draft id, full server text/HTML,
+and verification findings. Plain text is escaped without Markdown conversion; intentional HTML is
+passed through except active web content. Replies report quoted-history checks.
+After the user explicitly asks to send, `send_draft(draft_id)` sends that existing draft without
+changing its content. There is no direct send or confirmation-code API. Sends are never retried;
+unknown outcomes require checking Sent Items and Outbox before sending again.
+
+Inbox rules (write sign-in, including reads): `list_rules`, `create_rule`, `update_rule`,
+`reorder_rules`, `delete_rule`. Conditions: From, Sent to, Subject contains, Subject-or-body contains.
+Actions: Move to folder and Stop processing. Call a write without `user_confirmation` to propose it;
+show the persistent change and returned RULE code, then repeat with that code after explicit human
+confirmation. Every write is sent once and read back; changed server state invalidates confirmation.
+Unsupported rules are read-only. Reordering is refused if any unsupported rule is present because
+OWS resubmits the whole rule list. Enable/disable uses a separate update from field edits.
 
 Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` and
 `delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)
-and return a result per message: done, unchanged, not found, failed or unknown. Delete moves to
+and return per-message results and counts: done, unchanged, not found, failed or unknown.
+`continue_on_error=true` (default) attempts later chunks after errors. With false, later unsent
+messages return failed with detail `not sent`. Ambiguous writes are read back; failed read-back
+remains unknown. Writes are never retried. Delete moves to
 Deleted Items and never deletes permanently.
 
 Every tool follows the same scope rules: Deleted Items and Junk Email are left out unless
@@ -136,6 +149,11 @@ uv run ruff format --check .
 uv run pyright
 ```
 
+
+H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
+hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
+messages with other selections; reach/scope filters still govern range and conversation selections.
+Copies remain merged and message limits still apply.
 
 H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
 expands each conversation up to the existing 1,000-message server listing cap and reports truncation
