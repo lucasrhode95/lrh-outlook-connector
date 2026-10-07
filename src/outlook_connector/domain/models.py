@@ -138,7 +138,7 @@ class Coverage(Compact):
     """
 
     complete: bool
-    server_total: int | None = None
+    server_total: int | None = None  # includes meeting mail, even when results hide it
     excluded: dict[str, int] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 
