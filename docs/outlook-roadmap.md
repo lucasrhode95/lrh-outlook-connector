@@ -11,8 +11,8 @@ Snapshot **2026-10-07**.
 
 ## Current priority
 
-1. **W8:** implement signature listing/content retrieval and fresh default resolution, including
-   missing signatures and dangling defaults.
+1. **W10 → W8:** remove `edit_draft` (drafts are composed once), then signature listing/content
+   retrieval and fresh default resolution, including missing signatures and dangling defaults.
 2. **Correctness:** H19, H22 and H26.
 3. **Performance and cleanup:** H30–H32 and H34–H38.
 
@@ -24,6 +24,35 @@ Status wording:
 - **Later** — useful work outside the current build sequence.
 
 # Send and mailbox features
+
+## W10 — Drafts are composed once: remove `edit_draft` (enabler of W8)
+
+**Status:** Decided, not built.
+
+**Decision (2026-10-07):** remove the `edit_draft` tool. A draft is composed once by `create_draft`
+and never patched. When the user wants to change a draft (text, recipients, subject or, with W8,
+the signature), the agent creates a new draft with the full intended content and then deletes the
+old one with `delete_messages` (moved to Deleted Items, so it stays recoverable).
+
+**Why:** `edit_draft` replaces the whole body. With W8 placing a signature block (`id="Signature"`,
+research §4.6) and replies carrying Exchange's quoted history, an in-place body edit must either
+make the agent resubmit signature and quote HTML, or make the connector parse the body into message,
+signature and quote regions on every draft read-back, with text/HTML ambiguity and refusals for
+drafts edited in Outlook. Today a body edit on a reply already drops the quote silently. Composing
+from parts avoids all of it: the connector writes `message + signature` and, for replies, Exchange
+appends the quote (`NewBodyContent`), so no draft body is ever parsed or rewritten.
+
+**Implementation:**
+
+- Remove `edit_draft` end to end: MCP tool, service method, `MailWriter.edit_draft`, the OWS
+  `UpdateItem`/`SaveOnly` field updates, `DraftEdit`, fakes, tests and docs. No compatibility shim.
+- MCP instructions: to change a draft, create the replacement first and verify its read-back, then
+  delete the old draft; report both ids. Never delete first.
+- Update requirements §11.1, architecture (`writes.py`, `ows_mail.py`, tool table) and README.
+
+**Accepted costs:** the draft id changes on every change; body edits the user made to the draft in
+Outlook, and attachments added there, are not carried into the replacement (the old draft remains
+in Deleted Items).
 
 ## W8 — Signatures
 
@@ -49,9 +78,10 @@ and [§4.8](outlook-api-research.md#48-native-signature-crud-and-default-lifecyc
   Check account ownership and the relevant revision after retrieval. Respect an explicit no-default
   setting; report missing configured content or a failed/changed read rather than selecting another
   signature or using a stale copy.
-- Placement: new body, then signature; for replies, retain Outlook's quoted history after the
-  signature. Body edits must replace the connector-managed signature rather than duplicate it.
-  Select the signature before saving the draft; sending preserves the already saved draft.
+- Placement at creation only (W10): new body, then one `<div id="Signature"
+  data-signature-name="{name}">` block (the Outlook Web convention, research §4.6); for replies,
+  Exchange appends the quoted history after it. A different signature means composing a new draft.
+  Sending preserves the already saved draft.
 - Convert embedded image data into actual inline attachments with matching CID references.
 
 **Implementation constraints from live findings:** a raw name-list entry may have no readable
