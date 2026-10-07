@@ -11,12 +11,10 @@ Snapshot **2026-10-07**.
 
 ## Current priority
 
-1. **W9:** fix inactive rule values/description metadata and create-response identity reconciliation,
-   then repeat the public-tool lifecycle checks.
-2. **W8:** implement signature listing/content retrieval and fresh default resolution, including
+1. **W8:** implement signature listing/content retrieval and fresh default resolution, including
    missing signatures and dangling defaults.
-3. **Correctness:** H19, H22 and H26.
-4. **Performance and cleanup:** H30–H32 and H34–H38.
+2. **Correctness:** H19, H22 and H26.
+3. **Performance and cleanup:** H30–H32 and H34–H38.
 
 Status wording:
 
@@ -68,23 +66,6 @@ evaluation; see [research §4.6](outlook-api-research.md#46-outlook-web-signatur
 **Remaining validation:** synthetic fixtures for missing references, no default, missing default
 contents, name encoding, configuration changes and account ownership; then public-tool behavior,
 draft image attachments, new-message/reply placement and recipient rendering.
-
-## W9 — Inbox-rule fixes and public-tool validation
-
-**Status:** Pending; two adapter fixes and the public-tool lifecycle checks remain.
-
-**Current blockers:**
-
-- Description metadata and inactive OWS enum values are classified as unsupported behavior,
-  making supported rules read-only. Recognize the proven per-field values while retaining protection
-  for active unsupported conditions/actions.
-- `NewInboxRule` can return an identity that differs from fresh `GetInboxRule` read-back, so
-  creation reports failure even when the rule was created. Reconcile against the fresh collection.
-
-**Remaining work:** add synthetic fixtures for those wire shapes, fix both cases, then validate
-edit/condition clearing, disable/enable, delete and reorder through the public tools. Preserve
-state-bound confirmation, a single write and fresh read-back; never rewrite unsupported rules.
-The specific fields and live evidence are in [research §4.5](outlook-api-research.md#45-connector-live-validation-2026-10-07).
 
 # Correctness and reliability
 
