@@ -15,12 +15,14 @@ from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ows_mail import OwsMailWriter
+from outlook_connector.remote.ows_rules import OwsRules
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.mutations import Mutations
+from outlook_connector.service.rules import Rules
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store, store_path
 
@@ -34,6 +36,7 @@ class Services:
     files: Files
     writes: Writes  # uses the write sign-in, only when a write is made
     mutations: Mutations  # likewise
+    rules: Rules  # OWS reads/writes use the bound write sign-in
 
 
 class AppContext:
@@ -62,11 +65,19 @@ class AppContext:
             store = Store(store_path(account.fingerprint), account.fingerprint)
             mailbox = Mailbox(reader, store)
             conversations = Conversations(mailbox)
-            writer = OwsMailWriter(Ows(self._transport, self.tokens))
+            ows = Ows(self._transport, self.tokens)
+            writer = OwsMailWriter(ows)
             writes = Writes(mailbox, writer, account)
             mutations = Mutations(mailbox, writer, writes.check_account)
             self._services = Services(
-                account, mailbox, conversations, Exports(conversations), Files(mailbox), writes, mutations
+                account,
+                mailbox,
+                conversations,
+                Exports(conversations),
+                Files(mailbox),
+                writes,
+                mutations,
+                Rules(mailbox, OwsRules(ows), account, writes.check_account),
             )
         return self._services
 
