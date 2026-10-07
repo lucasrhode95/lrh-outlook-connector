@@ -24,6 +24,32 @@ How to act on them is in [`docs/architecture.md` §6](../docs/architecture.md) (
   is unsupported; a few hits are not proof of exhaustive recall. Keep implementation choices
   in the roadmap and architecture rather than expanding the research record into a plan.
 
+## Configure the environment
+
+The checked-in defaults target Microsoft's public cloud and Microsoft-owned clients.
+They are starting points, not promised grants. Copy research/probe-config.example.json
+to .local/probe-config.json and edit only the settings your environment needs:
+
+- tenant: organizations, a tenant ID, or a verified tenant domain.
+- expected_user: optional sign-in email check; empty means no fixed email restriction.
+- profiles: the client ID and resource scope for each of read, write, and search.
+  Registered public clients can be substituted where your administrators permit them.
+- login_url, graph_resource, graph_url, ows_url, substrate_urls: endpoint and resource
+  settings. URLs must use HTTPS; requests are restricted to their configured hosts.
+  Changing a hostname alone does not establish compatibility with another Microsoft cloud.
+- denied_pairs: client/scope pairs to skip in this environment, with "*" for all scopes
+  of a client. Empty by default: historical denials do not block a new investigation.
+
+Use a separate token/config/results folder for each account or environment by setting
+OUTLOOK_PROBE_HOME to a private directory; the default is .local/. Never commit that
+directory or a real account configuration. Changing accounts requires a fresh directory
+or deleting the old probe token file. All cached profiles must identify the same tenant
+and account, even when expected_user is empty.
+
+OWS mailbox routing is derived from the token's email, or its tenant/object identity.
+The self-send body helper requires a token and derives its recipient from that token.
+Missing identity is reported rather than filled with an example account.
+
 ## Running
 
 From the repo root, with any Python ≥ 3.11. On Windows, set `PYTHONUTF8=1` so non-ASCII query
@@ -38,8 +64,8 @@ python research/probes/auth.py --status
 
 `auth.py` prints a device-code link and code. Sign in in any browser. Tokens are stored as
 **plaintext** in `.local/probe-tokens.json` (git-ignored). Delete that file when you are done.
-The probes refuse to use a token that belongs to a different account than the one configured
-in `common.py`.
+The probes check the optional expected account and reject mixed-account caches.
+These helpers are independent of the production app's encrypted MSAL cache.
 
 ## Order for a new tenant (or a re-check)
 
@@ -53,7 +79,24 @@ in `common.py`.
 | 6 | `delta_moves.py --snapshot`, then a change, then `--check` | What delta reports for moves, deletes and read toggles | No (the change is made by you or by step 7) |
 | 7 | `ows_mutations.py --case OPS "subject" …` | OWS write contracts: read, flag, categories, conversation read, move, soft delete | **Yes**, only with `--i-authorize-mutations`, on named Inbox messages |
 
-Steps 2–5 need the `read` profile. Step 4 also needs `search`, and step 7 needs `write`.
+First authenticate each client needed for the run. graph_scopes.py needs a cached
+refresh token for each configured client; if a baseline scope fails, try an administrator-
+approved baseline such as that resource's .default in the local profile configuration.
+A missing refresh token, skipped pair, transport failure, or expired refresh token does
+not establish that a capability is unsupported. Inspect the OAuth error and distinguish
+a scope denial from a sign-in problem. Only a successful API probe establishes usable behavior.
+
+Steps 2–5 need read. Step 4 also needs search, and step 7 needs write.
+Route capabilities according to your results: documented Graph where usable, OWS for proven
+gaps, and unavailable or unresolved where neither is established. Update the findings with
+date, configuration context (without private identifiers), evidence and remaining uncertainty.
+
+## Offline checks
+
+The probe helpers have synthetic, network-free checks separate from the application suite:
+
+    python -m unittest discover -s research/probes -p test_probes.py
+    python -m compileall -q research/probes
 
 ## Output and safety rules
 
@@ -62,8 +105,9 @@ Steps 2–5 need the `read` profile. Step 4 also needs `search`, and step 7 need
   labels the operator supplied.
 - Save runs under `.local/probe-results/` (git-ignored) if you want to keep them:
   `python research/probes/catalog.py > .local/probe-results/catalog.json`.
-- The client/scope pairs Microsoft denied with `AADSTS65002` are listed in `common.DENIED`
-  and are never requested again. Update the list per tenant.
+- Historical AADSTS65002 results belong to the dated research record. Add confirmed
+  denials to your local denied_pairs if you want later runs to skip them. Remove entries
+  deliberately when reassessing changed policy; the probes never retry denials automatically.
 - Writes: no send, no hard delete, explicit subject targets only, Inbox copies only, no
   retries after an ambiguous result. A prior authorization does not carry over to new targets.
 

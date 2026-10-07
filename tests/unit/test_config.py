@@ -32,6 +32,6 @@ def test_windows_data_dir_is_outside_appdata(tmp_path: Path, monkeypatch: pytest
     # Packaged apps (the Claude desktop app and the MCP servers it starts) get AppData redirected.
     monkeypatch.delenv("OUTLOOK_CONNECTOR_HOME")
     monkeypatch.setattr(config, "_windows", lambda: True)
-    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "rhode"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "rhode" / "AppData" / "Local"))
-    assert config.data_dir() == tmp_path / "rhode" / ".lrh-outlook-connector"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "example-user"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "example-user" / "AppData" / "Local"))
+    assert config.data_dir() == tmp_path / "example-user" / ".lrh-outlook-connector"

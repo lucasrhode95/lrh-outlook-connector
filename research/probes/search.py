@@ -20,11 +20,9 @@ from typing import Any
 
 from common import account, emit, graph, graph_pages, http, need, rows
 
-SUBSTRATE_HOSTS = [
-    "https://outlook.office.com/searchservice/api/v2/query",
-    "https://outlook.office.com/search/api/v2/query",
-    "https://substrate.office.com/searchservice/api/v2/query",
-]
+from config import SETTINGS
+
+SUBSTRATE_HOSTS = SETTINGS["substrate_urls"]
 
 
 def graph_dollar_search(token: str, q: str, top: int, pages: int) -> dict[str, Any]:

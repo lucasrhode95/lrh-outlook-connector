@@ -1,6 +1,6 @@
 """Outlook Web's JSON RPC (OWS, ``/owa/service.svc``): the write path (architecture §5.5).
 
-A gap fill: Graph cannot write mail with the usable first-party clients (research §2), so every
+A gap fill: the tested deployment did not grant Graph writes to the selected clients (research §2), so every
 write goes here with the ``write`` token. Only the ``ows*`` modules know OWS JSON. Contracts are the ones
 proven in research §4.1–4.2; anything else is marked where it is used.
 
