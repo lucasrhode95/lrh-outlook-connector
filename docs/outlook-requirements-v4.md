@@ -242,3 +242,10 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
+
+
+H17 mutation result contract: `set_read_state`, `set_flag`, `move_messages` and `delete_messages`
+default to `continue_on_error=true`. Each returns results and counts even when a later chunk fails.
+Clear rejection is failed; successful work is done, already satisfied work is unchanged, ambiguous
+unconfirmed work is unknown (including failed read-back). With false, later chunks are failed with
+`not sent` detail and are never sent. No automatic write retries.

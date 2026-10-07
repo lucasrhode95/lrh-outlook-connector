@@ -165,3 +165,9 @@ async def test_mutation_tools_report_per_message(server: FastMCP, fake: FakeGrap
     assert deleted["counts"] == {"done": 1} and fake.messages["m5"].folder == "f-deleted"
     flagged = await call(server, "set_flag", message_ids=["m1"], flagged=True)
     assert flagged["counts"] == {"done": 1}
+
+
+async def test_mutation_continue_on_error_schema_defaults(server: FastMCP) -> None:
+    tools = {t.name: t for t in await server.list_tools()}
+    for name in CHANGE_TOOLS | RELOCATE_TOOLS:
+        assert tools[name].inputSchema["properties"]["continue_on_error"]["default"] is True

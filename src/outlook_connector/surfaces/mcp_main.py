@@ -101,7 +101,9 @@ Sent Items and Outbox.
 explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
 set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
 (already so; nothing sent), not_found, failed (with Outlook's code) or unknown (no clear answer; \
-check before repeating). delete_messages moves \
+check before repeating). continue_on_error defaults to true: later chunks are attempted after errors. \
+With false, later messages are failed with detail "not sent". Always report results and counts. \
+delete_messages moves \
 to Deleted Items; messages already there are left alone (there is no permanent delete). Act only \
 on messages the user asked about, and say which ones before changing many.
 - Writes need the write sign-in (`outlook-connector auth write`).
@@ -301,7 +303,8 @@ def build_server(context: AppContext) -> FastMCP:
         combine: Annotated[
             CombineMode,
             Field(
-                description="per_conversation: one TXT per conversation; all: one TXT; none: one TXT per message."
+                description="per_conversation: one TXT per conversation; all: one TXT; "
+                "none: one TXT per message."
             ),
         ] = "per_conversation",
         body: Literal["unique", "full"] = "unique",
@@ -390,6 +393,7 @@ def build_server(context: AppContext) -> FastMCP:
             list[str] | None, Field(description="Also every message of these conversations, in scope.")
         ] = None,
         include_deleted_items: IncludeDeleted = False,
+        continue_on_error: bool = True,
     ) -> MutationResult:
         """Mark messages read or unread (read receipts are never sent). A result per message."""
         return await (await services()).mutations.set_read(
@@ -397,26 +401,34 @@ def build_server(context: AppContext) -> FastMCP:
             read,
             conversation_ids=conversation_ids,
             include_deleted_items=include_deleted_items,
+            continue_on_error=continue_on_error,
         )
 
     @mcp.tool(annotations=CHANGE)
-    async def set_flag(message_ids: MessageIds, flagged: bool) -> MutationResult:
+    async def set_flag(
+        message_ids: MessageIds, flagged: bool, continue_on_error: bool = True
+    ) -> MutationResult:
         """Flag or unflag messages. A result per message."""
-        return await (await services()).mutations.set_flag(message_ids, flagged)
+        return await (await services()).mutations.set_flag(
+            message_ids, flagged, continue_on_error=continue_on_error
+        )
 
     @mcp.tool(annotations=RELOCATE)
     async def move_messages(
         message_ids: MessageIds,
         folder: Annotated[str, Field(description="Target folder: path, alias (archive, inbox) or id.")],
+        continue_on_error: bool = True,
     ) -> MutationResult:
         """Move messages to a folder (not Deleted Items: use delete_messages). A result per message."""
-        return await (await services()).mutations.move(message_ids, folder)
+        return await (await services()).mutations.move(
+            message_ids, folder, continue_on_error=continue_on_error
+        )
 
     @mcp.tool(annotations=RELOCATE)
-    async def delete_messages(message_ids: MessageIds) -> MutationResult:
+    async def delete_messages(message_ids: MessageIds, continue_on_error: bool = True) -> MutationResult:
         """Move messages to Deleted Items. Messages already there are left alone; nothing is ever
         deleted permanently. A result per message."""
-        return await (await services()).mutations.delete(message_ids)
+        return await (await services()).mutations.delete(message_ids, continue_on_error=continue_on_error)
 
     return mcp
 

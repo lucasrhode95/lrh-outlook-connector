@@ -106,7 +106,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H17 — Partial mutation failures are reported incorrectly
 
-**Status:** Decided, not built.
+**Status:** Implemented on this branch; synthetic validation complete.
 
 **Problem:** mutations are sent in chunks. If a later chunk fails, earlier chunks may already have changed the mailbox while the tool call raises only the later error.
 
