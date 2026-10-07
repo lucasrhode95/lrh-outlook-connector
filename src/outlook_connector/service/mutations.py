@@ -49,24 +49,48 @@ class Mutations:
         include_deleted_items: bool = False,
         continue_on_error: bool = True,
     ) -> MutationResult:
-        """Mark messages, and every message of the given conversations in scope, read or unread."""
-        ids = list(message_ids)
-        for conversation_id in conversation_ids or []:
-            ids += await self._conversation(conversation_id, include_deleted_items=include_deleted_items)
-        return await self._apply(
+        """Entry point: bound explicit ids to 100; expand each conversation under its server limit."""
+        explicit = _message_ids(message_ids, allow_empty=bool(conversation_ids))
+        ids = list(explicit)
+        notes = []
+        for conversation_id in dict.fromkeys(conversation_ids or []):
+            expanded, truncated = await self._conversation(
+                conversation_id, include_deleted_items=include_deleted_items
+            )
+            ids += expanded
+            if truncated:
+                notes.append(
+                    f"Conversation {conversation_id} was truncated at the 1,000-message listing limit; "
+                    "only listed messages in scope are included."
+                )
+        ids = list(dict.fromkeys(ids))
+        if not ids:
+            raise InvalidRequest("Name at least one message id or a conversation with messages in scope.")
+        result = await self._apply(
             "read" if is_read else "unread",
             ids,
             lambda m: m.is_read is is_read,
             lambda chunk: self.writer.set_read(chunk, is_read),
             continue_on_error=continue_on_error,
         )
+        if conversation_ids and len(ids) > MAX_MUTATION_ITEMS:
+            result.results = [
+                r for r in result.results if r.id in explicit or r.status not in ("done", "unchanged")
+            ]
+            notes.append(
+                "Ordinary conversation-expanded done/unchanged results are summarized in counts; "
+                "explicit-id and error results are retained."
+            )
+        result.notes = notes
+        return result
 
     async def set_flag(
         self, message_ids: list[str], flagged: bool, *, continue_on_error: bool = True
     ) -> MutationResult:
+        """Entry point: validate explicit ids (1–100 unique messages) before changing flags."""
         return await self._apply(
             "flag" if flagged else "unflag",
-            message_ids,
+            _message_ids(message_ids),
             lambda m: m.flagged is flagged,
             lambda chunk: self.writer.set_flag(chunk, flagged),
             continue_on_error=continue_on_error,
@@ -75,6 +99,8 @@ class Mutations:
     async def move(
         self, message_ids: list[str], folder: str, *, continue_on_error: bool = True
     ) -> MutationResult:
+        """Entry point: validate explicit ids and resolve a permitted destination."""
+        message_ids = _message_ids(message_ids)
         target = await self.mailbox.resolve_folder(folder)  # hidden folders are refused
         if await self.mailbox.under(target.id, "deleteditems"):
             raise InvalidRequest("To delete messages, use delete_messages (it moves them to Deleted Items).")
@@ -88,7 +114,7 @@ class Mutations:
         )
 
     async def delete(self, message_ids: list[str], *, continue_on_error: bool = True) -> MutationResult:
-        """Move to Deleted Items. Messages already in Deleted Items (or its subfolders) are left alone."""
+        """Entry point: validate explicit ids; move to Deleted Items, leaving messages already there alone."""
         deleted: set[str] = set()
 
         async def classify() -> None:  # after _apply has refreshed the folder list for these messages
@@ -99,7 +125,7 @@ class Mutations:
 
         return await self._apply(
             "delete (move to Deleted Items)",
-            message_ids,
+            _message_ids(message_ids),
             lambda m: m.folder_id in deleted,
             self.writer.delete,
             prepare=classify,
@@ -108,20 +134,22 @@ class Mutations:
 
     # ---------------------------------------------------------------- shared flow
 
-    async def _conversation(self, conversation_id: str, *, include_deleted_items: bool) -> list[str]:
+    async def _conversation(
+        self, conversation_id: str, *, include_deleted_items: bool
+    ) -> tuple[list[str], bool]:
         """Every message of the conversation in scope (all copies, not merged).
 
         Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
         results).
         """
-        items, _ = await self.mailbox.reader.conversation(conversation_id)
+        items, truncated = await self.mailbox.reader.conversation(conversation_id)
         skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in items)
         return [
             m.id
             for m in items
             if m.folder_id in folders and m.folder_id not in hidden and m.folder_id not in skip
-        ]
+        ], truncated
 
     async def _apply(
         self,
@@ -135,15 +163,11 @@ class Mutations:
     ) -> MutationResult:
         """Read state, send the change once per chunk, report a result per message.
 
-        Entry point for every mutation: validates the ids (at least one, at most MAX_MUTATION_ITEMS,
-        duplicates dropped), checks the account, and classifies each message before anything is sent. The
-        writer trusts the chunks it is given.
+        Assumes (not re-checked here): ids are unique, nonempty and validated by the public method;
+        only explicit inputs are bounded to MAX_MUTATION_ITEMS. Expanded conversations may be larger.
+        The writer trusts the 20-message chunks it is given.
         """
-        ids = list(dict.fromkeys(message_ids))
-        if not ids:
-            raise InvalidRequest("Name at least one message id.")
-        if len(ids) > MAX_MUTATION_ITEMS:
-            raise InvalidRequest(f"At most {MAX_MUTATION_ITEMS} messages per call.")
+        ids = message_ids
         self.check_account()
         before = await self.mailbox.reader.get_summaries(ids)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in before.summaries.values() if m)
@@ -209,3 +233,13 @@ class Mutations:
             else:
                 out[mid] = ItemResult(id=mid, status="unknown", detail=reason)
         return out
+
+
+def _message_ids(message_ids: list[str], *, allow_empty: bool = False) -> list[str]:
+    """Validate explicit message selection once at each mutation's public entry point."""
+    ids = list(dict.fromkeys(message_ids))
+    if not ids and not allow_empty:
+        raise InvalidRequest("Name at least one message id.")
+    if len(ids) > MAX_MUTATION_ITEMS:
+        raise InvalidRequest(f"At most {MAX_MUTATION_ITEMS} messages per call.")
+    return ids

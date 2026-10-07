@@ -154,3 +154,9 @@ H20: explicitly supplied export `message_ids` are authoritative, like `get_messa
 hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
 messages with other selections; reach/scope filters still govern range and conversation selections.
 Copies remain merged and message limits still apply.
+
+H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
+expands each conversation up to the existing 1,000-message server listing cap and reports truncation
+in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
+messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
+ids and error results remain detailed. Counts cover the entire deduplicated selection.
