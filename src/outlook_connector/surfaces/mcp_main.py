@@ -29,10 +29,13 @@ from outlook_connector.domain.models import (
     ExportFormat,
     ExportRequest,
     Folder,
+    InboxRule,
     MessageContent,
     MessagePage,
     MutationResult,
     OutgoingMessage,
+    RuleChange,
+    RuleWriteResult,
     SearchResult,
     SendResult,
 )
@@ -101,6 +104,12 @@ With false, later messages are failed with detail "not sent". Always report resu
 delete_messages moves \
 to Deleted Items; messages already there are left alone (there is no permanent delete). Act only \
 on messages the user asked about, and say which ones before changing many.
+- Rules: list_rules lists unsupported rules read-only. For create_rule, update_rule, reorder_rules and \
+ delete_rule, first omit user_confirmation and show the persistent change and returned RULE code. \
+Only after explicit human confirmation repeat the exact request with that code. \
+Never confirm on the user's behalf. \
+Each write is sent once and read back; unknown means check Outlook before repeating. \
+Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
 - Writes need the write sign-in (`outlook-connector auth write`).
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
@@ -116,6 +125,9 @@ LOCAL_FILE = ToolAnnotations(
 DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False)
 SEND = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 CHANGE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
+RULE_WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
 RELOCATE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
 
 MessageIds = Annotated[
@@ -350,6 +362,33 @@ def build_server(context: AppContext) -> FastMCP:
             include_deleted_items=include_deleted_items,
         )
         return await (await services()).exports.export(request)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def list_rules() -> list[InboxRule]:
+        """Current inbox rules in order. Unsupported rules are read-only; needs the write sign-in."""
+        return await (await services()).rules.list_rules()
+
+    @mcp.tool(annotations=RULE_WRITE)
+    async def create_rule(changes: RuleChange, user_confirmation: str | None = None) -> RuleWriteResult:
+        """Propose a persistent rule; only after human approval repeat with the returned confirmation code."""
+        return await (await services()).rules.create_rule(changes, user_confirmation)
+
+    @mcp.tool(annotations=RULE_WRITE)
+    async def update_rule(
+        rule_id: str, changes: RuleChange, user_confirmation: str | None = None
+    ) -> RuleWriteResult:
+        """Propose/confirm partial edits. Null conditions clear them; enabled must be a separate update."""
+        return await (await services()).rules.update_rule(rule_id, changes, user_confirmation)
+
+    @mcp.tool(annotations=RULE_WRITE)
+    async def reorder_rules(rule_ids: list[str], user_confirmation: str | None = None) -> RuleWriteResult:
+        """Propose/confirm every rule in the new order. Refused if any rule is unsupported/read-only."""
+        return await (await services()).rules.reorder_rules(rule_ids, user_confirmation)
+
+    @mcp.tool(annotations=RULE_WRITE)
+    async def delete_rule(rule_id: str, user_confirmation: str | None = None) -> RuleWriteResult:
+        """Propose/confirm removing a supported inbox rule; changes future mail handling, never retries."""
+        return await (await services()).rules.delete_rule(rule_id, user_confirmation)
 
     @mcp.tool(annotations=DRAFT)
     async def create_draft(

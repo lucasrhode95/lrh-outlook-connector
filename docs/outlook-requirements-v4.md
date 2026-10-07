@@ -253,6 +253,16 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
 
 
+### Inbox rules (W9)
+
+List all rules in priority order, marking unsupported rules read-only. First-version conditions:
+From, Sent to, Subject contains and Subject-or-body contains. Actions: Move to folder and Stop
+processing more rules. Partial edits keep omitted fields; null conditions clear them.
+Every create/update/toggle/reorder/delete requires a proposed write, explicit human confirmation,
+a single OWS write and fresh read-back. Confirmation binds account and complete current rule state.
+Enable/disable is a separate update. Reordering refuses collections containing unsupported rules,
+which must never be rewritten. Unknown outcomes must be checked in Outlook before repeating.
+
 H17 mutation result contract: `set_read_state`, `set_flag`, `move_messages` and `delete_messages`
 default to `continue_on_error=true`. Each returns results and counts even when a later chunk fails.
 Clear rejection is failed; successful work is done, already satisfied work is unchanged, ambiguous

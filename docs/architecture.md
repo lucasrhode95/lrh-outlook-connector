@@ -191,7 +191,7 @@ lrh-outlook-connector/
 - `OwsMailWriter` implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
 - The bearer-only OWS envelope and write contracts proven in research §4.1–4.2. Payloads ≤ 2,048 characters go in the `X-OWA-UrlPostData` header. Anchor mailbox, correlation headers.
 - `Ows.call(action, body)` sends one action and returns its item results; an item whose `ResponseClass` is not `Success`/`Warning` raises an error naming its `ResponseCode`. The anchor mailbox is the write token's `upn`.
-- `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Not yet used by a tool (W9).
+- `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Used by `OwsRules` through the `RuleWriter` port (W9).
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `edit_draft` (`UpdateItem` / `SaveOnly`, partial field updates). Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;
@@ -253,6 +253,21 @@ lrh-outlook-connector/
   `UpdateItem` / `SendAndSaveCopy`, no field updates. It accepts no content arguments and never
   reconstructs mail. An ambiguous answer reads the exact immutable id: a Sent Items copy proves sent,
   otherwise unknown. Human approval is the host/agent interaction, not a connector token.
+
+**`rules.py` / `remote/ows_rules.py` (W9):**
+- Service depends on `RuleWriter`; only `OwsRules` knows rule wire fields and identity envelopes.
+- Supported From/Sent to and subject/subject-or-body conditions, Move to folder and Stop processing.
+  Non-neutral unsupported fields (including exceptions) mark a rule read-only; its complete server
+  revision is retained as a hash for confirmation binding. No unsupported rule is updated or deleted.
+- Each write first returns a stateless proposal with a RULE code bound to account, normalized request
+  and every current rule revision. Confirmation re-reads state and refuses changed proposals.
+- One OWS write follows confirmation and is always read back. No automatic write retry. Failed
+  read-back or ambiguous unverified outcomes return unknown; a mismatched successful write returns failed.
+- Toggles are separate from field edits to keep each confirmation to one proven OWS call. Reordering
+  includes every supported rule in the requested order, preserves enabled flags and is refused when
+  unsupported rules exist. No local rule cache/proposal registry.
+- OWS reads target folder names/references rather than Graph ids; folder write targets resolve through
+  Mailbox. Target read-back compares the reported folder name; duplicated names cannot prove exact identity.
 
 **`mutations.py`:**
 - `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call. The write sign-in must be the bound account.
@@ -359,6 +374,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `create_draft(..., text_body?, html_body?)` | `writes.create_draft` | not read-only, not destructive, closed world |
 | `edit_draft(draft_id, ...)` | `writes.edit_draft` | not read-only, not destructive, closed world |
 | `send_draft(draft_id)` | `writes.send_draft` | destructive, open-world |
+| `list_rules()` | `rules.list_rules` | read-only, write sign-in |
+| `create_rule(changes, user_confirmation?)` / `update_rule(id, changes, user_confirmation?)` / `reorder_rules(ids, user_confirmation?)` / `delete_rule(id, user_confirmation?)` | `rules` | destructive, non-idempotent, proposed/confirmed, single write |
 | `move_messages(message_ids, folder)` · `delete_messages(message_ids)` | `mutations.move` / `mutations.delete` | destructive, idempotent |
 | `set_read_state(read, message_ids?, conversation_ids?, include_deleted_items)` · `set_flag(message_ids, flagged)` | `mutations` | not read-only, not destructive, idempotent |
 

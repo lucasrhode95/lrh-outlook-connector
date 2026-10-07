@@ -348,3 +348,45 @@ class MutationResult(Compact):
     action: str
     results: list[ItemResult]
     counts: dict[str, int] = Field(default_factory=dict)  # MutationStatus -> messages
+
+
+# ---------------------------------------------------------------- inbox rules (W9)
+
+
+class RuleChange(BaseModel):
+    """Supported rule fields. Omitted fields stay; null conditions clear them."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    from_addresses: list[str] | None = None
+    sent_to: list[str] | None = None
+    subject_contains: list[str] | None = None
+    subject_or_body_contains: list[str] | None = None
+    move_to_folder: str | None = None
+    stop_processing: bool | None = None
+    enabled: bool | None = None
+
+
+class InboxRule(Compact):
+    id: str
+    name: str
+    enabled: bool
+    priority: int
+    conditions: RuleChange
+    move_to_folder_name: str | None = None
+    move_to_folder_reference: str | None = None
+    unsupported: list[str] = Field(default_factory=list)
+    read_only: bool = False
+    description: list[str] = Field(default_factory=list)
+    revision: str  # binds confirmation to the complete server state, including unsupported fields
+
+
+class RuleWriteResult(Compact):
+    action: str
+    status: Literal["proposed", "done", "failed", "unknown"]
+    confirmation: str | None = None
+    changes: RuleChange | None = None
+    rule_id: str | None = None
+    rule_ids: list[str] = Field(default_factory=list)
+    rules: list[InboxRule] = Field(default_factory=list)
+    detail: str | None = None
