@@ -718,11 +718,25 @@ async def test_failed_per_folder_counts_do_not_claim_stale_window_counts(
     _junk_heavy(fake)
 
     async def unavailable(**kwargs):  # type: ignore[no-untyped-def]
-        return None
+        return {}  # no folder could be counted
 
     monkeypatch.setattr(mailbox.reader, "count_messages", unavailable)
     page = await mailbox.list_messages(limit=3)
     assert page.items and page.coverage.excluded == {}
+
+
+async def test_a_failed_excluded_folder_count_keeps_the_in_scope_counts(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    fake.add_folder("f-new", "New")  # empty when the folder list is cached
+    fake.add_folder("deleted-child", "Old", parent="f-deleted")
+    await mailbox.folders()
+    fake.add(FakeMessage("arrived", "Arrived", "f-new", "2026-10-09T09:00:00Z"))
+    fake.folders = [f for f in fake.folders if f["id"] != "deleted-child"]  # its count now 404s
+    page = await mailbox.list_messages(limit=3)
+    assert page.items[0].id == "arrived"  # chosen by its fresh count, not the cached zero
+    assert page.coverage.excluded == {}  # the excluded count is incomplete: not claimed
 
 
 async def test_total_explicitly_includes_hidden_meeting_mail(mailbox: Mailbox, fake: FakeGraph) -> None:
