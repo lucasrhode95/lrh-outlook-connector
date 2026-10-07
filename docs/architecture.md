@@ -261,6 +261,11 @@ lrh-outlook-connector/
 - Supported From/Sent to and subject/subject-or-body conditions, Move to folder and Stop processing.
   Non-neutral unsupported fields (including exceptions) mark a rule read-only; its complete server
   revision is retained as a hash for confirmation binding. No unsupported rule is updated or deleted.
+  Neutral: description metadata (`DescriptionTimeFormat`/`TimeZone`) and each inactive condition's
+  exact "not set" value (`NullImportance`, `NullSensitivity`, `NullInboxRuleMessageFlag`,
+  `NullInboxRuleMessageType`, per field), which OWS reports on every rule; any other value is active.
+- `NewInboxRule` can report an identity that fresh `GetInboxRule` does not, so creation takes the id
+  of the one new rule in read-back that matches the request.
 - Each write first returns a stateless proposal with a RULE code bound to account, normalized request
   and every current rule revision. Confirmation re-reads state and refuses changed proposals.
 - One OWS write follows confirmation and is always read back. No automatic write retry. Failed
