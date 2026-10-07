@@ -10,9 +10,9 @@ Snapshot **2026-10-06**, against `main`.
 
 ## Completed in this implementation batch
 
-Implementation branches start independently from `main`; all PRs target `main` and remain unmerged.
-The compact record below is retained for this batch's independent review, overriding the normal
-omission of completed work. Each implementation branch contains its own affected-doc updates.
+Implementation branches started independently from `main`; all were merged into `main` on
+2026-10-06 (conflicts resolved per PR, keeping both sides' behavior). The compact record below is
+retained for this batch's review, overriding the normal omission of completed work.
 
 | Item | PR | Completion note |
 |---|---|---|
@@ -29,10 +29,24 @@ omission of completed work. Each implementation branch contains its own affected
 | H33 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Batch-item retries share single-read transient statuses (429/502/503/504). |
 
 All implementation PRs passed lint, formatting, type checks and their full Python test suites;
-H25 also passed five behavioral JavaScript tests. No real mailbox was changed. W7's no-field-update
-OWS send shape and draft/HTML behavior still require explicitly authorized live validation; W9's
-folder read-back relies on OWS's reported name. H17/H21 touch the same mutation module but have no
-branch dependency; preserve both behaviors when resolving merge conflicts.
+H25 also passed behavioral JavaScript tests. No real mailbox was changed. W7's draft/HTML behavior
+still requires explicitly authorized live validation; W9's folder read-back relies on OWS's reported
+name.
+
+**Review fixes (2026-10-06, after the merge).** The PR review found, and one follow-up change fixed:
+
+- W7 sent drafts with an empty `UpdateItem` `Updates` list, a shape never tried live (EWS defines
+  `Updates` as nonempty). Restored the proven send: one `SetItemField` re-setting the draft's own
+  subject (research §4.2). The fake now rejects an empty `Updates` on send.
+- W9 proposals serialized every `RuleChange` field, showing omitted conditions as null ("clear it")
+  and breaking a replayed confirmation. Proposals now carry only the supplied fields.
+- H25's reader re-read the whole message from Graph for every 200,000-character chunk. The local web
+  reader now gets the whole body in one request; MCP keeps its chunks.
+- H27 put the Deleted/Junk folders into the listing's count batch, where one failed count (a folder
+  deleted meanwhile) discarded the in-scope counts too. Counts now fail per folder.
+- H20, H21 and the other H items appended their doc notes to the end of README, architecture and
+  requirements, leaving older text contradicting them (export scope; "a result per message"). The
+  notes now live in the sections they change.
 
 ## Current priority
 
@@ -52,7 +66,7 @@ Status wording used below:
 
 ## W7 — Draft-first text and HTML sending
 
-**Status:** Implemented on this branch; synthetic validation complete, live validation pending.
+**Status:** Implemented (merged 2026-10-06); synthetic validation complete, live validation pending.
 
 **Goal:** make Outlook drafts the only entry point for agent-authored outgoing mail. The connector must never guess whether a body is plain text or HTML, and it must never reconstruct a message at send time.
 
@@ -87,7 +101,7 @@ For the first version, automatic verification stays deliberately simple and high
 
 **Deferred live-test research, not blockers:** after the basic flow works, test how Outlook/Graph and recipient clients treat fragments vs complete HTML documents, malformed-but-accepted HTML, CSS, remote images and representative formatting. Revisit body-change detection only with real examples; a future approach may compare normalized visible text (entities decoded, whitespace/non-breaking spaces normalized) rather than HTML structure.
 
-**Next:** on explicit owner request, live-test plain-text/HTML creation, partial edit, replies and existing-draft send. The no-field-update `UpdateItem` send shape needs live confirmation; earlier evidence used a subject update. Deferred HTML/client research remains unchanged.
+**Next:** on explicit owner request, live-test plain-text/HTML creation, partial edit, replies and existing-draft send (the send uses the proven subject-update shape). Also live-test clearing Cc/Bcc with `edit_draft(cc=[])`: it sends a `SetItemField` with an empty recipient list. OWS accepted empty lists in `CreateItem`, but EWS declares recipient collections nonempty, so if Outlook rejects it the edit should use `DeleteItemField` instead. Deferred HTML/client research remains unchanged.
 
 ## W8 — Signatures
 
@@ -110,7 +124,7 @@ The existing import design below remains the fallback if Outlook does not expose
 
 ## W9 — Inbox rules
 
-**Status:** Implemented on this branch; proven OWS contracts, synthetic tool validation complete.
+**Status:** Implemented (merged 2026-10-06); proven OWS contracts, synthetic tool validation complete.
 
 **Current state:** the Outlook Web rule contracts have been captured and replayed successfully through `Ows.call_request`. Reading, creating, editing (including clearing a condition), enabling/disabling, reordering and deleting a throwaway rule all worked live. Graph folder ids are accepted by the write request.
 
@@ -132,7 +146,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H17 — Partial mutation failures are reported incorrectly
 
-**Status:** Implemented on this branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06); synthetic validation complete.
 
 **Problem:** mutations are sent in chunks. If a later chunk fails, earlier chunks may already have changed the mailbox while the tool call raises only the later error.
 
@@ -156,7 +170,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H20 — Explicit message ids can be filtered out during export
 
-**Status:** Recommended decision implemented on this branch; synthetic validation complete.
+**Status:** Recommended decision implemented (merged 2026-10-06); synthetic validation complete.
 
 **Problem:** `export_messages(message_ids=[...])` reads the requested messages, then applies reach/scope filtering at the end. An explicitly supplied id from a hidden/out-of-reach folder can therefore disappear from the export without the selection behaving like `get_message(id)`.
 
@@ -166,7 +180,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H21 — Long conversations cannot be marked read/unread cleanly
 
-**Status:** Implemented on this branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06); synthetic validation complete.
 
 **Problem:** `set_read_state(conversation_ids=[...])` expands a conversation to messages and then applies the 100-message limit intended for explicit `message_ids`. A long conversation can therefore be rejected even though the caller supplied only one conversation id. Conversations beyond the 1,000-message listing cap also need an explicit truncation note.
 
@@ -186,7 +200,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H23 — Search dates without a timezone can crash
 
-**Status:** Implemented on this branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06); synthetic validation complete.
 
 **Problem:** the web API can pass a naive `since`/`until` datetime into service code, which is then compared with timezone-aware Graph dates.
 
@@ -194,7 +208,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H25 — The UI silently truncates very long message bodies
 
-**Status:** Implemented on this branch; automatic full-body loading validated.
+**Status:** Implemented (merged 2026-10-06); automatic full-body loading validated.
 
 **Problem:** the UI reader asks for a bounded body and ignores `next_offset`, so a message over the current limit can stop mid-body without telling the user.
 
@@ -212,15 +226,15 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H27 — Per-folder listing does not report excluded-folder counts
 
-**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06, #27); synthetic validation complete.
 
 **Problem:** when the mailbox uses the per-folder listing strategy, Junk and Deleted Items are never read. That is efficient, but `coverage.excluded` therefore lacks the `deleted_or_junk` count even though those messages are outside the result.
 
-**Next:** include the left-out folders in the existing count batch and report their counts for the requested window. No extra network round trip should be necessary.
+**Decision:** include the left-out folders in the existing count batch and report their counts for the requested window, with no extra round trip. A failed count drops only that folder: the excluded count is then not claimed, and the in-scope folders keep their fresh counts (review fix, 2026-10-06).
 
 ## H28 — `server_total` includes meeting mail that the listing may hide
 
-**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06, #27); synthetic validation complete.
 
 **Problem:** with `include_meeting_mail=false`, `server_total` still includes invitations, cancellations and RSVPs, so the total can be larger than the messages the listing can return.
 
@@ -230,7 +244,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H29 — NotFound wording assumes deletion
 
-**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06, #27); synthetic validation complete.
 
 **Problem:** a bad or inaccessible message id currently produces wording equivalent to "not on the server (deleted on the server)", even though the id may simply be wrong or the item may have moved out of reach.
 
@@ -238,7 +252,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H33 — `$batch` retries fewer transient statuses than single requests
 
-**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
+**Status:** Implemented (merged 2026-10-06, #27); synthetic validation complete.
 
 **Problem:** individual requests retry transient 429/502/503/504 responses, but a failing item inside a Graph `$batch` is retried only for throttling. A 503/504 batch item therefore becomes an export gap immediately even though the equivalent single request would retry.
 
