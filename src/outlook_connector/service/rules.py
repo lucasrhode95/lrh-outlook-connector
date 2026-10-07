@@ -127,10 +127,11 @@ class Rules:
             result.detail = f"Write was not retried; read-back failed: {exc}. Check Outlook before repeating."
             return result
         result.rules, result.confirmation = after, None
-        if action == "create" and result.rule_id is None:
+        # The identity NewInboxRule reports can differ from fresh read-back (live 2026-10-07): find the
+        # one new rule that matches the request instead.
+        if action == "create" and result.rule_id not in {r.id for r in after}:
             added = [r for r in after if r.id not in by_id and _matches(r, changes, folder)]
-            if len(added) == 1:
-                result.rule_id = added[0].id
+            result.rule_id = added[0].id if len(added) == 1 else None
         current = next((r for r in after if r.id == result.rule_id), None)
         if action == "delete":
             verified = current is None
