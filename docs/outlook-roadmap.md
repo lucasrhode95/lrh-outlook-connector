@@ -104,6 +104,12 @@ on 2026-10-07, including a newly added signature image. Reliable enumeration and
 messages, and list signatures/retrieve contents reliably. Resolve the reply/forward default separately.
 This route does not require a user-supplied file or a frozen imported signature.
 
+**Backend preference:** Graph first, matching architecture §1. OWA fills only documented capability
+gaps. Microsoft's current [roaming-signature documentation](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater)
+says it has no plans to support roaming-signature management in Graph; the proven Cloud Settings
+adapter fills this gap. Graph remains the reader for draft bodies and attachments. Revisit routing
+if Microsoft adds a documented native signature/default API.
+
 **Live evidence:** the second Web capture includes Outlook's native roaming-signature settings
 source. Standalone reads using the connector's encrypted `write` sign-in retrieved the name list,
 new-message and reply defaults, and HTML/text/RTF contents through Outlook Cloud Settings. Re-reading
