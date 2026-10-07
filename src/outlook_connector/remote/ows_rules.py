@@ -33,6 +33,24 @@ METADATA = {
     "ErrorType",
     "IsValid",
     "ObjectState",
+    "DescriptionTimeFormat",
+    "DescriptionTimeZone",
+}
+# The value OWS reports for each inactive condition/action on every rule (live 2026-10-07, research
+# §4.5): this exact value means "not set". Any other value is active behavior the connector does
+# not manage, so the rule stays read-only.
+INACTIVE = {
+    "FlaggedForAction": "NullInboxRuleMessageFlag",
+    "RequestedAction": "NullInboxRuleMessageFlag",
+    "ExceptIfFlaggedForAction": "NullInboxRuleMessageFlag",
+    "ExceptIfRequestedAction": "NullInboxRuleMessageFlag",
+    "MessageTypeMatches": "NullInboxRuleMessageType",
+    "ExceptIfMessageTypeMatches": "NullInboxRuleMessageType",
+    "MarkImportance": "NullImportance",
+    "WithImportance": "NullImportance",
+    "ExceptIfWithImportance": "NullImportance",
+    "WithSensitivity": "NullSensitivity",
+    "ExceptIfWithSensitivity": "NullSensitivity",
 }
 
 
@@ -53,7 +71,11 @@ class OwsRules(RuleWriter):
         return sorted(rules, key=lambda r: r.priority)
 
     async def create_rule(self, changes: RuleChange, folder: Folder | None) -> str | None:
-        """Assumes (not re-checked here): supported, validated, confirmed fields and bound account."""
+        """Assumes (not re-checked here): supported, validated, confirmed fields and bound account.
+
+        Returns the identity Outlook reports for the new rule. Live, it can differ from the identity
+        fresh ``GetInboxRule`` reports (research §4.5), so the service reconciles it against read-back.
+        """
         answer = await self.ows.call_request("NewInboxRule", {"InboxRule": _fields(changes, folder)})
         value = answer.get("InboxRule")
         identity = value.get("Identity") if isinstance(value, dict) else None
@@ -108,6 +130,7 @@ def _rule(value: dict[str, Any]) -> InboxRule:
         if key not in METADATA | set(FIELDS.values())
         and v not in (None, False, "", [], {})
         and not (key in ("DisplayAlert", "PlaySound") and v == "Default")
+        and not (key in INACTIVE and v == INACTIVE[key])
     ]
     if value.get("InError"):
         unsupported.append("InError")

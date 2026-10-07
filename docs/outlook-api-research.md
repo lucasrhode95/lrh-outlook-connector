@@ -378,6 +378,16 @@ followed by injected response loss and failed read-back yielded `unknown: 20`; a
 confirmed the changes. All initial states were restored. These are injected failures, not evidence
 of natural Microsoft outages; flag/move/delete failure variants remain synthetic coverage.
 
+**W9 — public-tool lifecycle after the fixes (2026-10-07, later).** With the inactive values and
+description metadata treated as neutral and creation reconciled against read-back, `list_rules`
+reported all nine current rules as supported (none read-only). One throwaway rule (invalid sender
+and a unique subject marker, so it could never fire; Archive; stop processing) went through the
+`Rules` service with a proposal and confirmation for each write: create (id found in read-back),
+rename (conditions and folder kept), add then clear a subject-or-body condition (other conditions
+kept), disable, enable, reorder to last and back, and delete. Every step returned `done`, verified by
+fresh read-back. Afterwards the original rules' ids, order, enabled states and full revisions matched
+the starting snapshot exactly.
+
 ### 4.6 Outlook Web signature capture (2026-10-07)
 
 **Scope and confidence.** Offline review of the owner-supplied HAR: 105 entries, 96 captured response

@@ -23,6 +23,25 @@ ROOT = "https://graph.microsoft.com/v1.0"
 REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
 
+# Fields every live GetInboxRule answer carries (research §4.5, 2026-10-07): description metadata
+# and the "nothing set" value of each inactive condition/action.
+LIVE_RULE_EXTRAS: dict[str, Any] = {
+    "DescriptionTimeFormat": "h:mm tt",
+    "DescriptionTimeZone": "E. South America Standard Time",
+    "FlaggedForAction": "NullInboxRuleMessageFlag",
+    "RequestedAction": "NullInboxRuleMessageFlag",
+    "ExceptIfFlaggedForAction": "NullInboxRuleMessageFlag",
+    "ExceptIfRequestedAction": "NullInboxRuleMessageFlag",
+    "MessageTypeMatches": "NullInboxRuleMessageType",
+    "ExceptIfMessageTypeMatches": "NullInboxRuleMessageType",
+    "MarkImportance": "NullImportance",
+    "WithImportance": "NullImportance",
+    "ExceptIfWithImportance": "NullImportance",
+    "WithSensitivity": "NullSensitivity",
+    "ExceptIfWithSensitivity": "NullSensitivity",
+}
+
+
 @dataclass
 class FakeAttachment:
     id: str
@@ -233,6 +252,7 @@ class FakeGraph:
         return httpx.Response(200, json=answer)
 
     def _rule_action(self, action: str, request: dict[str, Any]) -> dict[str, Any]:
+        """OWS inbox-rule actions, with the shapes seen live (research §4.4–4.5)."""
         import copy
 
         answer: dict[str, Any] = {"WasSuccessful": True, "ErrorCode": 0}
@@ -245,8 +265,11 @@ class FakeGraph:
                 "DisplayName": rule["Name"],
             }
             rule["Enabled"] = True
+            rule |= LIVE_RULE_EXTRAS  # what GetInboxRule returns on every live rule (research §4.5)
             self.inbox_rules.insert(0, rule)
             answer["InboxRule"] = copy.deepcopy(rule)
+            # live: the creation answer's identity differs from the one fresh GetInboxRule reports
+            answer["InboxRule"]["Identity"]["RawIdentity"] = "creation-" + rule["Identity"]["RawIdentity"]
         elif action == "SetInboxAndSweepRules":
             by_id = {r["Identity"]["RawIdentity"]: r for r in self.inbox_rules}
             self.inbox_rules = [

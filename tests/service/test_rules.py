@@ -93,6 +93,9 @@ async def test_partial_edit_clear_toggle_reorder_delete(rules: Rules, fake: Fake
         {"ExceptIfSubjectContainsWords": ["private"]},
         {"ForwardTo": [{"SmtpAddress": "x@example.com"}]},
         {"FutureAction": "Default"},
+        {"MarkImportance": "High"},  # an active value, not the inactive NullImportance
+        {"ExceptIfWithSensitivity": "Private"},
+        {"FlaggedForAction": "NullImportance"},  # another field's null value is not this one's
     ],
 )
 async def test_unsupported_rules_never_rewritten(
@@ -206,3 +209,18 @@ async def test_proposal_shows_only_supplied_fields(rules: Rules, fake: FakeGraph
     replayed = RuleChange.model_validate(shown)  # a later call can resend exactly what was shown
     result = await rules.update_rule(rule_id, replayed, proposal.confirmation)
     assert result.status == "done"
+
+
+async def test_live_rule_shapes_stay_supported_and_creation_id_is_reconciled(
+    rules: Rules, fake: FakeGraph
+) -> None:
+    """Live 2026-10-07: every rule carries description metadata and inactive enum values, and
+    NewInboxRule reports an identity that fresh GetInboxRule does not (research §4.5)."""
+    rid = await create(rules)
+    (listed,) = await rules.list_rules()
+    assert listed.id == rid == fake.inbox_rules[0]["Identity"]["RawIdentity"]
+    assert not listed.read_only and listed.unsupported == []
+    assert fake.inbox_rules[0]["MarkImportance"] == "NullImportance"  # the shape was present
+    result = await rules.update_rule(rid, RuleChange(subject_contains=None))
+    done = await rules.update_rule(rid, RuleChange(subject_contains=None), result.confirmation)
+    assert done.status == "done"
