@@ -8,6 +8,32 @@ Snapshot **2026-10-06**, against `main`.
 - Build/module map: [architecture §11](architecture.md)
 - API evidence: [API research](outlook-api-research.md)
 
+## Completed in this implementation batch
+
+Implementation branches start independently from `main`; all PRs target `main` and remain unmerged.
+The compact record below is retained for this batch's independent review, overriding the normal
+omission of completed work. Each implementation branch contains its own affected-doc updates.
+
+| Item | PR | Completion note |
+|---|---|---|
+| W7 | [#20](https://github.com/lucasrhode95/lrh-outlook-connector/pull/20) | Explicit text/HTML draft creation/edit, mandatory server read-back, existing-draft-only send; synthetic checks complete, live validation pending. |
+| W9 | [#21](https://github.com/lucasrhode95/lrh-outlook-connector/pull/21) | Supported inbox-rule MCP tools; state-bound proposal/confirmation, one write/read-back; unsupported rules read-only. |
+| H17 | [#22](https://github.com/lucasrhode95/lrh-outlook-connector/pull/22) | Default continuation after chunk errors, per-message outcomes/counts, unknown read-back failures and explicit not-sent results. |
+| H20 | [#23](https://github.com/lucasrhode95/lrh-outlook-connector/pull/23) | Explicit export ids remain authoritative; other sources keep scope filters and copies still merge. |
+| H21 | [#24](https://github.com/lucasrhode95/lrh-outlook-connector/pull/24) | Explicit-only 100 limit, existing 1,000-per-conversation cap, truncation notes and compact bulk results. |
+| H23 | [#25](https://github.com/lucasrhode95/lrh-outlook-connector/pull/25) | Search normalizes naive/aware dates to UTC in the service; redundant MCP search normalization removed. |
+| H25 | [#26](https://github.com/lucasrhode95/lrh-outlook-connector/pull/26) | UI automatically follows all body offsets; no total size cap; obsolete continuation scheduling stops on selection change. |
+| H27 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Deleted/Junk window exclusions from the existing per-folder count batch, reported once across pages. |
+| H28 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Coverage/docs explicitly say server_total includes meeting mail; no second counting mechanism. |
+| H29 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Neutral NotFound wording for messages, attachments, MIME and export gaps; mailbox GONE text removed. |
+| H33 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Batch-item retries share single-read transient statuses (429/502/503/504). |
+
+All implementation PRs passed lint, formatting, type checks and their full Python test suites;
+H25 also passed five behavioral JavaScript tests. No real mailbox was changed. W7's no-field-update
+OWS send shape and draft/HTML behavior still require explicitly authorized live validation; W9's
+folder read-back relies on OWS's reported name. H17/H21 touch the same mutation module but have no
+branch dependency; preserve both behaviors when resolving merge conflicts.
+
 ## Current priority
 
 1. **W7 → W8:** draft-first text/HTML sending, then signatures.
