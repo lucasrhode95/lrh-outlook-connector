@@ -97,7 +97,7 @@ Lazy population:
 
 ## 8. Listing, conversations and search
 
-**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or exported); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by range/conversation export); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
 
@@ -242,3 +242,9 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
+
+
+H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
+hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
+messages with other selections; reach/scope filters still govern range and conversation selections.
+Copies remain merged and message limits still apply.
