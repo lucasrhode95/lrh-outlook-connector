@@ -467,6 +467,16 @@ access is inferred from that malformed/unsupported variant. Microsoft's document
 [`mailboxSettings` properties](https://learn.microsoft.com/en-us/graph/api/resources/mailboxsettings?view=graph-rest-1.0)
 do not expose this native signature list/default/content model.
 
+**Graph-first decision (2026-10-07).** The owner prefers Graph because its contracts are documented.
+Microsoft's current [`PostponeRoamingSignaturesUntilLater` documentation](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater)
+explicitly says it has no plans to support roaming-signature management in Graph and recommends
+the Office.js signature API/event hooks for vendors. The documented Graph beta
+[`userSettings`](https://learn.microsoft.com/en-us/graph/api/resources/usersettings?view=graph-rest-beta)
+model also does not expose native signature list/default/content properties. These are documentation
+findings, not proof that every possible undocumented Graph route fails. Use OWA only for this native
+configuration gap; keep Graph for message/draft and attachment reads. Revisit if Graph gains a
+documented equivalent rather than treating OWA as the preferred general backend.
+
 **Proven reads (STANDALONE).** All requests below used the connector's existing encrypted, app-owned
 `write` profile (One Outlook Web → Outlook resource), no browser credentials. Reads were sequential
 and did not change mail or signature settings. No extra scopes, vendor authentication or user file
