@@ -38,6 +38,7 @@ from outlook_connector.service.failures import (
     error_summary,
     export_error,
 )
+from outlook_connector.service.mailbox import OUTGOING_FOLDERS, merge_copies
 
 RANGE_PAGE = 200
 SHOWN_FAILURES = 3
@@ -149,7 +150,10 @@ class Exports:
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
         known = await self._fetch(explicit)
         selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
-        merged, _ = await self.mailbox.finish(selected.values())  # copies across conversations and pages
+        # Conversations/ranges already applied scope. Explicit ids are authoritative, like get_message.
+        folders, _ = await self.mailbox.reach(m.folder_id for m in selected.values())
+        outgoing = {f.id for f in folders.values() if f.well_known in OUTGOING_FOLDERS}
+        merged = merge_copies(await self.mailbox.decorate(list(selected.values())), outgoing)
         _check_limit({m.id: m for m in merged}, request.limit)
         return Selection(sorted(merged, key=oldest_first), dict(excluded), known)
 
