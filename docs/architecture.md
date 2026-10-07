@@ -434,3 +434,10 @@ ids and error results remain detailed. Counts cover the entire deduplicated sele
 H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
 to UTC before building the search/window and cursor. MCP and web search pass dates through;
 normalization is authoritative at `Mailbox.search`, shared by both callers.
+
+H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
+unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
+the service retains its bounded per-request body chunks. No manual continuation button is required.
+A continuation failure reports that the complete message could not be loaded, rather than displaying
+a partial body as complete. Selecting a different message stops scheduling old continuations using
+the existing reader request counter; the request already in flight is allowed to finish.
