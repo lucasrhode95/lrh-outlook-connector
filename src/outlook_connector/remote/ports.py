@@ -17,8 +17,10 @@ from outlook_connector.domain.models import (
     Attachment,
     EmailProposal,
     Folder,
+    InboxRule,
     Message,
     MessageSummary,
+    RuleChange,
     UserProfile,
 )
 
@@ -156,3 +158,13 @@ class MailWriter(Protocol):
     async def delete(self, message_ids: list[str]) -> dict[str, str | None]:
         """Move to Deleted Items. There is no hard delete."""
         ...
+
+
+class RuleWriter(Protocol):
+    """OWS rule reads and single-attempt writes; wire formats stay in the adapter."""
+
+    async def list_rules(self) -> list[InboxRule]: ...
+    async def create_rule(self, changes: RuleChange, folder: Folder | None) -> str | None: ...
+    async def update_rule(self, rule: InboxRule, changes: RuleChange, folder: Folder | None) -> None: ...
+    async def reorder_rules(self, rules: list[InboxRule]) -> None: ...
+    async def delete_rule(self, rule: InboxRule) -> None: ...

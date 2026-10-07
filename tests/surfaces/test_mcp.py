@@ -17,11 +17,18 @@ from tests.fakes.msal_fakes import jwt
 READ_TOOLS = {
     "auth_status", "list_folders", "list_messages", "search_messages", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
-    "propose_email",
+    "propose_email", "list_rules",
 }  # fmt: skip
 WRITE_TOOLS = {"create_draft", "send_email"}
 CHANGE_TOOLS = {"set_read_state", "set_flag"}
-RELOCATE_TOOLS = {"move_messages", "delete_messages"}
+RELOCATE_TOOLS = {
+    "move_messages",
+    "delete_messages",
+    "create_rule",
+    "update_rule",
+    "reorder_rules",
+    "delete_rule",
+}
 
 
 class FakeTokens:
@@ -165,3 +172,18 @@ async def test_mutation_tools_report_per_message(server: FastMCP, fake: FakeGrap
     assert deleted["counts"] == {"done": 1} and fake.messages["m5"].folder == "f-deleted"
     flagged = await call(server, "set_flag", message_ids=["m1"], flagged=True)
     assert flagged["counts"] == {"done": 1}
+
+
+async def test_rule_proposal_and_confirmed_mcp_write(server: FastMCP, fake: FakeGraph) -> None:
+    changes = {
+        "name": "Rule",
+        "subject_contains": ["synthetic"],
+        "move_to_folder": "archive",
+        "stop_processing": True,
+    }
+    proposal = await call(server, "create_rule", changes=changes)
+    assert proposal["status"] == "proposed" and not fake.inbox_rules
+    result = await call(server, "create_rule", changes=changes, user_confirmation=proposal["confirmation"])
+    assert result["status"] == "done" and result["rule_id"]
+    rules = await call(server, "list_rules")
+    assert rules[0]["name"] == "Rule"

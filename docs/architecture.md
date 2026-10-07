@@ -191,7 +191,7 @@ lrh-outlook-connector/
 - `OwsMailWriter` implements `MailWriter`. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
 - The bearer-only OWS envelope and write contracts proven in research §4.1–4.2. Payloads ≤ 2,048 characters go in the `X-OWA-UrlPostData` header. Anchor mailbox, correlation headers.
 - `Ows.call(action, body)` sends one action and returns its item results; an item whose `ResponseClass` is not `Success`/`Warning` raises an error naming its `ResponseCode`. The anchor mailbox is the write token's `upn`.
-- `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Not yet used by a tool (W9).
+- `Ows.call_request(action, fields)` sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no `JsonRequest` wrapper and no `Body`; the answer's `WasSuccessful` / `ErrorCode` decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Used by `OwsRules` through the `RuleWriter` port (W9).
 - Actions:
   - `create_draft` (`CreateItem` with `SaveOnly`, into Drafts; returns the draft id, mapped to Graph's alphabet);
   - `send` (`CreateItem` with `SendAndSaveCopy`), both with the body proven by the self-send. Replies use EWS's `ReplyToItem` / `ReplyAllToItem` with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images;
@@ -245,6 +245,21 @@ lrh-outlook-connector/
 - `propose(message)` resolves the message exactly as it would be sent: the sender is the signed-in account (no Send As), recipients are validated and de-duplicated, and a reply gets Outlook's defaults when recipients or subject are omitted (the sender, or the original recipients for your own message; with reply-all also the original To and Cc; never yourself, unless nobody else is left, as for mail you sent only to yourself; "RE: <subject>"). It returns an `EmailProposal` with a **confirmation code**: a hash of the account fingerprint and every material field. Stateless: nothing is stored between calls.
 - `create_draft` saves the proposal into Drafts and reads it back through Graph; it never sends, so it needs no confirmation.
 - `send(message, user_confirmation)` re-derives the proposal and refuses unless the code matches (any change to the account, recipients, subject or body changes it), checks that the write token's `tid`/`oid` are the bound account, and sends once. A reply is sent through a checked draft (W6): saved as an HTML reply draft, read back and compared with the original (its full text quoted; its formatting kept: at least as many lists, list items, tables, rows, cells, emphasis, links, images and `cid:` image references; every inline image present with the same bytes; no `[cid:…]` text). The reply's own text keeps repeated spaces and tabs as non-breaking spaces, and only then that draft is sent (`send_draft`); a failed check sends nothing and leaves the draft in Drafts. `create_draft` replies report the same check (`history_intact`, `history_problem`). On `WriteOutcomeUnknown` it looks for the message in Sent Items (subject and recipients, from five minutes before the send): found → `sent`; not found → `unknown`, with "do not send again before checking Outlook".
+
+**`rules.py` / `remote/ows_rules.py` (W9):**
+- Service depends on `RuleWriter`; only `OwsRules` knows rule wire fields and identity envelopes.
+- Supported From/Sent to and subject/subject-or-body conditions, Move to folder and Stop processing.
+  Non-neutral unsupported fields (including exceptions) mark a rule read-only; its complete server
+  revision is retained as a hash for confirmation binding. No unsupported rule is updated or deleted.
+- Each write first returns a stateless proposal with a RULE code bound to account, normalized request
+  and every current rule revision. Confirmation re-reads state and refuses changed proposals.
+- One OWS write follows confirmation and is always read back. No automatic write retry. Failed
+  read-back or ambiguous unverified outcomes return unknown; a mismatched successful write returns failed.
+- Toggles are separate from field edits to keep each confirmation to one proven OWS call. Reordering
+  includes every supported rule in the requested order, preserves enabled flags and is refused when
+  unsupported rules exist. No local rule cache/proposal registry.
+- OWS reads target folder names/references rather than Graph ids; folder write targets resolve through
+  Mailbox. Target read-back compares the reported folder name; duplicated names cannot prove exact identity.
 
 **`mutations.py`:**
 - `set_read` (also per conversation: every message in scope, all copies), `set_flag`, `move(folder)` and `delete` act on **explicit ids only**, at most 100 per call. The write sign-in must be the bound account.
@@ -346,6 +361,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `create_draft(message)` | `writes.create_draft` | not read-only, not destructive, closed world |
 | `propose_email(message)` | `writes.propose` | read-only |
 | `send_email(message, user_confirmation)` | `writes.send` | destructive, open-world |
+| `list_rules()` | `rules.list_rules` | read-only, write sign-in |
+| `create_rule(changes, user_confirmation?)` / `update_rule(id, changes, user_confirmation?)` / `reorder_rules(ids, user_confirmation?)` / `delete_rule(id, user_confirmation?)` | `rules` | destructive, non-idempotent, proposed/confirmed, single write |
 | `move_messages(message_ids, folder)` · `delete_messages(message_ids)` | `mutations.move` / `mutations.delete` | destructive, idempotent |
 | `set_read_state(read, message_ids?, conversation_ids?, include_deleted_items)` · `set_flag(message_ids, flagged)` | `mutations` | not read-only, not destructive, idempotent |
 
