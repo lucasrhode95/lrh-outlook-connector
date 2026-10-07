@@ -197,7 +197,7 @@ class Exports:
         gone = [mid for mid, m in fetched.messages.items() if m is None]
         if fetched.failed or gone:
             cases = [f"{mid} (failed: {f.describe()})" for mid, f in fetched.failed.items()]
-            cases += [f"{mid} (gone: not on the server)" for mid in gone]
+            cases += [f"{mid} (not found: deleted, moved out of reach, or wrong id)" for mid in gone]
             shown = "; ".join(cases[:SHOWN_FAILURES]) + ("; ..." if len(cases) > SHOWN_FAILURES else "")
             text = (
                 f"{len(cases)} of the {len(message_ids)} message(s) selected by id could not be read: "

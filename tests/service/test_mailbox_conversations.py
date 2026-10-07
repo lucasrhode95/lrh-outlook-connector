@@ -210,7 +210,7 @@ async def test_unique_body_is_the_default(mailbox: Mailbox) -> None:
 async def test_message_deleted_on_the_server_is_not_found(mailbox: Mailbox, fake: FakeGraph) -> None:
     await mailbox.get_message("m2")
     del fake.messages["m2"]
-    with pytest.raises(NotFound, match="deleted on the server"):
+    with pytest.raises(NotFound, match="was not found;.*id may be wrong"):
         await mailbox.get_message("m2")
     with pytest.raises(NotFound):
         await mailbox.attachments("m2")
@@ -640,3 +640,84 @@ async def test_a_named_folder_is_never_listed_folder_by_folder(mailbox: Mailbox,
     page = await mailbox.list_messages(folder="inbox", limit=10)
     assert [m.id for m in page.items] == ["n8", "n4", "m5", "m1"]
     assert fake.calls.count("GET /v1.0/me/mailFolders/f-inbox/messages") == 1
+
+
+async def test_per_folder_excluded_counts_use_the_existing_window_count_batch(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _junk_heavy(fake)
+    fake.add_folder("deleted-child", "Old", parent="f-deleted")
+    fake.add_folder("hidden", "Hidden", hidden=True)
+    fake.add(FakeMessage("deleted-window", "x", "f-deleted", "2026-10-08T00:00:00Z"))
+    fake.add(FakeMessage("deleted-child-window", "x", "deleted-child", "2026-10-08T00:00:00Z"))
+    fake.add(FakeMessage("deleted-old", "x", "f-deleted", "2026-09-01T00:00:00Z"))
+    await mailbox.folders()
+    fake.calls.clear()
+    original = mailbox.reader.count_messages
+    batches = []
+
+    async def capture(**kwargs):  # type: ignore[no-untyped-def]
+        batches.append(kwargs)
+        return await original(**kwargs)
+
+    monkeypatch.setattr(mailbox.reader, "count_messages", capture)
+    since, until = datetime(2026, 10, 7, tzinfo=UTC), datetime(2026, 10, 9, tzinfo=UTC)
+    page = await mailbox.list_messages(since=since, until=until, limit=10)
+    assert page.coverage.excluded == {"deleted_or_junk": 10}  # eight Junk + two Deleted in this window
+    assert len(batches) == 1 and batches[0]["since"] == since and batches[0]["until"] == until
+    assert {"f-junk", "f-deleted", "deleted-child"} <= set(batches[0]["folder_ids"])
+    assert "hidden" not in batches[0]["folder_ids"]
+    assert fake.calls.count("POST /v1.0/$batch") == 1
+    assert not any("f-junk/messages" in c or "f-deleted/messages" in c for c in fake.calls)
+
+
+async def test_per_folder_window_exclusions_are_reported_once_across_pages(
+    mailbox: Mailbox, fake: FakeGraph
+) -> None:
+    _junk_heavy(fake)
+    page = await mailbox.list_messages(limit=3)
+    assert page.coverage.excluded == {"deleted_or_junk": 41} and page.cursor
+    next_page = await mailbox.list_messages(limit=3, cursor=page.cursor)
+    assert next_page.coverage.excluded == {}
+
+
+async def test_failed_per_folder_counts_do_not_claim_stale_window_counts(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _junk_heavy(fake)
+
+    async def unavailable(**kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(mailbox.reader, "count_messages", unavailable)
+    page = await mailbox.list_messages(limit=3)
+    assert page.items and page.coverage.excluded == {}
+
+
+async def test_total_explicitly_includes_hidden_meeting_mail(mailbox: Mailbox, fake: FakeGraph) -> None:
+    fake.add(
+        FakeMessage(
+            "meeting",
+            "Invite",
+            "f-inbox",
+            "2026-10-02T00:00:00Z",
+            meeting={"meetingMessageType": "meetingRequest"},
+        )
+    )
+    page = await mailbox.list_messages(
+        folder="inbox", include_meeting_mail=False, include_total=True, limit=20
+    )
+    assert page.coverage.server_total == 3 and len(page.items) == 2
+    assert any("includes meeting mail" in n for n in page.coverage.notes)
+
+
+@pytest.mark.parametrize("operation", ["message", "attachments"])
+async def test_bad_message_ids_use_neutral_not_found_wording(mailbox: Mailbox, operation: str) -> None:
+    with pytest.raises(
+        NotFound, match="was not found;.*deleted, moved out of reach,.*id may be wrong"
+    ) as error:
+        if operation == "message":
+            await mailbox.get_message("bad-id")
+        else:
+            await mailbox.attachments("bad-id")
+    assert "deleted on the server" not in str(error.value)

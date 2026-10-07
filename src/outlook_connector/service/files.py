@@ -63,7 +63,10 @@ class Files:
             raise Upstream(found.failed[message_id])
         summary = found.summaries.get(message_id)
         if summary is None:
-            raise NotFound(f"Message {message_id} is not on the server.")
+            raise NotFound(
+                f"Message {message_id} was not found; it may have been deleted, "
+                "moved out of reach, or the id may be wrong."
+            )
         subject = summary.subject
         target = claim(kept_dir("downloads"), safe_name(subject, fallback="message") + ".eml")
         try:
@@ -71,7 +74,8 @@ class Files:
         except NotFound:
             target.unlink(missing_ok=True)
             raise NotFound(
-                "The message was deleted on the server; its MIME source is no longer available."
+                "The message MIME source was not found; the message may have been deleted, "
+                "moved out of reach, or the id may be wrong."
             ) from None
         except Exception:
             target.unlink(missing_ok=True)

@@ -242,3 +242,13 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
+
+
+H27/H28 coverage: the first per-folder listing page includes requested-window Deleted/Junk
+exclusion counts (including subfolders) from the existing count batch, without an extra count call.
+Continuation pages do not repeat those full-window exclusions. Unavailable counts are not replaced
+with stale folder totals. `server_total` counts copies separately and includes meeting invitations,
+cancellations and RSVPs even when `include_meeting_mail=false` hides them; no second counting path.
+H29 NotFound text leaves the cause open: deletion, moving out of reach or an incorrect id.
+H33 Graph batch items retry the same transient statuses as single reads (429/502/503/504), only
+resending failed items and retaining the final status on exhaustion. Writes remain single-attempt.

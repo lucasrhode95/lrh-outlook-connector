@@ -235,7 +235,7 @@ async def test_message_deleted_before_export_fails_the_export_and_writes_nothing
     del fake.messages["m3"]
     with pytest.raises(NotFound) as caught:
         await exports.export(ExportRequest(message_ids=["m1", "m3"], include_attachments=True))
-    assert "1 of the 2 message(s) selected by id could not be read: m3 (gone" in str(caught.value)
+    assert "1 of the 2 message(s) selected by id could not be read: m3 (not found" in str(caught.value)
     assert "deleted or moved in Outlook" in str(caught.value) and HINT in str(caught.value)
     assert exported_files() == []
 
@@ -498,3 +498,15 @@ async def test_a_range_export_of_a_junk_heavy_mailbox_never_reads_junk(
     artifact = await exports.export(ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), format="jsonl"))
     assert artifact.message_count == 12  # m1-m3, m5 and n1-n8; m4 and the 40 junk messages left out
     assert not any(c == "GET /v1.0/me/messages" or "f-junk" in c for c in fake.calls)
+
+
+async def test_mime_disappearing_after_summary_has_neutral_not_found_text(
+    exports: Exports, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def missing(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise NotFound("Synthetic not found")
+
+    monkeypatch.setattr(exports.mailbox.reader, "download_mime", missing)
+    with pytest.raises(NotFound, match="MIME source was not found;.*id may be wrong"):
+        await Files(exports.mailbox).save_mime("m1")
+    assert exported_files() == []
