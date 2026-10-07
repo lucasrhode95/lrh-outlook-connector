@@ -28,6 +28,15 @@ Never log or commit credentials, tokens, session cookies, private user content, 
 
 Treat persisted data as the current format. Do not add backward-compatibility shims, old-format readers, automatic migrations, schema-version frameworks, or fallback behavior for previous application versions unless asked. Keep safeguards that protect current user data and account ownership.
 
+### Research scope
+
+Research probes make explicitly authorized requests to configured endpoints and report
+responses. They do not consume browser captures. HARs, Resource Saver archives and downloaded
+source bundles are temporary inputs for ad hoc exploratory work outside the repository.
+Document useful URLs, request/response shapes, dated findings and limitations. Do not retain
+raw or anonymized captures, per-file/member manifests, source indexes, or capture-reading,
+regeneration and redaction machinery in the repository. Probes must work without captures.
+
 ## The project
 
 A local connector for one user's Exchange Online mailbox: an MCP server for agents and a small local web UI. Reads go through Microsoft Graph; writes (drafts, send, mailbox changes) go through Outlook Web (OWS).

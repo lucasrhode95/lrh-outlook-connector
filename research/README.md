@@ -128,7 +128,7 @@ what Outlook Web itself does while you perform one deliberate action:
    - DevTools → Network → **Export HAR** (with content), which also includes request bodies.
      Response-only exports omit them; the 2026-10-02 capture lacked request bodies, so the
      search request shape had to be reconstructed from the bundles.
-4. Save the export under `web-app-download/` (git-ignored) and inspect it **in place**. Search
+4. Save the export in a private temporary folder **outside this repository** and inspect it **in place**. Search
    the JavaScript for the action or route name, and match responses by the marker.
 5. Record only route names, request/response **shapes**, key names and counts in
    `docs/outlook-api-research.md`. Delete the export when done.
