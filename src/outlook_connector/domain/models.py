@@ -337,8 +337,9 @@ class ItemResult(Compact):
 
 
 class MutationResult(Compact):
-    """One result per message, in request order. Partial failure is reported, never hidden."""
+    """Ordered per-message results; large conversation successes may be summarized in counts."""
 
     action: str
     results: list[ItemResult]
     counts: dict[str, int] = Field(default_factory=dict)  # MutationStatus -> messages
+    notes: list[str] = Field(default_factory=list)

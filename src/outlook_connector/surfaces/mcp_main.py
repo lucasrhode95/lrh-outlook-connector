@@ -99,7 +99,9 @@ confirm again. If send_email returns status "unknown", do not send again; ask th
 Sent Items and Outbox.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
-set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
+set_read_state also takes conversation ids (up to 1,000 listed messages per conversation). \
+For large expansions, counts summarize ordinary done/unchanged results; explicit-id and error \
+results remain detailed. Read notes for truncation. Each returns results and counts: done, unchanged \
 (already so; nothing sent), not_found, failed (with Outlook's code) or unknown (no clear answer; \
 check before repeating). delete_messages moves \
 to Deleted Items; messages already there are left alone (there is no permanent delete). Act only \
@@ -301,7 +303,8 @@ def build_server(context: AppContext) -> FastMCP:
         combine: Annotated[
             CombineMode,
             Field(
-                description="per_conversation: one TXT per conversation; all: one TXT; none: one TXT per message."
+                description="per_conversation: one TXT per conversation; all: one TXT; "
+                "none: one TXT per message."
             ),
         ] = "per_conversation",
         body: Literal["unique", "full"] = "unique",

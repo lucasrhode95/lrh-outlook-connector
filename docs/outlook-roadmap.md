@@ -140,7 +140,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H21 — Long conversations cannot be marked read/unread cleanly
 
-**Status:** Pending.
+**Status:** Implemented on this branch; synthetic validation complete.
 
 **Problem:** `set_read_state(conversation_ids=[...])` expands a conversation to messages and then applies the 100-message limit intended for explicit `message_ids`. A long conversation can therefore be rejected even though the caller supplied only one conversation id. Conversations beyond the 1,000-message listing cap also need an explicit truncation note.
 
