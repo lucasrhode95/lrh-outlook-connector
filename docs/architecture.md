@@ -388,3 +388,8 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 |---|---|---|
 | A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache (a separate file in the data directory) is available during development. |
 | A2 | Package / CLI name | **`outlook_connector` / `outlook-connector`** |
+
+
+H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
+to UTC before building the search/window and cursor. MCP and web search pass dates through;
+normalization is authoritative at `Mailbox.search`, shared by both callers.
