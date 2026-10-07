@@ -100,7 +100,9 @@ Never confirm on the user's behalf. It sends the stored draft without changing i
 On status "unknown", ask the user to check Sent Items and Outbox before any further send.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
-set_read_state also takes conversation ids. Each returns a result per message: done, unchanged \
+set_read_state also takes conversation ids (up to 1,000 listed messages per conversation). \
+For large expansions, counts summarize ordinary done/unchanged results; explicit-id and error \
+results remain detailed. Read notes for truncation. Each returns results and counts: done, unchanged \
 (already so; nothing sent), not_found, failed (with Outlook's code) or unknown (no clear answer; \
 check before repeating). continue_on_error defaults to true: later chunks are attempted after errors. \
 With false, later messages are failed with detail "not sent". Always report results and counts. \
