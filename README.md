@@ -54,6 +54,14 @@ confirm; any change to the recipients, subject or body afterwards is refused. A 
 retried; if Outlook gives no clear answer, the connector looks in Sent Items and otherwise tells you
 to check before anything is sent again.
 
+Inbox rules (write sign-in, including reads): `list_rules`, `create_rule`, `update_rule`,
+`reorder_rules`, `delete_rule`. Conditions: From, Sent to, Subject contains, Subject-or-body contains.
+Actions: Move to folder and Stop processing. Call a write without `user_confirmation` to propose it;
+show the persistent change and returned RULE code, then repeat with that code after explicit human
+confirmation. Every write is sent once and read back; changed server state invalidates confirmation.
+Unsupported rules are read-only. Reordering is refused if any unsupported rule is present because
+OWS resubmits the whole rule list. Enable/disable uses a separate update from field edits.
+
 Mailbox changes (same sign-in): `set_read_state`, `set_flag`, `move_messages` and
 `delete_messages` act on explicit message ids (up to 100 per call; read state also per conversation)
 and return a result per message: done, unchanged, not found, failed or unknown. Delete moves to

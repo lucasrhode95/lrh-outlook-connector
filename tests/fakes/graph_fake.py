@@ -105,6 +105,7 @@ class FakeGraph:
     batch_sizes: list[int] = field(default_factory=list)
     sent_drafts: list[str] = field(default_factory=list)  # drafts sent with UpdateItem
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
+    inbox_rules: list[dict[str, Any]] = field(default_factory=list)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
     # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
     # "no-items" / "not-json" (HTTP 200 without readable item results),
@@ -219,8 +220,54 @@ class FakeGraph:
             raise httpx.ReadTimeout("no answer", request=request)
         if isinstance(script, int):
             return httpx.Response(script, headers={"x-owa-error": "FakeError"}, json={})
-        answer = script if isinstance(script, dict) else {"WasSuccessful": True, "ErrorCode": 0}
+        answer = script if isinstance(script, dict) else self._rule_action(action, request_object)
+        if script == "done-no-answer":
+            raise httpx.ReadTimeout("no answer", request=request)
         return httpx.Response(200, json=answer)
+
+    def _rule_action(self, action: str, request: dict[str, Any]) -> dict[str, Any]:
+        import copy
+
+        answer: dict[str, Any] = {"WasSuccessful": True, "ErrorCode": 0}
+        if action == "GetInboxRule":
+            answer["InboxRuleCollection"] = {"InboxRules": copy.deepcopy(self.inbox_rules)}
+        elif action == "NewInboxRule":
+            rule = copy.deepcopy(request["InboxRule"])
+            rule["Identity"] = {
+                "RawIdentity": f"rule-{len(self.inbox_rules) + 1}",
+                "DisplayName": rule["Name"],
+            }
+            rule["Enabled"] = True
+            self.inbox_rules.insert(0, rule)
+            answer["InboxRule"] = copy.deepcopy(rule)
+        elif action == "SetInboxAndSweepRules":
+            by_id = {r["Identity"]["RawIdentity"]: r for r in self.inbox_rules}
+            self.inbox_rules = [
+                by_id[r["Identity"]["RawIdentity"]] for r in request["EnableDisableInboxRules"]
+            ]
+            for rule, entry in zip(self.inbox_rules, request["EnableDisableInboxRules"], strict=True):
+                rule["Enabled"] = entry["IsEnabled"]
+        elif action in ("SetInboxRule", "EnableInboxRule", "DisableInboxRule", "RemoveInboxRule"):
+            fields = request.get("InboxRule") or request
+            rule = next(
+                (
+                    r
+                    for r in self.inbox_rules
+                    if r["Identity"]["RawIdentity"] == fields["Identity"]["RawIdentity"]
+                ),
+                None,
+            )
+            if rule is None:
+                return {"WasSuccessful": False, "ErrorCode": 5, "ErrorMessage": "No such rule"}
+            if action == "SetInboxRule":
+                rule.update(copy.deepcopy(fields))
+            elif action == "RemoveInboxRule":
+                self.inbox_rules.remove(rule)
+            else:
+                rule["Enabled"] = action == "EnableInboxRule"
+        for priority, rule in enumerate(self.inbox_rules, 1):
+            rule["Priority"] = priority
+        return answer
 
     def ows_CreateItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
         disposition = body["MessageDisposition"]

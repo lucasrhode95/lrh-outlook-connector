@@ -190,6 +190,7 @@ async def test_bare_request_posts_the_request_object_itself(fake: FakeGraph) -> 
     assert action == "GetInboxRule" and sent["__type"] == "GetInboxRuleRequest:#Exchange"
     assert "Body" not in sent and sent["UseServerRulesLoader"] is True
     assert sent["Header"]["TimeZoneContext"]["TimeZoneDefinition"]["Id"] == "UTC"
+    fake.ows_next = [{"WasSuccessful": True, "ErrorCode": 0}]
     await ows_for(fake).call_request("EnableInboxRule", {"Identity": {"RawIdentity": "r"}})
     assert "TimeZoneContext" not in fake.ows_calls[1][1]["Header"]
 
