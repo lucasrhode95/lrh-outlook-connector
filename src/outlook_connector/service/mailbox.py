@@ -12,7 +12,7 @@ Scope rules shared by list, search, conversations, sizes and export (a folder co
   with real replies shows through them. Every flag points the same way: true shows more mail.
 - Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
   and items outside the mail folders (e.g. Teams meeting records) are out of reach:
-  never listed, searched, counted, included in conversations or exported, and list_folders does
+  never listed, searched, counted, included in conversations or range exports, and list_folders does
   not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.
@@ -24,7 +24,7 @@ import asyncio
 import hashlib
 import time
 from collections.abc import Iterable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
@@ -568,13 +568,14 @@ class Mailbox:
     ) -> SearchResult:
         """Server-side search, hits grouped by conversation (requirements v4 §9).
 
-        Entry point: the authoritative check of its arguments (query, limit, folder, cursor); the web
-        routes pass them through unchecked.
+        Entry point: normalize naive dates as UTC and aware dates to UTC; validate query, limit,
+        folder and cursor. The web and MCP search routes pass dates through unchecked.
         """
         if not query.strip():
             raise InvalidRequest("query must not be empty.")
         if not 1 <= limit <= 100:
             raise InvalidRequest("limit must be between 1 and 100.")
+        since, until = _search_date(since), _search_date(until)
         state = cursors.decode(cursor, "search") if cursor else None
         if state:
             folder_id, kql = state["folder_id"], state["query"]
@@ -818,3 +819,10 @@ def _with_paths(folders: list[Folder]) -> list[Folder]:
             current = by_id.get(current.parent_id or "")
         folder.path = "/".join(reversed(parts))
     return folders
+
+
+def _search_date(value: datetime | None) -> datetime | None:
+    """Assumes (not re-checked here): optional datetime passed to the search entry point."""
+    if value is None:
+        return None
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)

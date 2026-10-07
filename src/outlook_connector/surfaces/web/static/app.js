@@ -529,9 +529,18 @@ async function openMessage(id) {
   const body = $("opt-full").checked ? "full" : "unique"; // one setting for the reader and exports
   let content;
   try {
-    content = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body })}`);
+    const parts = [];
+    let offset = 0;
+    do {
+      const part = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body, offset })}`);
+      if (request !== state.readerRequest) return; // stop requesting continuations for an obsolete selection
+      content ||= part; // metadata and attachments come from the first response
+      parts.push(part.text);
+      offset = part.next_offset;
+    } while (offset !== null && offset !== undefined);
+    content.text = parts.join("");
   } catch {
-    if (request === state.readerRequest) $("reader-title").textContent = "Could not load this message.";
+    if (request === state.readerRequest) $("reader-title").textContent = "Could not load the complete message.";
     return;
   }
   if (request !== state.readerRequest) return; // another message was clicked meanwhile

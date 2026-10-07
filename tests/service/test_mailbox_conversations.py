@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -640,6 +640,37 @@ async def test_a_named_folder_is_never_listed_folder_by_folder(mailbox: Mailbox,
     page = await mailbox.list_messages(folder="inbox", limit=10)
     assert [m.id for m in page.items] == ["n8", "n4", "m5", "m1"]
     assert fake.calls.count("GET /v1.0/me/mailFolders/f-inbox/messages") == 1
+
+
+@pytest.mark.parametrize(
+    "since,until",
+    [
+        (datetime(2026, 9, 28, 9, 30), datetime(2026, 9, 29, 7)),
+        (datetime(2026, 9, 28, 9, 30), datetime(2026, 9, 29, 7, tzinfo=UTC)),
+        (
+            datetime(2026, 9, 28, 6, 30, tzinfo=timezone(timedelta(hours=-3))),
+            datetime(2026, 9, 29, 9, tzinfo=timezone(timedelta(hours=2))),
+        ),
+    ],
+)
+async def test_search_normalizes_naive_and_aware_at_service_entry(
+    mailbox: Mailbox, since: datetime, until: datetime
+) -> None:
+    result = await mailbox.search("relatório", since=since, until=until)
+    assert [m.id for hit in result.conversations for m in hit.matching_messages] == ["m2"]
+
+
+async def test_search_cursor_carries_normalized_utc_dates(mailbox: Mailbox) -> None:
+    from outlook_connector.service.cursors import decode
+
+    result = await mailbox.search(
+        "relatório", since=datetime(2026, 9, 28), until=datetime(2026, 9, 30), limit=1
+    )
+    assert result.cursor
+    state = decode(result.cursor, "search")
+    assert state["since"] == "2026-09-28T00:00:00+00:00" and state["until"] == "2026-09-30T00:00:00+00:00"
+    continuation = await mailbox.search("relatório", cursor=result.cursor, limit=1)
+    assert continuation.conversations
 
 
 async def test_per_folder_excluded_counts_use_the_existing_window_count_batch(

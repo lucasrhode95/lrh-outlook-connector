@@ -8,6 +8,32 @@ Snapshot **2026-10-06**, against `main`.
 - Build/module map: [architecture §11](architecture.md)
 - API evidence: [API research](outlook-api-research.md)
 
+## Completed in this implementation batch
+
+Implementation branches start independently from `main`; all PRs target `main` and remain unmerged.
+The compact record below is retained for this batch's independent review, overriding the normal
+omission of completed work. Each implementation branch contains its own affected-doc updates.
+
+| Item | PR | Completion note |
+|---|---|---|
+| W7 | [#20](https://github.com/lucasrhode95/lrh-outlook-connector/pull/20) | Explicit text/HTML draft creation/edit, mandatory server read-back, existing-draft-only send; synthetic checks complete, live validation pending. |
+| W9 | [#21](https://github.com/lucasrhode95/lrh-outlook-connector/pull/21) | Supported inbox-rule MCP tools; state-bound proposal/confirmation, one write/read-back; unsupported rules read-only. |
+| H17 | [#22](https://github.com/lucasrhode95/lrh-outlook-connector/pull/22) | Default continuation after chunk errors, per-message outcomes/counts, unknown read-back failures and explicit not-sent results. |
+| H20 | [#23](https://github.com/lucasrhode95/lrh-outlook-connector/pull/23) | Explicit export ids remain authoritative; other sources keep scope filters and copies still merge. |
+| H21 | [#24](https://github.com/lucasrhode95/lrh-outlook-connector/pull/24) | Explicit-only 100 limit, existing 1,000-per-conversation cap, truncation notes and compact bulk results. |
+| H23 | [#25](https://github.com/lucasrhode95/lrh-outlook-connector/pull/25) | Search normalizes naive/aware dates to UTC in the service; redundant MCP search normalization removed. |
+| H25 | [#26](https://github.com/lucasrhode95/lrh-outlook-connector/pull/26) | UI automatically follows all body offsets; no total size cap; obsolete continuation scheduling stops on selection change. |
+| H27 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Deleted/Junk window exclusions from the existing per-folder count batch, reported once across pages. |
+| H28 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Coverage/docs explicitly say server_total includes meeting mail; no second counting mechanism. |
+| H29 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Neutral NotFound wording for messages, attachments, MIME and export gaps; mailbox GONE text removed. |
+| H33 | [#27](https://github.com/lucasrhode95/lrh-outlook-connector/pull/27) | Batch-item retries share single-read transient statuses (429/502/503/504). |
+
+All implementation PRs passed lint, formatting, type checks and their full Python test suites;
+H25 also passed five behavioral JavaScript tests. No real mailbox was changed. W7's no-field-update
+OWS send shape and draft/HTML behavior still require explicitly authorized live validation; W9's
+folder read-back relies on OWS's reported name. H17/H21 touch the same mutation module but have no
+branch dependency; preserve both behaviors when resolving merge conflicts.
+
 ## Current priority
 
 1. **W7 → W8:** draft-first text/HTML sending, then signatures.
@@ -26,7 +52,7 @@ Status wording used below:
 
 ## W7 — Draft-first text and HTML sending
 
-**Status:** Decided, not built.
+**Status:** Implemented on this branch; synthetic validation complete, live validation pending.
 
 **Goal:** make Outlook drafts the only entry point for agent-authored outgoing mail. The connector must never guess whether a body is plain text or HTML, and it must never reconstruct a message at send time.
 
@@ -61,7 +87,7 @@ For the first version, automatic verification stays deliberately simple and high
 
 **Deferred live-test research, not blockers:** after the basic flow works, test how Outlook/Graph and recipient clients treat fragments vs complete HTML documents, malformed-but-accepted HTML, CSS, remote images and representative formatting. Revisit body-change detection only with real examples; a future approach may compare normalized visible text (entities decoded, whitespace/non-breaking spaces normalized) rather than HTML structure.
 
-**Next:** replace the current `create_draft` / `propose_email` / `send_email` surface and write service with the draft-first API above, update models/tests/docs together, and live-test both plain-text and HTML creation/edit/reply/send flows.
+**Next:** on explicit owner request, live-test plain-text/HTML creation, partial edit, replies and existing-draft send. The no-field-update `UpdateItem` send shape needs live confirmation; earlier evidence used a subject update. Deferred HTML/client research remains unchanged.
 
 ## W8 — Signatures
 
@@ -84,7 +110,7 @@ The existing import design below remains the fallback if Outlook does not expose
 
 ## W9 — Inbox rules
 
-**Status:** Decided, API proven live; tools not built.
+**Status:** Implemented on this branch; proven OWS contracts, synthetic tool validation complete.
 
 **Current state:** the Outlook Web rule contracts have been captured and replayed successfully through `Ows.call_request`. Reading, creating, editing (including clearing a condition), enabling/disabling, reordering and deleting a throwaway rule all worked live. Graph folder ids are accepted by the write request.
 
@@ -100,13 +126,13 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 **Safeguard:** every rule write is proposed first, requires user confirmation, is sent once, and is read back. Rules persist and affect future mail, so writes must not be retried automatically.
 
-**Next:** add the service mapping and MCP tools on top of the already-proven OWS calls.
+**Implementation notes:** stateless account/state-bound proposals, one confirmed write and fresh read-back. Enable/disable is a separate update; reordering refuses collections containing unsupported rules to avoid rewriting them. Folder read-back uses the reported name (OWS returns a mailbox path rather than a Graph id). No new live mailbox writes were performed.
 
 # Correctness and reliability
 
 ## H17 — Partial mutation failures are reported incorrectly
 
-**Status:** Decided, not built.
+**Status:** Implemented on this branch; synthetic validation complete.
 
 **Problem:** mutations are sent in chunks. If a later chunk fails, earlier chunks may already have changed the mailbox while the tool call raises only the later error.
 
@@ -130,7 +156,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H20 — Explicit message ids can be filtered out during export
 
-**Status:** Decision needed.
+**Status:** Recommended decision implemented on this branch; synthetic validation complete.
 
 **Problem:** `export_messages(message_ids=[...])` reads the requested messages, then applies reach/scope filtering at the end. An explicitly supplied id from a hidden/out-of-reach folder can therefore disappear from the export without the selection behaving like `get_message(id)`.
 
@@ -140,7 +166,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H21 — Long conversations cannot be marked read/unread cleanly
 
-**Status:** Pending.
+**Status:** Implemented on this branch; synthetic validation complete.
 
 **Problem:** `set_read_state(conversation_ids=[...])` expands a conversation to messages and then applies the 100-message limit intended for explicit `message_ids`. A long conversation can therefore be rejected even though the caller supplied only one conversation id. Conversations beyond the 1,000-message listing cap also need an explicit truncation note.
 
@@ -160,7 +186,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H23 — Search dates without a timezone can crash
 
-**Status:** Pending.
+**Status:** Implemented on this branch; synthetic validation complete.
 
 **Problem:** the web API can pass a naive `since`/`until` datetime into service code, which is then compared with timezone-aware Graph dates.
 
@@ -168,11 +194,11 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H25 — The UI silently truncates very long message bodies
 
-**Status:** Pending.
+**Status:** Implemented on this branch; automatic full-body loading validated.
 
 **Problem:** the UI reader asks for a bounded body and ignores `next_offset`, so a message over the current limit can stop mid-body without telling the user.
 
-**Next:** expose the truncation state in the UI and provide a way to load the continuation.
+**Decision for this batch:** automatically follow continuation offsets until the chosen body is complete, without a new total length cap. Switching messages stops scheduling obsolete continuations using the existing reader request counter; no new in-flight cancellation infrastructure.
 
 ## H26 — Oversized attachments are classified as unexpected failures
 

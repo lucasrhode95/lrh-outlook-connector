@@ -155,3 +155,147 @@ async def test_mismatched_item_results_are_read_back(mutations: Mutations, fake:
     fake.ows_next = [{"ResponseClass": "Success", "ResponseCode": "NoError"}]  # one result for two
     result = await mutations.set_flag(["m1", "m5"], True)
     assert statuses(result) == {"m1": "unknown", "m5": "unknown"} and len(fake.ows_calls) == 1
+
+
+@pytest.mark.parametrize("read", [True, False])
+async def test_long_conversations_use_normal_chunks_and_compact_counts(
+    mutations: Mutations, fake: FakeGraph, read: bool
+) -> None:
+    for i in range(125):
+        fake.add(
+            FakeMessage(
+                f"long-{i}",
+                "x",
+                "f-inbox",
+                "2026-09-01T00:00:00Z",
+                conversation="long",
+                is_read=not read if i < 120 else read,
+            )
+        )
+    result = await mutations.set_read([], read, conversation_ids=["long"])
+    assert result.counts == {"done": 120, "unchanged": 5}
+    assert result.results == [] and any("summarized" in n for n in result.notes)
+    assert len(fake.ows_calls) == 6 and all(len(b["ItemChanges"]) == 20 for _, b in fake.ows_calls)
+    assert all(fake.messages[f"long-{i}"].is_read is read for i in range(125))
+
+
+async def test_expansion_truncation_is_reported_at_existing_limit(
+    mutations: Mutations, fake: FakeGraph
+) -> None:
+    for i in range(1001):
+        fake.add(
+            FakeMessage(f"cap-{i}", "x", "f-inbox", "2026-09-01T00:00:00Z", conversation="cap", is_read=False)
+        )
+    result = await mutations.set_read([], True, conversation_ids=["cap"])
+    assert result.counts == {"done": 1000} and not result.results
+    assert any("truncated" in n and "1,000" in n for n in result.notes)
+    assert (
+        len(fake.ows_calls) == 50
+        and sum(m.is_read for mid, m in fake.messages.items() if mid.startswith("cap-")) == 1000
+    )
+
+
+async def test_explicit_limit_checked_before_expansion(mutations: Mutations, fake: FakeGraph) -> None:
+    with pytest.raises(InvalidRequest, match="At most 100"):
+        await mutations.set_read([f"x{i}" for i in range(101)], True, conversation_ids=["long"])
+    assert not fake.calls and not fake.ows_calls
+
+
+async def test_large_expansion_retains_explicit_and_failure_results(
+    mutations: Mutations, fake: FakeGraph
+) -> None:
+    for i in range(120):
+        fake.add(
+            FakeMessage(
+                f"compact-{i}", "x", "f-inbox", "2026-09-01T00:00:00Z", conversation="compact", is_read=False
+            )
+        )
+    original = fake.ows_UpdateItem
+
+    def one_failure(body: dict[str, Any]) -> list[dict[str, Any]]:
+        result = original(body)
+        if body["ItemChanges"][0]["ItemId"]["Id"] == "compact/0":
+            result[1] = {"ResponseClass": "Error", "ResponseCode": "ErrorAccessDenied"}
+        return result
+
+    fake.ows_UpdateItem = one_failure  # type: ignore[method-assign]
+    result = await mutations.set_read(["compact-0", "gone"], True, conversation_ids=["compact", "compact"])
+    assert result.counts == {"done": 119, "failed": 1, "not_found": 1}
+    assert statuses(result) == {"compact-0": "done", "gone": "not_found", "compact-1": "failed"}
+    assert len(fake.ows_calls) == 6
+
+
+@pytest.mark.parametrize("action", ["read", "flag", "move", "delete"])
+@pytest.mark.parametrize("keep_going", [True, False])
+async def test_failed_middle_chunk_preserves_partial_results(
+    mutations: Mutations, fake: FakeGraph, action: str, keep_going: bool
+) -> None:
+    ids = [f"partial-{i}" for i in range(45)]
+    for mid in ids:
+        fake.add(FakeMessage(mid, "synthetic", "f-inbox", "2026-09-01T00:00:00Z", is_read=False))
+    fake.ows_next = [None, 429, None]
+    if action == "read":
+        result = await mutations.set_read(ids, True, continue_on_error=keep_going)
+    elif action == "flag":
+        result = await mutations.set_flag(ids, True, continue_on_error=keep_going)
+    elif action == "move":
+        result = await mutations.move(ids, "archive", continue_on_error=keep_going)
+    else:
+        result = await mutations.delete(ids, continue_on_error=keep_going)
+    assert [r.id for r in result.results] == ids
+    assert all(r.status == "done" for r in result.results[:20])
+    assert all(r.status == "failed" and r.detail != "not sent" for r in result.results[20:40])
+    assert result.counts == ({"done": 25, "failed": 20} if keep_going else {"done": 20, "failed": 25})
+    assert len(fake.ows_calls) == (3 if keep_going else 2)
+    if not keep_going:
+        assert all(r.status == "failed" and r.detail == "not sent" for r in result.results[40:])
+
+
+async def test_default_continues_after_failed_chunk(mutations: Mutations, fake: FakeGraph) -> None:
+    ids = [f"default-{i}" for i in range(21)]
+    for mid in ids:
+        fake.add(FakeMessage(mid, "x", "f-inbox", "2026-09-01T00:00:00Z"))
+    fake.ows_next = [429, None]
+    result = await mutations.set_flag(ids, True)
+    assert result.counts == {"failed": 20, "done": 1} and len(fake.ows_calls) == 2
+
+
+async def test_failed_readback_is_unknown_and_stops_only_when_requested(
+    mutations: Mutations, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outlook_connector.domain.errors import Throttled
+
+    ids = [f"unknown-{i}" for i in range(41)]
+    for mid in ids:
+        fake.add(FakeMessage(mid, "x", "f-inbox", "2026-09-01T00:00:00Z"))
+    original = mutations.mailbox.reader.get_summaries
+    calls = 0
+
+    async def unavailable_after_initial(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls > 1:
+            raise Throttled("Graph unavailable")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(mutations.mailbox.reader, "get_summaries", unavailable_after_initial)
+    fake.ows_next = [None, "no-answer"]
+    result = await mutations.set_flag(ids, True, continue_on_error=False)
+    assert result.counts == {"done": 20, "unknown": 20, "failed": 1}
+    assert result.results[-1].detail == "not sent" and len(fake.ows_calls) == 2
+
+
+async def test_per_item_error_stops_subsequent_chunks(mutations: Mutations, fake: FakeGraph) -> None:
+    ids = [f"item-{i}" for i in range(21)]
+    for mid in ids:
+        fake.add(FakeMessage(mid, "x", "f-inbox", "2026-09-01T00:00:00Z"))
+    original = fake.ows_UpdateItem
+
+    def fail_one(body: dict[str, Any]) -> list[dict[str, Any]]:
+        results = original(body)
+        results[-1] = {"ResponseClass": "Error", "ResponseCode": "ErrorAccessDenied"}
+        return results
+
+    fake.ows_UpdateItem = fail_one  # type: ignore[method-assign]
+    result = await mutations.set_flag(ids, True, continue_on_error=False)
+    assert result.counts == {"done": 19, "failed": 2} and result.results[-1].detail == "not sent"
