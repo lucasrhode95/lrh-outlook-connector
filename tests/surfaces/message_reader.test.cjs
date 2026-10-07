@@ -47,55 +47,42 @@ function reader(handler, full = false) {
   return { context, nodes, calls, open: (id) => context.openMessage(id) };
 }
 
-function part(text, offset, next_offset, id = 'mail') {
-  return { text, offset, next_offset, message: { id, subject: id }, attachments: [] };
+function part(text, id = 'mail') {
+  return { text, offset: 0, message: { id, subject: id }, attachments: [] };
 }
 
-test('automatically loads all continuations with exact server offsets and the chosen body', async () => {
-  const chunks = [part('Hello😀', 0, 6), part('\n  middle\u00a0', 6, 17), part('\nEnd', 17, null)];
-  const ui = reader(async (url) => chunks[Number(url.searchParams.get('offset')) === 0 ? 0 :
-    Number(url.searchParams.get('offset')) === 6 ? 1 : 2], true);
+test('loads the whole body in one request with the chosen body kind', async () => {
+  const ui = reader(async () => part('Hello😀\n  middle \nEnd'), true);
   await ui.open('mail');
-  assert.equal(ui.nodes.get('reader-body').textContent, 'Hello😀\n  middle\u00a0\nEnd');
-  assert.deepEqual(ui.calls.map(u => u.searchParams.get('offset')), ['0', '6', '17']);
-  assert.ok(ui.calls.every(u => u.searchParams.get('body') === 'full'));
-});
-
-test('has no body-size cap and loads unique bodies completely', async () => {
-  const texts = ['x'.repeat(200000), 'y'.repeat(200000), 'z'.repeat(200001)];
-  let i = 0;
-  const ui = reader(async () => { const index = i++; return part(texts[index], index * 200000,
-    index < 2 ? (index + 1) * 200000 : undefined); });
-  await ui.open('large');
-  assert.equal(ui.nodes.get('reader-body').textContent, texts.join(''));
-  assert.equal(ui.calls.length, 3);
-  assert.ok(ui.calls.every(u => u.searchParams.get('body') === 'unique'));
-});
-
-test('a complete short body needs only one request', async () => {
-  const ui = reader(async () => part('Short', 0, undefined));
-  await ui.open('short');
-  assert.equal(ui.nodes.get('reader-body').textContent, 'Short');
+  assert.equal(ui.nodes.get('reader-body').textContent, 'Hello😀\n  middle \nEnd');
   assert.equal(ui.calls.length, 1);
+  assert.equal(ui.calls[0].searchParams.get('body'), 'full');
+  assert.equal(ui.calls[0].searchParams.get('offset'), null);
 });
 
-test('continuation failure never presents a partial body as complete', async () => {
-  const ui = reader(async (url) => {
-    if (url.searchParams.get('offset') === '0') return part('Partial', 0, 7);
-    throw new Error('synthetic failure');
-  });
+test('has no body-size cap: a very long unique body is shown whole from one request', async () => {
+  const text = 'x'.repeat(200000) + 'y'.repeat(200000) + 'z'.repeat(200001);
+  const ui = reader(async () => part(text, 'large'));
+  await ui.open('large');
+  assert.equal(ui.nodes.get('reader-body').textContent, text);
+  assert.equal(ui.calls.length, 1);
+  assert.equal(ui.calls[0].searchParams.get('body'), 'unique');
+});
+
+test('a failure never presents a partial body', async () => {
+  const ui = reader(async () => { throw new Error('synthetic failure'); });
   await ui.open('broken');
   assert.equal(ui.nodes.get('reader-title').textContent, 'Could not load the complete message.');
   assert.equal(ui.nodes.get('reader-body').textContent, '');
 });
 
-test('switching messages stops obsolete continuations and keeps the newest body', async () => {
+test('switching messages keeps the newest body when an older answer arrives late', async () => {
   let resolveOld;
   const old = new Promise(resolve => { resolveOld = resolve; });
-  const ui = reader(async (url) => url.pathname.endsWith('/old') ? old : part('Newest', 0, null, 'new'));
+  const ui = reader(async (url) => url.pathname.endsWith('/old') ? old : part('Newest', 'new'));
   const readingOld = ui.open('old');
   await ui.open('new');
-  resolveOld(part('Old partial', 0, 11, 'old'));
+  resolveOld(part('Old body', 'old'));
   await readingOld;
   assert.equal(ui.nodes.get('reader-body').textContent, 'Newest');
   assert.equal(ui.calls.filter(u => u.pathname.endsWith('/old')).length, 1);

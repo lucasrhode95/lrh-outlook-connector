@@ -530,18 +530,24 @@ class Mailbox:
         return found
 
     async def get_message(
-        self, message_id: str, *, body: BodyKind = "unique", offset: int = 0, max_chars: int = 20000
+        self,
+        message_id: str,
+        *,
+        body: BodyKind = "unique",
+        offset: int = 0,
+        max_chars: int | None = 20000,
     ) -> MessageContent:
-        """One message's body with offset continuation, and its attachment metadata.
+        """One message's body with offset continuation, and its attachment metadata. ``max_chars=None``
+        returns the whole body from ``offset`` (the local web reader: one server read, no token budget).
 
         Entry point: the authoritative check of ``offset`` and ``max_chars`` (the web routes pass them
         through unchecked). The id is taken as given (ids come from this connector's own results).
         """
-        if offset < 0 or not 1 <= max_chars <= 200_000:
+        if offset < 0 or (max_chars is not None and not 1 <= max_chars <= 200_000):
             raise InvalidRequest("offset must be >= 0 and max_chars between 1 and 200000.")
         message = await self.message(message_id, body=body)
         text = message.body(body)
-        end = min(len(text), offset + max_chars)
+        end = len(text) if max_chars is None else min(len(text), offset + max_chars)
         return MessageContent(
             message=MessageSummary.model_validate(message.model_dump()),
             body_kind=body,
