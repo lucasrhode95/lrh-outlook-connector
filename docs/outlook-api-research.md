@@ -519,7 +519,8 @@ No native signature send/recipient rendering or automatic application insertion 
 **Unsuccessful variants.** A content-name URL path (`/settings/{name}`) returned HTTP 404; use the
 proven query route. A guessed `parentsetting=roaming_signature_list` query returned HTTP 403 and
 does not prove inability to read children: exact-name large-setting reads work. No guessed write
-request was sent, and no unsuccessful authentication/client-scope pair was retried.
+request was sent during this read-only discovery phase, and no unsuccessful authentication/client-scope
+pair was retried. The subsequent authorized lifecycle writes are recorded in §4.8.
 
 **Owner-selected W8 design.** Read the current native configuration automatically, expose reliable
 listing/content retrieval, and resolve the correct default per compose operation. Check account
@@ -533,6 +534,71 @@ unchanged. API discovery is proved; public read tools and automatic integration 
 subsequently replace/render a signature using sender, recipient, language and policy context (§4.6).
 Reading native defaults does not reproduce that additional logic. Graph draft extraction is now
 proved, but is a snapshot rather than an always-current corporate-default resolver.
+
+### 4.8 Native signature CRUD and default lifecycle (2026-10-07)
+
+**Scope (STANDALONE).** The owner explicitly requested the remaining live tests. All operations used
+the connector's existing encrypted, bound-account `write` profile against Outlook Cloud Settings,
+with no browser credentials or new scopes. Only uniquely named synthetic signatures and temporary
+default selections were changed. No real signature contents were overwritten; no messages were
+created, edited or sent. Writes were sent once, with fresh reads to verify their results and cleanup.
+Recovery state was encrypted and never committed.
+
+**Proven write contracts:**
+
+| Action | Request | Result |
+|---|---|---|
+| Create and update HTML/text | `PATCH /ows/v1/OutlookCloudSettings/settings/account`, JSON array of per-format settings; `x-islargesetting: true` | HTTP 200. New contents readable immediately; created signature automatically appeared in the name list. |
+| Set/clear a default | Same PATCH endpoint, `String` settings; `x-islargesetting: false` | HTTP 200. New-message and reply defaults changed independently; empty new-message default accepted. |
+| Delete all fixture formats | `DELETE /ows/v1/OutlookCloudSettings/settings/account`, JSON body `{name}`; `Content-Type: application/json`, `x-islargesetting: true` | HTTP 200. Content read returned `[]`; fixture was also removed from the name list. |
+
+Content patches contain `itemClass: "RoamingSetting"`, `name`, account `scope`, `secondaryKey: "htm"`
+or `"txt"`, `type: "Blob"`, `value`, `parentSetting: "roaming_signature_list"`,
+`metadata: "encoding:utf-8"`, a current UTC .NET-ticks `timestamp`, and `value@is.Large: true`.
+Default patches contain the same item class/scope, `name` and `secondaryKey` equal to
+`roaming_new_signature` or `roaming_reply_signature`, `type: "String"`, and `value`. Headers also
+included `x-outlook-client: owa`, `Accept: application/json` and `x-overridetimestamp: false`.
+This proves the tested header/payload combination, not that every field is independently mandatory.
+The captured native source and this [original HTTP implementation](https://gist.github.com/EionRobb/21dd89b05417b247bface6373fb380fb)
+provided wire-format leads; our own live calls establish capability for this account.
+
+**Content lifecycle.** A dedicated fixture with a space-containing name was created with synthetic
+HTML and text containing accents and Japanese characters. HTML read-back was normalized: Outlook
+added wrappers/CRLFs and changed `id="Signature"` to `id="x_Signature"`. Visible text and the text
+format matched exactly. An edit changed the text and added a base64 PNG; read-back retained the
+expected visible/text content and exactly matching decoded PNG bytes. A later edit removed the
+image and retained the updated text. Deletion removed both formats and its name-list reference.
+No append-at-end order was assumed; the original signatures' relative order was preserved.
+
+**Default lifecycle.** With the fixture's image-bearing HTML selected as the new-message default,
+fresh default resolution retrieved that current HTML. The reply default initially stayed unchanged;
+it was then separately set to the fixture. Clearing only the new-message default produced an
+explicit empty string while the reply default still selected the fixture. Both original values
+were restored before ordinary fixture deletion. These calls establish server configuration behavior,
+not automatic signature insertion by the connector, which is unimplemented.
+
+**Deleting the selected default.** A separate temporary fixture was selected only for new messages
+and deleted. Contents returned `[]` and the name was absent from the list, but
+`roaming_new_signature` still pointed to the deleted name. The reply default stayed unchanged.
+Cleanup restored the original new-message default. A consumer must verify that selected content
+exists and report a missing configured default, rather than silently falling back to another name
+or a cached signature. The backend DELETE alone does not maintain the default pointer.
+
+**Probe corrections and cleanup.** Two initial setup passes stopped on overly strict harness
+expectations (byte-identical HTML and insertion at the end of the list); both fixtures were cleaned
+up. A DELETE with no JSON content type returned HTTP 415, and a query-only name with that header
+returned HTTP 400. The corrected JSON-body DELETE succeeded. Rejected requests were not automatically
+retried. Four temporary signatures in total were created and removed, including the complete
+lifecycle and selected-default deletion fixture. Final reads confirmed the original two signatures'
+full records were unchanged (hashed comparison), all test contents were absent, and original
+signature-list/default values were restored. Default/list revision timestamps can advance when
+values are changed and restored; no claim of restoring those metadata revisions is made.
+
+**Limits.** The tests prove native create/read/update/delete, embedded PNG add/remove, list
+registration/removal, independent default changes and no-default behavior through our authentication.
+They do not prove rename, editing RTF, concurrent-write races, every image format, public MCP write
+tools, or integration/recipient rendering of automatic signatures in a draft. Graph-first routing
+remains unchanged: these native operations fill the documented roaming-signature gap in Graph.
 
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
@@ -567,6 +633,11 @@ proved, but is a snapshot rather than an always-current corporate-default resolv
   Bulk and partial-failure read states were restored before cleanup. One throwaway inbox rule was
   created and removed; the eight original rules ended with identical ids, order, priorities,
   enabled states and revisions. Nothing was permanently deleted.
+- 2026-10-07 (native signatures): four synthetic signatures created and deleted. New-message and
+  reply defaults were temporarily switched, the new-message default was cleared, and deletion of
+  a selected fixture left a dangling pointer that was repaired. Final list/default values matched
+  the original baseline, both original signature records were unchanged, and all temporary contents
+  were absent. No message writes or sends occurred in these signature tests.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.
 
 ## Sources
