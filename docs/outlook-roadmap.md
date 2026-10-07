@@ -46,8 +46,14 @@ appends the quote (`NewBodyContent`), so no draft body is ever parsed or rewritt
 
 - Remove `edit_draft` end to end: MCP tool, service method, `MailWriter.edit_draft`, the OWS
   `UpdateItem`/`SaveOnly` field updates, `DraftEdit`, fakes, tests and docs. No compatibility shim.
-- MCP instructions: to change a draft, create the replacement first and verify its read-back, then
-  delete the old draft; report both ids. Never delete first.
+- Orient the agent where it looks when a change is requested (descriptions and instructions are
+  loaded once per session at the MCP handshake; no per-result note field):
+  - `create_draft` description: drafts are never edited; to change one, create the replacement
+    with the full content (for a reply, the same `reply_to_message_id`), check its read-back, then
+    delete the old draft with `delete_messages`, and use the new id from then on (e.g. `send_draft`).
+  - Drafts bullet of the MCP server instructions: the same rule, replacing the `edit_draft`
+    sentence. Never delete first. Tell the user the previous version is in Deleted Items.
+  - `delete_messages` description: also used to remove a draft after creating its replacement.
 - Update requirements §11.1, architecture (`writes.py`, `ows_mail.py`, tool table) and README.
 
 **Accepted costs:** the draft id changes on every change; body edits the user made to the draft in
