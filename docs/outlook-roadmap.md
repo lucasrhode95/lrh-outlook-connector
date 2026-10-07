@@ -186,7 +186,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H23 — Search dates without a timezone can crash
 
-**Status:** Pending.
+**Status:** Implemented on this branch; synthetic validation complete.
 
 **Problem:** the web API can pass a naive `since`/`until` datetime into service code, which is then compared with timezone-aware Graph dates.
 
