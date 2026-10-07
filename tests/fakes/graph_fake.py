@@ -314,6 +314,7 @@ class FakeGraph:
         assert body["SuppressReadReceipts"] is True
         if body["MessageDisposition"] == "SendAndSaveCopy":  # Outlook Web sends a draft this way
             (change,) = body["ItemChanges"]
+            assert change["Updates"], "UpdateItem's Updates must be nonempty (EWS schema)"
             draft = self._ows_target(change["ItemId"])
             if draft is None or not draft.is_draft:
                 return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]

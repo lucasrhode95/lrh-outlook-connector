@@ -100,10 +100,10 @@ class Writes:
 
         The host obtains human approval; the connector never reconstructs or retries the message.
         """
-        await self._draft(draft_id)
+        draft = await self._draft(draft_id)
         self.check_account()
         try:
-            await self.writer.send_draft(draft_id)
+            await self.writer.send_draft(draft_id, draft.subject or "")
         except WriteOutcomeUnknown as exc:
             try:
                 item = await self.mailbox.message(draft_id)

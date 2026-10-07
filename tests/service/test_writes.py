@@ -202,7 +202,8 @@ async def test_send_uses_only_the_stored_draft(writes: Writes, fake: FakeGraph) 
     result = await writes.send_draft(draft.id)
     assert result.status == "sent" and fake.sent_drafts == [draft.id]
     assert saved.subject == "Edited in Outlook" and saved.html == "<b>Edited on server</b>"
-    assert fake.ows_calls[-1][1]["ItemChanges"][0]["Updates"] == []
+    (update,) = fake.ows_calls[-1][1]["ItemChanges"][0]["Updates"]
+    assert update["Item"]["Subject"] == "Edited in Outlook"  # re-sets the server's own subject
     with pytest.raises(InvalidRequest, match="not an existing"):
         await writes.send_draft(draft.id)
 
