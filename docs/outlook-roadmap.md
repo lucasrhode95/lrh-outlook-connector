@@ -186,7 +186,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H27 — Per-folder listing does not report excluded-folder counts
 
-**Status:** Pending.
+**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
 
 **Problem:** when the mailbox uses the per-folder listing strategy, Junk and Deleted Items are never read. That is efficient, but `coverage.excluded` therefore lacks the `deleted_or_junk` count even though those messages are outside the result.
 
@@ -194,7 +194,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H28 — `server_total` includes meeting mail that the listing may hide
 
-**Status:** Pending.
+**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
 
 **Problem:** with `include_meeting_mail=false`, `server_total` still includes invitations, cancellations and RSVPs, so the total can be larger than the messages the listing can return.
 
@@ -204,7 +204,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H29 — NotFound wording assumes deletion
 
-**Status:** Pending.
+**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
 
 **Problem:** a bad or inaccessible message id currently produces wording equivalent to "not on the server (deleted on the server)", even though the id may simply be wrong or the item may have moved out of reach.
 
@@ -212,7 +212,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H33 — `$batch` retries fewer transient statuses than single requests
 
-**Status:** Pending.
+**Status:** Implemented in the combined H27/H28/H29/H33 branch; synthetic validation complete.
 
 **Problem:** individual requests retry transient 429/502/503/504 responses, but a failing item inside a Graph `$batch` is retried only for throttling. A 503/504 batch item therefore becomes an export gap immediately even though the equivalent single request would retry.
 

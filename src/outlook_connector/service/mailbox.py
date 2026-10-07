@@ -56,7 +56,6 @@ PER_FOLDER_SHARE = 2 / 3  # list folder by folder when left-out folders hold thi
 MIN_FOLDER_CHUNK = 10  # messages read at a time from one folder in a per-folder listing
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
-GONE = "deleted on the server"
 COMPACT_DROP = {
     "to": [],
     "cc": [],
@@ -251,6 +250,7 @@ class Mailbox:
         )
 
         notes: list[str] = []
+        window_excluded: dict[str, int] = {}
         link: str | None = None
         offsets: dict[str, int] | None = None  # per-folder listing: folder id -> messages returned
         hidden = set() if folder_id else (await self.reach(()))[1]
@@ -264,7 +264,7 @@ class Mailbox:
         elif not folder_id:
             share, note = await self._left_out_share(set(skip) | hidden)
             if share >= PER_FOLDER_SHARE:
-                offsets = await self._folders_with_mail(set(skip) | hidden, since, until)
+                offsets, window_excluded = await self._folders_with_mail(set(skip) | hidden, since, until)
                 notes.append(note)
         if offsets is not None:
             fetched, offsets = await self._merged_folders(offsets, since, until, limit)
@@ -287,6 +287,7 @@ class Mailbox:
                     break  # a page that exclusions empty entirely is skipped, within bounds
             complete = link is None
         items, excluded = await self.finish(fetched, skip)
+        excluded.update(window_excluded)  # full-window counts only on the first per-folder page
         items = _without_meetings(items, excluded) if not include_meeting_mail else items
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
@@ -297,7 +298,8 @@ class Mailbox:
             total = await self._count(folder_id, since, until, skip)
             if total is not None:
                 notes.append(
-                    "server_total counts the server's messages in scope (copies counted separately)."
+                    "server_total counts the server's messages in scope (copies counted separately). "
+                    "It includes meeting mail even when include_meeting_mail=false hides it."
                 )
         next_cursor = None
         if not complete:
@@ -347,22 +349,29 @@ class Mailbox:
 
     async def _folders_with_mail(
         self, left_out: set[str], since: datetime | None, until: datetime | None
-    ) -> dict[str, int]:
-        """The in-scope folders to list, each from its newest message: those with mail in the window
-        (one batch of counts), or every in-scope folder with messages if counting fails.
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        """Initial folder offsets and excluded Deleted/Junk counts, from the same count batch.
 
-        Assumes (not re-checked here): ``left_out`` is the caller's complete set of left-out folder ids,
-        and the window was validated by ``list_messages``.
+        Assumes (not re-checked here): complete left-out folder ids and a validated listing window.
+        If counting fails, use cached totals only to choose readable folders, never to claim window counts.
         """
         folders = await self.folder_map()
         in_scope = [fid for fid in folders if fid not in left_out]
+        categories = folder_categories(folders)
+        excluded_folders = [
+            fid for fid in folders if fid in left_out and categories.get(fid) == "deleted_or_junk"
+        ]
         try:
-            counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
+            counts = await self.reader.count_messages(
+                folder_ids=in_scope + excluded_folders, since=since, until=until
+            )
         except ConnectorError:
             counts = None
         if counts is None:
-            return {fid: 0 for fid in in_scope if folders[fid].total}
-        return {fid: 0 for fid in in_scope if counts.get(fid)}
+            return {fid: 0 for fid in in_scope if folders[fid].total}, {}
+        excluded_count = sum(counts.get(fid, 0) for fid in excluded_folders)
+        excluded = {"deleted_or_junk": excluded_count} if excluded_count else {}
+        return {fid: 0 for fid in in_scope if counts.get(fid)}, excluded
 
     async def _merged_folders(
         self, offsets: dict[str, int], since: datetime | None, until: datetime | None, limit: int
@@ -491,14 +500,20 @@ class Mailbox:
                 message_id, body_format="html" if body == "html" else "text"
             )
         except NotFound:
-            raise NotFound(f"Message {message_id} is not on the server ({GONE}).") from None
+            raise NotFound(
+                f"Message {message_id} was not found; it may have been deleted, moved out of reach, "
+                "or the id may be wrong."
+            ) from None
         return (await self.decorate([message]))[0]  # type: ignore[return-value]
 
     async def attachments(self, message_id: str) -> list[Attachment]:
         try:
             return await self.reader.list_attachments(message_id)
         except NotFound:
-            raise NotFound(f"Message {message_id} is not on the server ({GONE}).") from None
+            raise NotFound(
+                f"Message {message_id} was not found; it may have been deleted, moved out of reach, "
+                "or the id may be wrong."
+            ) from None
 
     async def attachments_many(self, message_ids: list[str]) -> dict[str, list[Attachment]]:
         """Attachments of many messages at once (batched), for the list's file chips. Messages whose
