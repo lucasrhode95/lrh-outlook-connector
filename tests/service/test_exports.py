@@ -500,6 +500,56 @@ async def test_a_range_export_of_a_junk_heavy_mailbox_never_reads_junk(
     assert not any(c == "GET /v1.0/me/messages" or "f-junk" in c for c in fake.calls)
 
 
+@pytest.mark.parametrize("folder", ["f-hidden", "f-outside", "f-sync"])
+async def test_explicit_export_ids_are_authoritative(exports: Exports, fake: FakeGraph, folder: str) -> None:
+    if folder == "f-hidden":
+        fake.add_folder(folder, "Hidden", hidden=True)
+    elif folder == "f-sync":
+        fake.add_folder(folder, "Sync Issues", alias="syncissues")
+    fake.add(FakeMessage("explicit", "Explicit", folder, "2026-10-01T00:00:00Z", text="Requested body"))
+    artifact = await exports.export(ExportRequest(message_ids=["explicit"], format="jsonl"))
+    record = json.loads(Path(artifact.path).read_text(encoding="utf-8"))
+    assert artifact.message_count == 1 and record["id"] == "explicit" and record["body"] == "Requested body"
+    assert artifact.messages_excluded == {}
+
+
+async def test_explicit_hidden_copy_merges_with_scoped_conversation(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add_folder("f-hidden", "Hidden", hidden=True)
+    original = fake.messages["m1"]
+    fake.add(
+        FakeMessage(
+            "copy-hidden",
+            original.subject,
+            "f-hidden",
+            "2026-10-01T00:00:00Z",
+            internet_id=original.internet_id or f"<{original.id}@example.com>",
+            conversation=original.conversation,
+            text="Hidden copy",
+        )
+    )
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], message_ids=["copy-hidden"], combine="all")
+    )
+    text = Path(artifact.path).read_text(encoding="utf-8")
+    assert artifact.message_count == 3 and "Also in: Hidden" in text
+    assert artifact.messages_excluded["hidden"] == 1
+
+
+async def test_range_scope_stays_filtered_but_explicit_hidden_id_is_included(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add_folder("f-hidden", "Hidden", hidden=True)
+    fake.add(FakeMessage("requested", "Requested", "f-hidden", "2026-10-01T00:00:00Z", text="Explicit"))
+    fake.add(FakeMessage("unrequested", "Unrequested", "f-hidden", "2026-10-01T00:00:00Z", text="Excluded"))
+    artifact = await exports.export(
+        ExportRequest(folder="inbox", message_ids=["requested"], format="jsonl", combine="all")
+    )
+    records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
+    assert "requested" in {r["id"] for r in records} and "unrequested" not in {r["id"] for r in records}
+
+
 async def test_mime_disappearing_after_summary_has_neutral_not_found_text(
     exports: Exports, monkeypatch: pytest.MonkeyPatch
 ) -> None:
