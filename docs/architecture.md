@@ -388,3 +388,11 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 |---|---|---|
 | A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache (a separate file in the data directory) is available during development. |
 | A2 | Package / CLI name | **`outlook_connector` / `outlook-connector`** |
+
+
+H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
+unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
+the service retains its bounded per-request body chunks. No manual continuation button is required.
+A continuation failure reports that the complete message could not be loaded, rather than displaying
+a partial body as complete. Selecting a different message stops scheduling old continuations using
+the existing reader request counter; the request already in flight is allowed to finish.

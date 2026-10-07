@@ -154,3 +154,22 @@ def test_activity_is_tracked(fake: FakeGraph) -> None:
         "/api/heartbeat", headers={"X-Session-Token": TOKEN}
     )
     assert activity.idle_seconds() < 5
+
+
+def test_reader_body_offsets_reconstruct_entire_large_message(client: TestClient, fake: FakeGraph) -> None:
+    text = "Start\n" + "x" * 410_000 + "\nEnd"
+    fake.messages["m1"].text = text
+    parts = []
+    offset = 0
+    while True:
+        response = client.get("/api/messages/m1", params={"body": "full", "offset": offset})
+        assert response.status_code == 200
+        content = response.json()
+        assert content["offset"] == offset and content["total_chars"] == len(text)
+        parts.append(content["text"])
+        offset = content.get("next_offset")
+        if offset is None:
+            break
+    assert len(parts) == 3 and "".join(parts) == text
+    assert client.get("/api/messages/m1", params={"offset": -1}).status_code == 400
+    assert client.get("/api/messages/m1", params={"offset": "bad"}).status_code == 400

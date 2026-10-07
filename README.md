@@ -135,3 +135,15 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pyright
 ```
+
+
+H25 UI reader: selecting a message automatically follows every `next_offset` until the chosen
+unique/full body is complete, with no total body-size ceiling. The web endpoint accepts `offset`;
+the service retains its bounded per-request body chunks. No manual continuation button is required.
+A continuation failure reports that the complete message could not be loaded, rather than displaying
+a partial body as complete. Selecting a different message stops scheduling old continuations using
+the existing reader request counter; the request already in flight is allowed to finish.
+
+Reader JavaScript regression tests use Node's built-in runner (Node 18+), with no package dependencies:
+`node --test tests/surfaces/message_reader.test.cjs`. They exercise the shipped frontend with a minimal
+test DOM: complete continuation loading, long/short bodies, failures and overlapping selections.
