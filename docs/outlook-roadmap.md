@@ -156,7 +156,7 @@ Support only the conditions/actions already proven and used by the mailbox: From
 
 ## H20 — Explicit message ids can be filtered out during export
 
-**Status:** Decision needed.
+**Status:** Recommended decision implemented on this branch; synthetic validation complete.
 
 **Problem:** `export_messages(message_ids=[...])` reads the requested messages, then applies reach/scope filtering at the end. An explicitly supplied id from a hidden/out-of-reach folder can therefore disappear from the export without the selection behaving like `get_message(id)`.
 

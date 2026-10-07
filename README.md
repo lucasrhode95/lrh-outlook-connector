@@ -148,3 +148,9 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pyright
 ```
+
+
+H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
+hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
+messages with other selections; reach/scope filters still govern range and conversation selections.
+Copies remain merged and message limits still apply.
