@@ -12,7 +12,7 @@ Scope rules shared by list, search, conversations, sizes and export (a folder co
   with real replies shows through them. Every flag points the same way: true shows more mail.
 - Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
   and items outside the mail folders (e.g. Teams meeting records) are out of reach:
-  never listed, searched, counted, included in conversations or exported, and list_folders does
+  never listed, searched, counted, included in conversations or range exports, and list_folders does
   not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.
