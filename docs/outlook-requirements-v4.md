@@ -97,9 +97,9 @@ Lazy population:
 
 ## 8. Listing, conversations and search
 
-**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by range/conversation export); search covers mail only. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by range/conversation export); search covers mail only. A message id named explicitly is authoritative: `get_message` and export read it wherever Graph can, hidden folders and Sync Issues included, and copies still merge. `since`/`until` without a time zone are UTC; the service normalizes both naive and aware dates once, for every caller. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
-**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads.
+**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads; it counts copies separately and includes meeting mail even when `include_meeting_mail=false` hides it. A mailbox-wide listing read folder by folder reports the window's Deleted Items and Junk counts (subfolders included) on its first page, from the same count batch that chooses the folders; a count that fails is never replaced by a cached total in what is reported, and one failed folder never hides the others' counts.
 
 - Always from the server; there is no local-only listing (`refresh=false` was removed with the summary cache on 2026-10-04).
 
@@ -124,6 +124,7 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 ## 9. Reading content (MCP)
 
 - `get_message` returns metadata plus a bounded body with an `offset`/`max_chars` continuation. Text is the default. HTML and `uniqueBody` are available on request.
+- The local UI reader shows the whole chosen body, however long, from one request (one server read); a failure says the complete message could not be loaded and never shows part of it as complete.
 - **Attachments are returned as raw files** (an MCP resource or file artifact) for the agent's client to read. No server-side text extraction. Attachment types: file, inline, item and reference. Item and reference attachments are listed with their metadata. Fetching them is best effort.
 - MIME (`$value`) is delivered as a file or resource, never inside JSON.
 - Read tools are annotated `readOnlyHint=true`, `destructiveHint=false`. **Read tools never change mailbox state, including read state.**
@@ -132,7 +133,7 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 ### 10.1 Selection and options (UI and MCP)
 
-The selection is any mix of **whole conversations**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `include_sent_items`), deduplicated by message and by copy. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
+The selection is any mix of **whole conversations**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `include_sent_items`), deduplicated by message and by copy. Individual messages are exported wherever they are (§8); conversations and ranges follow the scope rules. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
 
 | Option | Default | Effect |
 |---|---|---|
@@ -224,9 +225,22 @@ Requirements:
 - **Authorization:** the user's MCP client allow/deny prompt is the safeguard for mutations. There is no server-side plan or confirmation token. To keep that prompt meaningful:
   - Write tools take **explicit message IDs** and an explicit target. There is no "move everything matching a query" on the server.
   - They are never auto-approved by annotation: `readOnlyHint=false`. `destructiveHint=true` for move and delete, `false` for read state and flag.
-- **Per-item results:** each tool returns a result per item: `done`, `unchanged` (already so; nothing sent), `not_found`, `failed` (with Outlook's code) or `unknown`. Partial failure is reported, never hidden. Nothing is retried. On an ambiguous result, the items are read back: `done` where the change is visible, `unknown` elsewhere.
+- **Per-item results:** each tool returns results and `counts`: `done`, `unchanged` (already so; nothing sent), `not_found`, `failed` (with Outlook's code) or `unknown`. Partial failure is reported, never hidden. Nothing is retried. On an ambiguous result, the items are read back: `done` where the change is visible, `unknown` elsewhere (also when the read-back fails).
+- **Errors in one chunk** (changes go 20 messages at a time): with `continue_on_error=true` (default) later chunks are still attempted; with false they are not sent and report `failed` with detail `not sent`.
+- **Limits:** at most 100 explicit message ids per call. Read state per conversation expands each conversation to its messages in scope (all copies), up to the 1,000 the server lists per conversation, with a note when one is cut there. When such a selection has more than 100 messages, `counts` covers all of them and `results` keeps only explicit ids and messages that did not end `done` or `unchanged`.
 - **Delete** moves to Deleted Items; messages already in Deleted Items are left alone, so nothing is ever deleted permanently. **Read state** also works per conversation (every message in scope).
 - **Folder targets** are resolved through `list_folders`. Creating folders is out of scope until requested.
+
+### 11.3 Inbox rules (W9)
+
+List all rules in priority order, marking unsupported rules read-only. First-version conditions:
+From, Sent to, Subject contains and Subject-or-body contains. Actions: Move to folder and Stop
+processing more rules. Partial edits keep omitted fields; null conditions clear them, so a proposal
+shows only the fields the request supplied.
+Every create/update/toggle/reorder/delete requires a proposed write, explicit human confirmation,
+a single OWS write and fresh read-back. Confirmation binds account and complete current rule state.
+Enable/disable is a separate update. Reordering refuses collections containing unsupported rules,
+which must never be rewritten. Unknown outcomes must be checked in Outlook before repeating.
 
 ## 12. Phases
 
@@ -242,7 +256,8 @@ Requirements:
 Logging, retries, bounds and errors are specified in [architecture §9](architecture.md). The essentials:
 
 - Never log mail content, addresses, query text or credentials.
-- Never retry a write automatically.
+- Never retry a write automatically. Reads, including each item of a Graph `$batch`, are retried on 429/502/503/504; an item that still fails keeps its last status.
+- "Not found" leaves the cause open: deleted, moved out of reach, or a wrong id.
 
 ## 14. Open decisions
 
@@ -251,50 +266,3 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
-
-
-### Inbox rules (W9)
-
-List all rules in priority order, marking unsupported rules read-only. First-version conditions:
-From, Sent to, Subject contains and Subject-or-body contains. Actions: Move to folder and Stop
-processing more rules. Partial edits keep omitted fields; null conditions clear them.
-Every create/update/toggle/reorder/delete requires a proposed write, explicit human confirmation,
-a single OWS write and fresh read-back. Confirmation binds account and complete current rule state.
-Enable/disable is a separate update. Reordering refuses collections containing unsupported rules,
-which must never be rewritten. Unknown outcomes must be checked in Outlook before repeating.
-
-H17 mutation result contract: `set_read_state`, `set_flag`, `move_messages` and `delete_messages`
-default to `continue_on_error=true`. Each returns results and counts even when a later chunk fails.
-Clear rejection is failed; successful work is done, already satisfied work is unchanged, ambiguous
-unconfirmed work is unknown (including failed read-back). With false, later chunks are failed with
-`not sent` detail and are never sent. No automatic write retries.
-
-H20: explicitly supplied export `message_ids` are authoritative, like `get_message(id)`, including
-hidden, Sync Issues and out-of-reach folders when Graph can read the id. Only label and merge these
-messages with other selections; reach/scope filters still govern range and conversation selections.
-Copies remain merged and message limits still apply.
-
-H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
-expands each conversation up to the existing 1,000-message server listing cap and reports truncation
-in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
-messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
-ids and error results remain detailed. Counts cover the entire deduplicated selection.
-
-H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
-to UTC before building the search/window and cursor. MCP and web search pass dates through;
-normalization is authoritative at `Mailbox.search`, shared by both callers.
-
-H25 UI reader: selecting a message loads the whole chosen unique/full body in one request, with no
-total body-size ceiling: the web endpoint asks the service for the whole body (`max_chars=None`), so
-the message is read from the server once. MCP `get_message` keeps its bounded chunks and `next_offset`
-(an agent's token budget). A failure reports that the complete message could not be loaded, never a
-partial body; an answer for a message no longer selected is ignored.
-
-H27/H28 coverage: the first per-folder listing page includes requested-window Deleted/Junk
-exclusion counts (including subfolders) from the existing count batch, without an extra count call.
-Continuation pages do not repeat those full-window exclusions. Unavailable counts are not replaced
-with stale folder totals. `server_total` counts copies separately and includes meeting invitations,
-cancellations and RSVPs even when `include_meeting_mail=false` hides them; no second counting path.
-H29 NotFound text leaves the cause open: deletion, moving out of reach or an incorrect id.
-H33 Graph batch items retry the same transient statuses as single reads (429/502/503/504), only
-resending failed items and retaining the final status on exhaustion. Writes remain single-attempt.

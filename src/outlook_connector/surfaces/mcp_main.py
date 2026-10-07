@@ -460,7 +460,8 @@ def build_server(context: AppContext) -> FastMCP:
         include_deleted_items: IncludeDeleted = False,
         continue_on_error: bool = True,
     ) -> MutationResult:
-        """Mark messages read or unread (read receipts are never sent). A result per message."""
+        """Mark messages read or unread (read receipts are never sent). Results and counts; when
+        conversations expand past 100 messages, their done/unchanged ones are only counted."""
         return await (await services()).mutations.set_read(
             message_ids or [],
             read,
