@@ -35,7 +35,7 @@ def mailbox(fake: FakeGraph, tmp_path: Path) -> Mailbox:
 
 async def test_folders_have_paths_and_are_cached(mailbox: Mailbox, fake: FakeGraph) -> None:
     folders = {f.id: f for f in await mailbox.folders()}
-    assert folders["f-rie"].path == "Inbox/Projects/RIE"
+    assert folders["f-project"].path == "Inbox/Projects/Project Alpha"
     calls = len(fake.calls)
     await mailbox.folders()
     assert len(fake.calls) == calls  # served from the folder cache
@@ -47,7 +47,7 @@ async def test_resolve_folder_by_alias_path_name_or_id(mailbox: Mailbox, ref: st
 
 
 async def test_resolve_folder_path_and_unknown(mailbox: Mailbox) -> None:
-    assert (await mailbox.resolve_folder("inbox/projects/rie")).id == "f-rie"
+    assert (await mailbox.resolve_folder("inbox/projects/project alpha")).id == "f-project"
     with pytest.raises(InvalidRequest, match="Unknown folder"):
         await mailbox.resolve_folder("Nope")
 
@@ -234,9 +234,13 @@ async def test_search_requires_a_query(mailbox: Mailbox) -> None:
 async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(mailbox: Mailbox) -> None:
     conversation = await Conversations(mailbox).get_conversation("c-rel")
     assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3"]
-    assert [t.message.folder for t in conversation.messages] == ["Inbox", "Sent Items", "Inbox/Projects/RIE"]
+    assert [t.message.folder for t in conversation.messages] == [
+        "Inbox",
+        "Sent Items",
+        "Inbox/Projects/Project Alpha",
+    ]
     assert [t.text for t in conversation.messages] == ["First report", "Thanks!", "Follow-up with numbers"]
-    assert conversation.subject == "Relatório BE semanal"
+    assert conversation.subject == "Relatório de exemplo semanal"
     assert any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)
     assert conversation.coverage.excluded == {"deleted_or_junk": 1}
 
@@ -333,7 +337,7 @@ async def test_a_fresh_folder_cache_is_used_without_asking_the_server(
     transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
     other = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))  # a new process
     fake.calls.clear()
-    assert {f.id for f in await other.folders()} >= {"f-inbox", "f-rie"} and fake.calls == []
+    assert {f.id for f in await other.folders()} >= {"f-inbox", "f-project"} and fake.calls == []
 
 
 async def test_a_stale_folder_cache_is_never_used(mailbox: Mailbox, fake: FakeGraph, tmp_path: Path) -> None:
@@ -609,7 +613,7 @@ async def test_a_per_folder_cursor_keeps_each_folders_position(mailbox: Mailbox,
     assert [m.id for m in page.items] == ["n8", "n7", "n6"] and page.cursor
     state = cursors.decode(page.cursor, "list_messages")
     assert state["link"] is None
-    assert state["offsets"] == {"f-inbox": 1, "f-sent": 1, "f-archive": 0, "f-proj": 1, "f-rie": 0}
+    assert state["offsets"] == {"f-inbox": 1, "f-sent": 1, "f-archive": 0, "f-proj": 1, "f-project": 0}
 
 
 async def test_a_per_folder_listing_reads_only_folders_with_mail_in_the_window(

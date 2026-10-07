@@ -30,9 +30,9 @@ These are the use cases the design must serve. "Phase" refers to §12.
 |---|---|---|---|
 | A1 | "Search my whole mailbox for information on topic X." The agent tries several keywords, then pulls the full conversation of each match. | `search_messages` (repeated) → `get_conversation` | MVP |
 | A2 | "Summarize attention points from last week's email." | `list_messages(since=…)` across the mailbox → `get_conversation` per relevant message | MVP |
-| A3 | "Explain what the Teams 'Analytics Chat' is talking about." The agent reads Teams, decides it needs more context, searches email and reads attachments. | Teams MCP + this MCP side by side in the client. `search_messages`, `get_conversation`, attachment resources. **No cross-repo integration needed.** | MVP |
+| A3 | "Explain what the Teams 'Example Project Chat' is talking about." The agent reads Teams, decides it needs more context, searches email and reads attachments. | Teams MCP + this MCP side by side in the client. `search_messages`, `get_conversation`, attachment resources. **No cross-repo integration needed.** | MVP |
 | A4 | "Delete all marketing email from last week." | `list_messages`/`search_messages` → `move_messages(target=deleteditems)` | Mutations |
-| A5 | "Move inbound items to their project folders (National Grid, Naturgy, RIE…). If unsure, don't move; list them for me." | `list_folders`, `list_messages`, `get_message`; the agent classifies, then calls `move_messages` per target and reports the unsure items in chat | Mutations |
+| A5 | "Move inbound items to their project folders (Project Alpha, Project Beta, Project Gamma…). If unsure, don't move; list them for me." | `list_folders`, `list_messages`, `get_message`; the agent classifies, then calls `move_messages` per target and reports the unsure items in chat | Mutations |
 | A6 | Agent marks messages read/unread or flags them as part of triage. | `set_read_state`, `set_flag` | Mutations |
 | A7 | Agent sends an email on explicit request. | `send_draft` | Send |
 

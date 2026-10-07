@@ -65,7 +65,7 @@ class Folder(Compact):
     parent_id: str | None = None
     name: str
     well_known: str | None = None  # inbox, sentitems, archive, ... when the folder is a well-known one
-    path: str = ""  # "Inbox/Projects/RIE" style, filled by the service
+    path: str = ""  # "Inbox/Projects/Project Alpha" style, filled by the service
     total: int | None = None
     unread: int | None = None
     child_count: int | None = None

@@ -625,11 +625,11 @@ def sample_mailbox() -> FakeGraph:
     g.add_folder("f-junk", "Junk Email", alias="junkemail")
     g.add_folder("f-archive", "Archive", alias="archive")
     g.add_folder("f-proj", "Projects", parent="f-inbox")
-    g.add_folder("f-rie", "RIE", parent="f-proj")
+    g.add_folder("f-project", "Project Alpha", parent="f-proj")
     g.add(
         FakeMessage(
             "m1",
-            "Relatório BE semanal",
+            "Relatório de exemplo semanal",
             "f-inbox",
             "2026-09-28T09:00:00Z",
             conversation="c-rel",
@@ -640,7 +640,7 @@ def sample_mailbox() -> FakeGraph:
     g.add(
         FakeMessage(
             "m2",
-            "RE: Relatório BE semanal",
+            "RE: Relatório de exemplo semanal",
             "f-sent",
             "2026-09-28T10:00:00Z",
             conversation="c-rel",
@@ -653,8 +653,8 @@ def sample_mailbox() -> FakeGraph:
     g.add(
         FakeMessage(
             "m3",
-            "RE: Relatório BE semanal",
-            "f-rie",
+            "RE: Relatório de exemplo semanal",
+            "f-project",
             "2026-09-29T08:00:00Z",
             conversation="c-rel",
             text="Follow-up with numbers",

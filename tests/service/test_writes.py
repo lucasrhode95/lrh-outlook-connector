@@ -103,7 +103,7 @@ async def test_reply_defaults_and_self_replies(writes: Writes, fake: FakeGraph) 
     )
     saved = fake.messages[draft.id]
     assert saved.to == ("alice@example.com", "dan@example.com") and saved.cc == ("erin@example.com",)
-    assert saved.subject == "RE: Relatório BE semanal" and saved.conversation == "c-rel"
+    assert saved.subject == "RE: Relatório de exemplo semanal" and saved.conversation == "c-rel"
     own = await writes.create_draft(OutgoingMessage(reply_to_message_id="m2", text_body="Ping"))
     assert fake.messages[own.id].to == ("alice@example.com",)
     fake.messages["m5"].sender = "Me@Example.com"

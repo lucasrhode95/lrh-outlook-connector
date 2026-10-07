@@ -64,7 +64,7 @@
 <text class="card-subtitle" x="990" y="551"><tspan class="code">surfaces/web/web_main.py</tspan> <tspan class="code">serve_ui()</tspan> · <tspan class="code">routes.py</tspan>: Starlette JSON API + static JS</text>
 <rect x="100" y="588" width="810" height="367" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="118" y="626">Read</text>
-<g><title>Mail folders with paths (e.g. Inbox/Projects/RIE), well-known aliases and counts. → Mailbox.folders</title><text class="detail" x="118" y="656">• <tspan class="code">list_folders</tspan></text></g>
+<g><title>Mail folders with paths (e.g. Inbox/Projects/Project Alpha), well-known aliases and counts. → Mailbox.folders</title><text class="detail" x="118" y="656">• <tspan class="code">list_folders</tspan></text></g>
 <g><title>Messages newest first, from the server; folder optional (whole mailbox), date window, scope flags, cursor. → Mailbox.list_messages</title><text class="detail" x="118" y="683">• <tspan class="code">list_messages</tspan></text></g>
 <g><title>Server-side search of mail only; hits grouped by conversation in rank order, with each conversation's message_count. → Mailbox.search</title><text class="detail" x="118" y="710">• <tspan class="code">search_messages</tspan></text></g>
 <g><title>A whole conversation across folders, oldest first; body=unique strips quoted history. → Conversations.get_conversation</title><text class="detail" x="118" y="737">• <tspan class="code">get_conversation</tspan></text></g>

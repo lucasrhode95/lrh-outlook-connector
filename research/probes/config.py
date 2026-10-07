@@ -1,4 +1,4 @@
-"""Editable Microsoft defaults with private overrides in .local/probe-config.json."""
+"""Required private probe configuration in .local/probe-config.json."""
 
 from __future__ import annotations
 
@@ -14,52 +14,50 @@ LOCAL = Path(os.environ.get("OUTLOOK_PROBE_HOME", str(ROOT / ".local"))).expandu
 def load_config() -> dict:
     """Entry point: validate local configuration before token or network use."""
     path = LOCAL / "probe-config.json"
-    settings = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-    defaults = {
-        "tenant": "organizations",
-        "expected_user": "",
-        "login_url": "https://login.microsoftonline.com",
-        "graph_resource": "https://graph.microsoft.com",
-        "graph_url": "https://graph.microsoft.com/v1.0",
-        "ows_url": "https://outlook.cloud.microsoft/owa/service.svc",
-        "profiles": {
-            "read": [
-                "27922004-5251-4030-b22d-91ecd9a37ea4",
-                "https://graph.microsoft.com/Mail.Read",
-            ],
-            "write": [
-                "9199bf20-a13f-4107-85dc-02114787ef48",
-                "https://outlook.office.com/.default",
-            ],
-            "search": [
-                "9199bf20-a13f-4107-85dc-02114787ef48",
-                "https://outlook.office.com/search/.default",
-            ],
-        },
-        "substrate_urls": [
-            "https://outlook.office.com/searchservice/api/v2/query",
-            "https://outlook.office.com/search/api/v2/query",
-            "https://substrate.office.com/searchservice/api/v2/query",
-        ],
-        "denied_pairs": [],
-    }
-    if not isinstance(settings, dict) or settings.keys() - defaults.keys():
+    try:
+        settings = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         raise SystemExit(
-            "probe-config.json must be an object containing only documented settings."
+            f"Missing probe configuration: {path}. "
+            "Copy research/probe-config.example.json there and configure your environment."
+        ) from None
+    except (OSError, json.JSONDecodeError):
+        raise SystemExit("Cannot read probe-config.json as valid JSON.") from None
+    required = {
+        "tenant",
+        "expected_user",
+        "login_url",
+        "graph_resource",
+        "graph_url",
+        "ows_url",
+        "profiles",
+        "substrate_urls",
+        "denied_pairs",
+    }
+    if not isinstance(settings, dict):
+        raise SystemExit("probe-config.json must contain an object.")
+    missing = required - settings.keys()
+    unknown = settings.keys() - required
+    if missing:
+        raise SystemExit(
+            "Missing probe configuration settings: " + ", ".join(sorted(missing))
         )
-    defaults.update(settings)
+    if unknown:
+        raise SystemExit(
+            "Unknown probe configuration settings: " + ", ".join(sorted(unknown))
+        )
     for key in ("tenant", "expected_user"):
-        if not isinstance(defaults[key], str) or (
-            key == "tenant" and not defaults[key].strip()
+        if not isinstance(settings[key], str) or (
+            key == "tenant" and not settings[key].strip()
         ):
             raise SystemExit(f"{key} must be a string; tenant must not be empty.")
-        defaults[key] = defaults[key].strip()
+        settings[key] = settings[key].strip()
     urls = [
-        defaults[key] for key in ("login_url", "graph_resource", "graph_url", "ows_url")
+        settings[key] for key in ("login_url", "graph_resource", "graph_url", "ows_url")
     ]
-    if not isinstance(defaults["substrate_urls"], list):
+    if not isinstance(settings["substrate_urls"], list):
         raise SystemExit("substrate_urls must be a list of HTTPS URLs.")
-    urls.extend(defaults["substrate_urls"])
+    urls.extend(settings["substrate_urls"])
     for url in urls:
         parsed = urlsplit(url) if isinstance(url, str) else None
         if (
@@ -74,12 +72,12 @@ def load_config() -> dict:
             raise SystemExit(
                 "Probe URLs must use HTTPS without credentials, query strings or fragments."
             )
-    profiles = defaults["profiles"]
+    profiles = settings["profiles"]
     if not isinstance(profiles, dict) or set(profiles) != {"read", "write", "search"}:
         raise SystemExit(
             "profiles must define read, write and search client/scope pairs."
         )
-    pairs = defaults["denied_pairs"]
+    pairs = settings["denied_pairs"]
     if not isinstance(pairs, list):
         raise SystemExit("denied_pairs must be a list of client/scope pairs.")
     for pair in [*profiles.values(), *pairs]:
@@ -91,14 +89,14 @@ def load_config() -> dict:
             raise SystemExit(
                 "Each client/scope pair must contain two nonempty strings."
             )
-    defaults["authority"] = (
-        defaults["login_url"].rstrip("/")
+    settings["authority"] = (
+        settings["login_url"].rstrip("/")
         + "/"
-        + quote(defaults["tenant"], safe="")
+        + quote(settings["tenant"], safe="")
         + "/oauth2/v2.0"
     )
-    defaults["allowed_hosts"] = {urlsplit(url).hostname for url in urls}
-    return defaults
+    settings["allowed_hosts"] = {urlsplit(url).hostname for url in urls}
+    return settings
 
 
 SETTINGS = load_config()

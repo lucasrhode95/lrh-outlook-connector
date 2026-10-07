@@ -85,7 +85,7 @@ async def test_replies_reference_the_original_with_ows_ids(fake: FakeGraph) -> N
     fake.messages["m-1_a"] = fake.messages.pop("m1")
     fake.messages["m-1_a"].id = "m-1_a"
     await writer_for(fake).create_draft(
-        proposal(reply_to_message_id="m-1_a", reply_all=True, subject="RE: Relatório BE semanal")
+        proposal(reply_to_message_id="m-1_a", reply_all=True, subject="RE: Relatório de exemplo semanal")
     )
     item = fake.ows_calls[0][1]["Items"][0]
     assert item["__type"] == "ReplyAllToItem:#Exchange" and item["ReferenceItemId"]["Id"] == "m/1+a"
@@ -176,11 +176,11 @@ async def test_move_to_a_well_known_or_any_folder(fake: FakeGraph) -> None:
     assert await writer.move(["m1"], FolderTarget("f-archive", "archive")) == {"m1": None}
     assert fake.messages["m1"].folder == "f-archive"
     assert fake.ows_calls[-1][1]["ToFolderId"]["BaseFolderId"]["__type"] == "DistinguishedFolderId:#Exchange"
-    assert await writer.move(["m1"], FolderTarget("f-rie")) == {"m1": None}
-    assert fake.messages["m1"].folder == "f-rie"
+    assert await writer.move(["m1"], FolderTarget("f-project")) == {"m1": None}
+    assert fake.messages["m1"].folder == "f-project"
     assert fake.ows_calls[-1][1]["ToFolderId"]["BaseFolderId"] == {
         "__type": "FolderId:#Exchange",
-        "Id": "f/rie",
+        "Id": "f/project",
     }
 
 
