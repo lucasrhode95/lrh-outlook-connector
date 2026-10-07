@@ -135,3 +135,8 @@ uv run ruff check .
 uv run ruff format --check .
 uv run pyright
 ```
+
+
+H23 search dates: the service interprets naive `since`/`until` as UTC and converts aware dates
+to UTC before building the search/window and cursor. MCP and web search pass dates through;
+normalization is authoritative at `Mailbox.search`, shared by both callers.

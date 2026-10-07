@@ -165,3 +165,14 @@ async def test_mutation_tools_report_per_message(server: FastMCP, fake: FakeGrap
     assert deleted["counts"] == {"done": 1} and fake.messages["m5"].folder == "f-deleted"
     flagged = await call(server, "set_flag", message_ids=["m1"], flagged=True)
     assert flagged["counts"] == {"done": 1}
+
+
+async def test_search_naive_dates_use_service_normalization(server: FastMCP) -> None:
+    result = await call(
+        server,
+        "search_messages",
+        query="relatório",
+        since="2026-09-28T09:30:00",
+        until="2026-09-29T07:00:00Z",
+    )
+    assert [m["id"] for hit in result["conversations"] for m in hit["matching_messages"]] == ["m2"]

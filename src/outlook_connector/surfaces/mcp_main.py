@@ -233,8 +233,8 @@ def build_server(context: AppContext) -> FastMCP:
         grouped by conversation in rank order, with each conversation's message_count."""
         return await (await services()).mailbox.search(
             query,
-            since=_utc(since),
-            until=_utc(until),
+            since=since,
+            until=until,
             folder=folder,
             limit=limit,
             cursor=cursor,
@@ -301,7 +301,8 @@ def build_server(context: AppContext) -> FastMCP:
         combine: Annotated[
             CombineMode,
             Field(
-                description="per_conversation: one TXT per conversation; all: one TXT; none: one TXT per message."
+                description="per_conversation: one TXT per conversation; all: one TXT; "
+                "none: one TXT per message."
             ),
         ] = "per_conversation",
         body: Literal["unique", "full"] = "unique",
