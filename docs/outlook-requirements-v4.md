@@ -242,3 +242,10 @@ Logging, retries, bounds and errors are specified in [architecture §9](architec
 | O3 | UI layout for browsing. **Proposal:** a folder picker (plus an "all mail, recent" view) listing conversations grouped by `conversationId`, expandable to individual messages; a search box (online); an instant filter over the loaded list; checkboxes for conversations and messages; export options per §10.1 | Confirm while building U1 |
 | O4 | `get_conversation` default excludes Deleted Items and Junk: confirm or change | Confirm during MVP |
 | O5 | Conversation-header quality for branch detection | R4, before §10.3 |
+
+
+H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
+expands each conversation up to the existing 1,000-message server listing cap and reports truncation
+in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
+messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
+ids and error results remain detailed. Counts cover the entire deduplicated selection.

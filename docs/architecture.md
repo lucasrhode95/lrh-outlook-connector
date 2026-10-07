@@ -388,3 +388,10 @@ Web endpoints mirror the read tools (`GET /api/folders`, `/api/messages`, `/api/
 |---|---|---|
 | A1 | Auth | **MSAL + encrypted cache** (`msal-extensions`, fail-closed). An explicit `--unsecure` plaintext cache (a separate file in the data directory) is available during development. |
 | A2 | Package / CLI name | **`outlook_connector` / `outlook-connector`** |
+
+
+H21: the 100-message mutation limit applies to explicit `message_ids` only. `set_read_state`
+expands each conversation up to the existing 1,000-message server listing cap and reports truncation
+in `notes`. Changes use normal 20-item chunks and retain all in-scope copies. Above 100 selected
+messages, ordinary conversation-expanded done/unchanged results are summarized in `counts`; explicit
+ids and error results remain detailed. Counts cover the entire deduplicated selection.
