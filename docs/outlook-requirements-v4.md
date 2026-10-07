@@ -2,7 +2,7 @@
 
 **Status:** Decided scope  
 **Date:** 2026-10-02  
-**Evidence:** [Outlook API research](outlook-api-research.md) (single research record), `web-app-download/` capture (git-ignored)  
+**Evidence:** [Outlook API research](outlook-api-research.md) (single research record), private exploratory browser capture reviewed outside the repository
 **Work register:** [Outlook roadmap](outlook-roadmap.md)
 
 This document records the decisions made after the authentication investigation. Anything still undecided is listed in §14. Do not resolve it by assumption.

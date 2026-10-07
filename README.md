@@ -9,6 +9,11 @@ A local connector for one user's Exchange Online mailbox. It has two surfaces: a
 
 **Terminology:** this project uses **conversation** consistently for the Exchange/Graph `conversationId` grouping. A conversation is what email users and many clients commonly call a **thread**; there is no separate thread id in this connector.
 
+Research probes call live endpoints with explicit authorization. Browser captures and
+downloaded bundles are temporary exploratory inputs kept outside the repository; the
+published research contains endpoint documentation and findings, not capture files or
+capture-processing tooling.
+
 ## Setup
 
 Python ≥ 3.12.
