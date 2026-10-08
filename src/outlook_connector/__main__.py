@@ -163,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="?",
         default="graph",
         choices=sorted(config.PROFILES),
-        help="Which client profile to sign in (default: read).",
+        help="Which client profile to sign in (default: graph).",
     )
     auth.add_argument("--force", action="store_true", help="Sign in again even if a silent token works.")
     auth.add_argument("--sign-out", action="store_true", help="Delete the token cache (all profiles).")
