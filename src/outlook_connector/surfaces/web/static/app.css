@@ -259,7 +259,9 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
 .weekdays, .calendar-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); justify-items: center; }
 .weekdays { margin-bottom: 5px; color: var(--muted); font-size: 12px; }
 .calendar-day { display: grid; width: 36px; height: 36px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: none; }
-.calendar-day:hover { background: var(--accent-soft); }
+.calendar-day:not(:disabled) { font-weight: 700; }
+.calendar-day:hover:not(:disabled) { background: var(--accent-soft); }
+.calendar-day:disabled { color: var(--muted); opacity: .38; cursor: default; }
 .calendar-day.outside-month { color: var(--muted); opacity: .65; }
 .calendar-day.in-range { border-radius: 0; background: var(--accent-soft); }
 .calendar-day.range-start, .calendar-day.range-end { border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; }

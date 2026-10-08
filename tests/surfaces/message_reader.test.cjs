@@ -25,6 +25,7 @@ class Element {
     };
   }
   addEventListener() {}
+  querySelector() { return { focus() {} }; }
   setAttribute(name, value) {
     this.attributes.set(name, value);
     if (name === 'disabled') this.disabled = true;
@@ -131,4 +132,22 @@ test('future calendar dates are disabled and cannot be selected', () => {
   vm.runInContext('chooseDate(selectedDate);', ui.context);
   assert.equal(ui.nodes.get('since').value, '');
   assert.equal(ui.nodes.get('until').value, '');
+});
+
+test('selecting an end date leaves the date picker open', () => {
+  const ui = reader(async () => ({}));
+  const today = new Date();
+  const key = date => String(date.getFullYear()).padStart(4, '0') + '-' +
+    String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+  const start = key(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2));
+  const end = key(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
+  vm.runInContext('$("calendar").hidden = false;', ui.context);
+  ui.context.selectedDate = start;
+  vm.runInContext('chooseDate(selectedDate);', ui.context);
+  ui.context.selectedDate = end;
+  vm.runInContext('chooseDate(selectedDate);', ui.context);
+  assert.equal(ui.nodes.get('since').value, start);
+  assert.equal(ui.nodes.get('until').value, end);
+  assert.equal(ui.nodes.get('calendar').hidden, false);
+  assert.match(ui.nodes.get('calendar-hint').textContent, /Range selected/);
 });
