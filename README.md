@@ -110,7 +110,8 @@ server's count for the window (copies counted separately, and meeting mail inclu
 `export_messages` takes conversations, message ids and/or a folder/date window (`since`, `until`,
 `folder`), up to 2,000 messages (`limit` lowers that). Scope narrows only folder/date-window
 selections. Conversation and explicit message selections stay whole; scope alone is not a selection.
-`format="jsonl"` writes one JSON record per message for agents; `txt` is for people. Every exported message carries its message,
+`format="jsonl"` writes one JSON record per message for agents; `txt` is for people. JSONL uses one `received_at` timestamp, taking Graph's receive time and falling back to its send time when receive time is absent.
+Every exported message carries its message,
 conversation and Internet ids, and a message that exists in several folders is exported once, with
 `also_in` naming the other folders. Messages selected by id are exported whatever their folder (also
 hidden folders and Sync Issues); folder/date windows follow the scope rules above; ids that

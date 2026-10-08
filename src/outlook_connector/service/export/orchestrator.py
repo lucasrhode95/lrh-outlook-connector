@@ -35,6 +35,7 @@ from outlook_connector.service.export.formatter import RenderedMessage, body_tex
 from outlook_connector.service.export.packaging import TextFile, package
 from outlook_connector.service.failures import (
     THROTTLING,
+    describe,
     error_block,
     error_from,
     error_summary,
@@ -213,7 +214,7 @@ class Exports:
         fetched = await self.reader.get_messages(message_ids)
         gone = [mid for mid, m in fetched.messages.items() if m is None]
         if fetched.failed or gone:
-            cases = [f"{mid} (failed: {f.describe()})" for mid, f in fetched.failed.items()]
+            cases = [f"{mid} (failed: {describe(f)})" for mid, f in fetched.failed.items()]
             cases += [f"{mid} (not found: deleted, moved out of reach, or wrong id)" for mid in gone]
             shown = "; ".join(cases[:SHOWN_FAILURES]) + ("; ..." if len(cases) > SHOWN_FAILURES else "")
             text = (
@@ -435,7 +436,7 @@ def _excluded_note(excluded: dict[str, int]) -> str:
 
 
 def _day(message: MessageSummary) -> str:
-    stamp = message.received_at or message.sent_at
+    stamp = message.received_at
     return stamp.strftime("%Y-%m-%d") if stamp else "undated"
 
 

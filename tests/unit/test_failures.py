@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from outlook_connector.domain.errors import Failure, Upstream
+from outlook_connector.domain.models import ExportError
 from outlook_connector.service.failures import describe, error_from, error_summary, export_error
 
 
@@ -40,6 +41,21 @@ def test_no_response_and_errors_without_an_answer() -> None:
     assert (
         describe(error_from("downloading an attachment", answered)) == "HTTP 502 BadGateway, request-id r-2"
     )
+
+
+def test_fetched_and_export_failures_share_one_detail_format() -> None:
+    failure = Failure(status=502, code="BadGateway", message="Temporary failure", request_id="r-2")
+    exported = ExportError(
+        step="fetching message bodies",
+        status=502,
+        code="BadGateway",
+        message="Temporary failure",
+        request_id="r-2",
+        likely_cause="Microsoft service or network problem",
+        retry=True,
+        fix="retry later",
+    )
+    assert describe(failure) == describe(exported)
 
 
 def test_summary_names_every_kind_of_gap_with_its_causes() -> None:

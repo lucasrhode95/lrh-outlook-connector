@@ -606,6 +606,7 @@ async def test_jsonl_export_has_one_record_per_message(exports: Exports) -> None
     assert artifact.filename.endswith(".jsonl") and artifact.content_type.startswith("application/x-ndjson")
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
     assert [r["id"] for r in records] == ["m1", "m2", "m3", "m4"]
+    assert records[0]["received_at"] == "2026-09-28T09:00:00+00:00"
     assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report"
     assert records[2]["attachments"][0]["name"] == "numbers.xlsx" and records[0]["from"]["address"]
 

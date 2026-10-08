@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from outlook_connector.domain.errors import ConnectorError, Failure, InvalidRequest, Upstream
+from outlook_connector.domain.errors import ConnectorError, Failure, Upstream
 from outlook_connector.remote.transport import (
     RETRY_STATUSES,
     Transport,
@@ -21,8 +21,8 @@ from outlook_connector.remote.transport import (
     service_error,
     shorten,
 )
+from outlook_connector.remote.urls import graph_url
 
-GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 PREFER_IMMUTABLE = 'IdType="ImmutableId"'
 PREFER_TEXT_BODY = 'outlook.body-content-type="text"'
 PROFILE = "read"  # Graph calls use the read sign-in
@@ -60,25 +60,16 @@ class Graph:
         self._transport = transport
         self._batch_gate = asyncio.Semaphore(BATCH_CONCURRENCY)
 
-    def _absolute(self, path_or_url: str) -> str:
-        if path_or_url.startswith("https://"):
-            if not path_or_url.startswith(GRAPH_ROOT + "/"):
-                raise InvalidRequest("Continuation link does not point at Microsoft Graph.")
-            return path_or_url
-        return GRAPH_ROOT + path_or_url
-
     async def get(
         self, path: str, params: Mapping[str, Any] | None = None, *, prefer: tuple[str, ...] = ()
     ) -> dict[str, Any]:
-        url = self._absolute(relative(path, params) if not path.startswith("https://") else path)
+        url = graph_url(path if "://" in path else relative(path, params))
         data = await self._transport.json("GET", url, profile=PROFILE, headers=_prefer(*prefer))
         return data if isinstance(data, dict) else {}
 
     async def get_bytes(self, path: str, *, max_bytes: int) -> bytes:
         """A small binary GET (a profile photo), read whole."""
-        response = await self._transport.request(
-            "GET", self._absolute(path), profile=PROFILE, headers=_prefer()
-        )
+        response = await self._transport.request("GET", graph_url(path), profile=PROFILE, headers=_prefer())
         if len(response.content) > max_bytes:
             raise Upstream("Response too large.")
         return response.content
@@ -86,7 +77,7 @@ class Graph:
     async def post(self, path: str, body: Any) -> dict[str, Any]:
         """POST for read-style APIs (search). Idempotent, so retried like a GET."""
         data = await self._transport.json(
-            "POST", self._absolute(path), profile=PROFILE, headers=_prefer(), json_body=body, retry=True
+            "POST", graph_url(path), profile=PROFILE, headers=_prefer(), json_body=body, retry=True
         )
         return data if isinstance(data, dict) else {}
 
@@ -186,7 +177,7 @@ class Graph:
         dest.parent.mkdir(parents=True, exist_ok=True)
         with dest.open("wb") as handle:
             return await self._transport.download(
-                self._absolute(path), handle, profile=PROFILE, headers=_prefer(), max_bytes=max_bytes
+                graph_url(path), handle, profile=PROFILE, headers=_prefer(), max_bytes=max_bytes
             )
 
 

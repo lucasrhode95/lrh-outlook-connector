@@ -17,6 +17,7 @@ from outlook_connector.domain.errors import (
     Throttled,
     Upstream,
 )
+from outlook_connector.remote import graph_mapping as mapping
 from outlook_connector.remote.graph import BATCH_CONCURRENCY, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
@@ -42,6 +43,16 @@ def reader_for(fake: FakeGraph) -> GraphMailReader:
 @pytest.fixture
 def fake() -> FakeGraph:
     return sample_mailbox()
+
+
+def test_summary_uses_one_received_first_timestamp() -> None:
+    data = FakeMessage("time", "Date", "f-inbox", "2026-09-30T12:00:00Z").json(text_body=True)
+    data["receivedDateTime"] = "2026-09-30T12:00:00Z"
+    data["sentDateTime"] = "2026-09-30T11:00:00Z"
+    assert mapping.summary(data).received_at == datetime(2026, 9, 30, 12, tzinfo=UTC)
+
+    data["receivedDateTime"] = None
+    assert mapping.summary(data).received_at == datetime(2026, 9, 30, 11, tzinfo=UTC)
 
 
 async def test_folders_are_walked_recursively_with_aliases(fake: FakeGraph) -> None:
@@ -108,6 +119,13 @@ async def test_list_messages_in_one_folder(fake: FakeGraph) -> None:
 async def test_conversation_spans_folders_and_never_uses_orderby(fake: FakeGraph) -> None:
     messages, truncated = await reader_for(fake).conversation("c-rel")
     assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-project", "f-junk"} and not truncated
+
+
+async def test_summary_lookup_failures_keep_structured_details(fake: FakeGraph) -> None:
+    fake.fail[r"/me/messages/m1"] = 403
+    result = await reader_for(fake).get_summaries(["m1"])
+    assert isinstance(result.failed["m1"], Failure)
+    assert result.failed["m1"].status == 403
 
 
 async def test_large_conversation_reports_truncation(
@@ -280,6 +298,16 @@ async def test_a_download_that_keeps_timing_out_is_a_domain_error(fake: FakeGrap
     assert raised.value.failure == Failure(status=None, message=str(raised.value))
 
 
+async def test_download_renews_a_rejected_token_once(fake: FakeGraph, tmp_path: Path) -> None:
+    tokens_ = StaticTokens()
+    fake.reject_tokens = 1
+    transport = Transport(tokens_, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
+    reader = GraphMailReader(Graph(transport))
+    size = await reader.download_attachment("m3", "a1", tmp_path / "renewed.xlsx")
+    assert size == len(b"xlsx-bytes")
+    assert tokens_.renewals == [{"force_refresh": True}]
+
+
 async def test_throttling_is_retried(fake: FakeGraph) -> None:
     fake.throttle_next = 2
     folders = await reader_for(fake).list_folders()
@@ -292,15 +320,16 @@ async def test_persistent_throttling_raises(fake: FakeGraph) -> None:
         await reader_for(fake).list_folders()
 
 
-async def test_continuation_links_must_stay_on_graph(fake: FakeGraph) -> None:
+@pytest.mark.parametrize(
+    "page",
+    [
+        "https://evil.example.com/v1.0/me/messages",
+        "https://outlook.office.com/v1.0/me/messages",
+    ],
+)
+async def test_continuation_links_must_stay_on_graph(fake: FakeGraph, page: str) -> None:
     with pytest.raises(InvalidRequest):
-        await reader_for(fake).list_messages(
-            folder_id=None,
-            since=None,
-            until=None,
-            page_size=5,
-            page="https://evil.example.com/v1.0/me/messages",
-        )
+        await reader_for(fake).list_messages(folder_id=None, since=None, until=None, page_size=5, page=page)
 
 
 async def test_odata_quotes_are_escaped_in_conversation_ids() -> None:

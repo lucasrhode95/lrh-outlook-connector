@@ -96,8 +96,8 @@ def gone(step: ExportStep) -> ExportError:
     return export_error(step, Failure(status=404, code="ErrorItemNotFound"))
 
 
-def describe(error: ExportError) -> str:
-    """'HTTP 429 TooManyRequests: <message>, request-id <id>', or what happened without an answer."""
+def describe(error: Failure | ExportError) -> str:
+    """Format one structured failure consistently for fetched-result details and export errors."""
     if error.status:
         text = f"HTTP {error.status} {error.code or 'no error code'}"
         text += f": {error.message}" if error.message else ""

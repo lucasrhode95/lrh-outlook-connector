@@ -18,7 +18,6 @@ from outlook_connector.remote.graph import (
     failure_of,
     raise_for_failures,
     relative,
-    sub_failure,
 )
 from outlook_connector.remote.ports import (
     BodyFormat,
@@ -288,7 +287,7 @@ class GraphMailReader(MailReader):
             elif response.ok:
                 out.summaries[mid] = mapping.summary(response.body)
             else:
-                out.failed[mid] = str(sub_failure(response))
+                out.failed[mid] = failure_of(response)
         return out
 
     @_named("listing attachments")

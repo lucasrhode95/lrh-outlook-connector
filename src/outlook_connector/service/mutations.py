@@ -35,6 +35,7 @@ from outlook_connector.remote.ports import (
     FolderTarget,
     MailWriter,
 )
+from outlook_connector.service.failures import describe
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.scope import validate_scope
 
@@ -196,7 +197,7 @@ class Mutations:
         for mid in ids:
             summary = summaries.get(mid)
             if mid in before.failed:
-                results[mid] = ItemResult(id=mid, status="failed", detail=before.failed[mid])
+                results[mid] = ItemResult(id=mid, status="failed", detail=describe(before.failed[mid]))
             elif summary is None:
                 results[mid] = ItemResult(id=mid, status="not_found", detail="Not on the server.")
             elif summary.folder_id not in folders or summary.folder_id in hidden:
