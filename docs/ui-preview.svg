@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="590" viewBox="0 0 1000 590" role="img" aria-labelledby="title description">
+  <title id="title">Illustrative Outlook connector UI preview</title>
+  <desc id="description">A browser window mockup with a fictional inbox, sample sender labels, synthetic message subjects, and a sample conversation reader. No real mailbox content appears.</desc>
+  <defs>
+    <linearGradient id="backdrop" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f5f8fb"/><stop offset="1" stop-color="#e6edf3"/></linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#183153" flood-opacity=".14"/></filter>
+    <style>text{font-family:Arial,Helvetica,sans-serif;fill:#22384d}.brand{font-size:20px;font-weight:700}.small{font-size:13px;fill:#607488}.row{font-size:14px}.subject{font-size:14px;font-weight:600}.reader{font-size:16px;font-weight:700}.preview{font-size:13px;fill:#607488}.badge{font-size:11px;font-weight:700;fill:#176c73}</style>
+  </defs>
+  <rect width="1000" height="590" rx="28" fill="url(#backdrop)"/>
+  <g filter="url(#shadow)">
+    <rect x="32" y="28" width="936" height="534" rx="18" fill="#fff"/>
+    <path d="M50 28h900a18 18 0 0 1 18 18v32H32V46a18 18 0 0 1 18-18Z" fill="#eef3f7"/>
+    <circle cx="56" cy="54" r="6" fill="#e89991"/><circle cx="76" cy="54" r="6" fill="#e5c678"/><circle cx="96" cy="54" r="6" fill="#82b79c"/>
+    <rect x="184" y="42" width="600" height="24" rx="12" fill="#fff" stroke="#dce4eb"/>
+    <text x="204" y="59" class="small">Local Outlook connector · illustrative preview</text>
+    <rect x="32" y="78" width="936" height="58" fill="#173b5d"/>
+    <circle cx="68" cy="107" r="16" fill="#7ed1c5"/><path d="M60 107h16m-8-8v16" stroke="#173b5d" stroke-width="3" stroke-linecap="round"/>
+    <text x="98" y="114" font-size="19" font-weight="700" fill="#fff">Outlook connector</text>
+    <rect x="674" y="91" width="242" height="32" rx="16" fill="#fff" fill-opacity=".14"/>
+    <text x="695" y="112" font-size="13" fill="#fff">Synthetic mailbox preview</text>
+    <rect x="32" y="136" width="188" height="426" fill="#f5f8fa"/>
+    <text x="56" y="173" class="small" font-weight="700">FOLDERS</text>
+    <rect x="46" y="188" width="160" height="38" rx="9" fill="#dceaf2"/><text x="64" y="212" class="row" font-weight="700">Inbox</text>
+    <text x="64" y="252" class="row">Archive</text><text x="64" y="292" class="row">Sent Items</text><text x="64" y="332" class="row">Drafts</text>
+    <line x1="48" y1="357" x2="202" y2="357" stroke="#dce5ec"/>
+    <text x="56" y="388" class="small">Scope filters</text>
+    <rect x="57" y="405" width="15" height="15" rx="3" fill="#fff" stroke="#9fb0bd"/><text x="82" y="418" class="small">Invites / RSVPs</text>
+    <rect x="57" y="435" width="15" height="15" rx="3" fill="#fff" stroke="#9fb0bd"/><text x="82" y="448" class="small">Deleted / Junk</text>
+    <rect x="220" y="136" width="385" height="426" fill="#fff"/>
+    <text x="246" y="174" class="brand">Inbox</text><text x="246" y="196" class="small">3 sample conversations</text>
+    <rect x="238" y="213" width="350" height="76" rx="10" fill="#f0f6f9"/>
+    <circle cx="260" cy="239" r="5" fill="#2585b2"/><text x="277" y="243" class="row" font-weight="700">Sample sender</text><text x="522" y="243" class="small">9:31 AM</text>
+    <text x="277" y="266" class="subject">Illustrative project update</text><text x="277" y="282" class="preview">Synthetic preview text for the documentation image.</text>
+    <line x1="246" y1="306" x2="580" y2="306" stroke="#e5ebf0"/>
+    <text x="277" y="333" class="row">Sample sender</text><text x="522" y="333" class="small">Yesterday</text>
+    <text x="277" y="357" class="subject">Planning notes</text><text x="277" y="377" class="preview">A fictional message shown only as a layout example.</text>
+    <line x1="246" y1="397" x2="580" y2="397" stroke="#e5ebf0"/>
+    <text x="277" y="426" class="row">Sample sender</text><text x="522" y="426" class="small">Mon</text>
+    <text x="277" y="450" class="subject">Meeting follow-up</text><text x="277" y="470" class="preview">No names, addresses, or real message content.</text>
+    <rect x="605" y="136" width="363" height="426" fill="#fff" stroke="#e3eaf0"/>
+    <text x="636" y="176" class="small">SAMPLE CONVERSATION</text><text x="636" y="211" class="reader">Illustrative project update</text>
+    <rect x="636" y="230" width="294" height="34" rx="17" fill="#edf5f8"/><text x="652" y="252" class="badge">SYNTHETIC EXAMPLE</text>
+    <text x="636" y="304" class="row">Sample sender</text><text x="636" y="338" class="preview">This reader panel shows the shape of a conversation</text><text x="636" y="359" class="preview">without using content from any mailbox.</text>
+    <text x="636" y="403" class="preview">Attachments and export actions appear in the app.</text>
+    <rect x="636" y="474" width="138" height="38" rx="10" fill="#147e84"/><text x="663" y="499" font-size="14" font-weight="700" fill="#fff">Export view</text>
+    <rect x="784" y="474" width="146" height="38" rx="10" fill="#edf2f6"/><text x="808" y="499" font-size="14" font-weight="700" fill="#38536a">Download</text>
+  </g>
+  <text x="32" y="582" class="small">Illustrative UI mockup · all visible mailbox text is synthetic</text>
+</svg>
