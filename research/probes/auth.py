@@ -1,11 +1,11 @@
 """Device-code sign-in for the research probes.
 
-    python research/probes/auth.py read      # Outlook Mobile -> Graph Mail.Read
-    python research/probes/auth.py write     # One Outlook Web -> outlook.office.com (OWS)
+    python research/probes/auth.py graph      # Outlook Mobile -> Graph Mail.Read
+    python research/probes/auth.py outlook     # One Outlook Web -> outlook.office.com (OWS)
     python research/probes/auth.py search    # One Outlook Web -> outlook.office.com/search (Substrate)
     python research/probes/auth.py --status
 
-'search' is first attempted silently with the 'write' refresh token (same client),
+'search' is first attempted silently with the 'outlook' refresh token (same client),
 so a second sign-in is usually unnecessary.
 """
 

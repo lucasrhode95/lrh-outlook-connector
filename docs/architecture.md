@@ -28,7 +28,7 @@ There is no daemon. Three entry points, all short-lived:
 |---|---|---|---|
 | outlook-connector mcp | One process per MCP client session (stdio). Exits when the session ends. | Claude Code / Codex, from its MCP config | core + MCP |
 | outlook-connector ui [--port] | Starts a localhost web server and opens the browser. Exits on Ctrl+C or after an idle timeout. | You, occasionally | core + web stack |
-| outlook-connector auth [read\|write] [--unsecure] | One-shot device-code sign-in | You, rarely | core + auth |
+| outlook-connector auth [graph\|outlook] [--unsecure] | One-shot device-code sign-in | You, rarely | core + auth |
 
 outlook-connector status (offline) shows the signed-in account, which clients have tokens, and the store location.
 
@@ -80,13 +80,13 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.1 [`auth/tokens.py`](../src/outlook_connector/auth/tokens.py)
 
 - **One centralized provider** serving any number of named profiles (client_id + resource scope), all defined in [`config.py`](../src/outlook_connector/config.py). Cache, locking, fail-closed handling and the account check are shared. Profiles today (research §2):
-  - read: Outlook Mobile 27922004-… → https://graph.microsoft.com/Mail.Read.
-  - write: One Outlook Web 9199bf20-… → https://outlook.office.com/.default.
+  - graph: Outlook Mobile 27922004-… → https://graph.microsoft.com/Mail.Read.
+  - outlook: One Outlook Web 9199bf20-… → https://outlook.office.com/.default.
 - One MSAL PublicClientApplication per profile per process; the access token is kept in memory until 5 minutes before expiry. Silent acquisition first. Device code only from the auth command, so surfaces never start an interactive sign-in. They raise AuthenticationRequired with the exact command to run.
 - Encrypted cache via msal-extensions by default, **fail-closed** when unavailable. --unsecure selects a separate, clearly named plaintext cache file in the same data directory, with a warning on every use. Every process finds it at the same path, wherever it was started.
 - Cross-process lock around cache reads and writes.
 - The account fingerprint (tid+oid) must match the store owner (§7).
-- The write profile is optional for core mail reading, search and attachment downloads. Inbox-rule and native-signature reads also use this profile, as do mail and settings changes; tools report "write sign-in required" when it is missing.
+- The Outlook profile is optional for core mail reading, search and attachment downloads. Inbox-rule and native-signature reads also use this profile, as do mail and settings changes; tools report "Outlook sign-in required" when it is missing.
 - The recorded AADSTS65002 client/scope pairs (config.DENIED_PAIRS) are never requested; a unit test checks the profiles against them.
 
 ### 5.2 [`remote/transport.py`](../src/outlook_connector/remote/transport.py)
@@ -134,7 +134,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 - Split like the Graph side (§5.4): [`ows.py`](../src/outlook_connector/remote/ows.py) is the client (Ows), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py) builds request bodies (pure functions), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) holds OwsMailWriter.
 - OwsMailWriter implements MailWriter for draft creation and sending, read-state and flag changes, moves, and soft deletes. It fills mail-write gaps for this tenant and could be replaced by a Graph writer if the required Graph scopes become available.
 - The bearer-only OWS envelope and write contracts are described in [API research §4.1–4.2](outlook-api-research.md). Payloads ≤ 2,048 characters go in the X-OWA-UrlPostData header. Anchor mailbox, correlation headers.
-- Ows.call(action, body) sends one action and returns its item results; an item whose ResponseClass is not Success/Warning raises an error naming its ResponseCode. The anchor mailbox is the write token's upn.
+- Ows.call(action, body) sends one action and returns its item results; an item whose ResponseClass is not Success/Warning raises an error naming its ResponseCode. The anchor mailbox is the Outlook token's upn.
 - Ows.call_request(action, fields) sends inbox-rule reads and changes, which use a second style (research §4.4): the request object itself, no JsonRequest wrapper and no Body; the answer's WasSuccessful / ErrorCode decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. OwsRules uses it through the RuleWriter port; this includes reading rules as well as creating, updating, ordering, enabling, disabling and deleting them.
 - Actions:
   - create_draft (CreateItem with SaveOnly, into Drafts; replies use EWS's ReplyToItem / ReplyAllToItem with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images; returns the draft id, mapped to Graph's alphabet);
@@ -151,7 +151,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.6 [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py)
 
 - CloudSettings implements the SignatureStore port for Outlook native roaming signatures. It uses
-  the encrypted, account-bound write profile and Cloud Settings endpoint; it does not use browser
+  the encrypted, account-bound Outlook profile and Cloud Settings endpoint; it does not use browser
   credentials or store a local copy.
 - Reads fetch the name list and both defaults fresh. Each signature content read verifies its scope
   matches the current list setting. Writes use one PATCH or DELETE request and are never retried.
@@ -210,7 +210,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
   escaped minimal HTML preserving whitespace and NBSP. Intentional HTML passes through, with only
   active web content refused. The private writer takes DraftMessage, always HTML.
 - [`service/signatures.py`](../src/outlook_connector/service/signatures.py) validates exact names and passive HTML; commas are not allowed in names. It checks
-  write-profile account ownership, freshly reads native settings and contents, and refuses
+  Outlook-profile account ownership, freshly reads native settings and contents, and refuses
   missing/unreadable defaults or a configuration that changes during a read. It does not cache
   settings or emulate the organization's recipient-dependent add-in. create_draft resolves the
   correct default or explicit name, adds one signature block after the body, converts data-URI images
@@ -222,7 +222,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
   the old draft; read it first if needed. Every change recreates the draft.
 - create_draft requires bounded Graph read-back and returns DraftResult: id, saved/failed, full
   server text/HTML, message metadata and simple findings. Reply creation retains full quoted-history verification, reusing the original and draft data already fetched while checking original HTML structure and inline images.
-- send_draft(id) requires an existing draft and the bound write account, and sends once with
+- send_draft(id) requires an existing draft and the bound Outlook account, and sends once with
   UpdateItem / SendAndSaveCopy and no field updates, bound to the draft's change key as read
   (NeverOverwrite): a draft changed since then is refused with nothing sent (see [API research §4.2](outlook-api-research.md)). It accepts no content arguments and never
   reconstructs mail. An ambiguous answer reads the exact immutable id: a Sent Items copy proves sent,
@@ -249,7 +249,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
   Mailbox. Target read-back compares the reported folder name; duplicated names cannot prove exact identity.
 
 **[`mutations.py`](../src/outlook_connector/service/mutations.py):**
-- set_read (also per conversation: every message in scope, all copies), set_flag, move(folder) and delete act on **explicit ids only**, at most 100 per call, checked at each entry point before anything is read. The write sign-in must be the bound account.
+- set_read (also per conversation: every message in scope, all copies), set_flag, move(folder) and delete act on **explicit ids only**, at most 100 per call, checked at each entry point before anything is read. The Outlook sign-in must be the bound account.
 - Concurrent conversation reads are bounded to four; a failing expansion cancels and awaits sibling reads before returning the original error. Conversations given to set_read expand without that limit, up to the 1,000 messages the server lists per conversation; notes names a conversation cut there. When the selection has more than 100 messages, counts covers all of it and results keeps only explicit ids and messages that did not end done or unchanged.
 - Flow: conversation expansion reuses its returned summaries; explicit ids read current state through Graph (get_summaries, one $batch): unknown ids → not_found, hidden or outside the mail folders → failed, already as wanted → unchanged (nothing sent). Then send in chunks of 20, with a status per message (done, not_found, failed with the code). On WriteOutcomeUnknown, read the chunk back: done where the change is visible, unknown elsewhere.
 - Categories are read and returned with each message; no tool changes them.
@@ -301,14 +301,14 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 ## 6. Capability routing and portability
 
-The adapters below describe the current tenant's routing, not a universal division between read and write operations. Graph handles ordinary mail-data reads—including attachment bytes and MIME—and verifies selected results after OWS writes. OWS handles mail mutations and both reads and writes for inbox rules. Outlook Cloud Settings handles native signature reads and writes. The write profile is therefore also needed for some read-only tools. These choices depend on tenant permissions; capability evidence and limitations are recorded in [API research §2](outlook-api-research.md).
+The adapters below describe the current tenant's routing, not a universal division between read and write operations. Graph handles ordinary mail-data reads—including attachment bytes and MIME—and verifies selected results after OWS writes. OWS handles mail mutations and both reads and writes for inbox rules. Outlook Cloud Settings handles native signature reads and writes. The Outlook profile is therefore also needed for some read-only tools. These choices depend on tenant permissions; capability evidence and limitations are recorded in [API research §2](outlook-api-research.md).
 
 | Capability | Adapter | Token profile |
 |---|---|---|
-| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | read |
-| Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | write |
-| List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | write |
-| List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | write |
+| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | graph |
+| Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | outlook |
+| List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | outlook |
+| List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | outlook |
 
 ### 6.1 How the code stays swappable
 

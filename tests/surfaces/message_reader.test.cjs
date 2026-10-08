@@ -47,7 +47,7 @@ function reader(handler, full = false) {
     },
     Node: Element, URLSearchParams, setInterval() {},
     fetch: async (path, options) => {
-      if (path === '/api/status') return { ok: true, json: async () => ({ signed_in: { read: false } }) };
+      if (path === '/api/status') return { ok: true, json: async () => ({ signed_in: { graph: false } }) };
       assert.equal(options.headers['X-Session-Token'], 'synthetic-token');
       const url = new URL(path, 'http://localhost');
       calls.push(url);

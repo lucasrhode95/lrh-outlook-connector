@@ -1,7 +1,7 @@
 [project]
 name = "outlook-connector"
 version = "0.1.0"
-description = "Local Outlook mailbox connector: MCP server and local UI over Microsoft Graph (reads) and Outlook Web (writes)."
+description = "Local Outlook mailbox connector: MCP server and local UI over Microsoft Graph and Outlook APIs."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

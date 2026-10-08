@@ -1,6 +1,6 @@
 """S2: what does Graph delta report when YOU move or delete mail in Outlook?
 
-Read-only (profile 'read'). Two phases; the mailbox change is made by you, by hand:
+Read-only (profile 'graph'). Two phases; the mailbox change is made by you, by hand:
 
     python research/probes/delta_moves.py --snapshot
     # In Outlook: move one Inbox message to Archive, delete one Inbox message
@@ -99,7 +99,7 @@ def main() -> int:
     g.add_argument("--snapshot", action="store_true")
     g.add_argument("--check", action="store_true")
     args = ap.parse_args()
-    token = need("read")
+    token = need("graph")
     emit({"probe": "delta move/delete semantics (S2)",
           "phase": "snapshot" if args.snapshot else "check",
           "result": snapshot(token) if args.snapshot else check(token)})

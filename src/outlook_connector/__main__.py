@@ -139,9 +139,9 @@ def _status(args: argparse.Namespace) -> int:
         print(json.dumps(_status_dict(status, checks), indent=2))
     else:
         _print_status(status, checks)
-    # Core mail data needs read; inbox rules, signatures and mail changes need write.
-    read_ok = checks.get("read", {"ok": True})["ok"]
-    return EXIT_OK if read_ok else EXIT_AUTH_REQUIRED
+    # Core mail data needs Graph; inbox rules, signatures and mail changes need Outlook.
+    graph_ok = checks.get("graph", {"ok": True})["ok"]
+    return EXIT_OK if graph_ok else EXIT_AUTH_REQUIRED
 
 
 def _tokens(args: argparse.Namespace) -> TokenProvider:
@@ -161,7 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
     auth.add_argument(
         "profile",
         nargs="?",
-        default="read",
+        default="graph",
         choices=sorted(config.PROFILES),
         help="Which client profile to sign in (default: read).",
     )

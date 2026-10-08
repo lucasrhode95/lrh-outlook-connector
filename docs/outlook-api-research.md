@@ -26,8 +26,8 @@ should configure and rerun the probes before adopting the routing choices below.
 ## 1. Summary
 
 - **Core mail-data reads and attachment downloads → Microsoft Graph** via the Outlook Mobile client (`Mail.Read`). Graph also reads back selected OWS changes to verify them. These routes are documented in §3.
-- **Mail changes and inbox-rule access → OWS** (Outlook Web's private JSON RPC) via the One Outlook Web client. Graph mail write/send scopes are denied to the tested clients, and the read profile lacks `MailboxSettings.*`; OWS therefore handles mail mutations and both reads and writes for rules (§4).
-- **Native signatures → Outlook Cloud Settings** via the write profile. Signature settings and contents are read there; signature changes are also written there (§4.7–4.8). This is a separate service from OWS mail/rule actions.
+- **Mail changes and inbox-rule access → OWS** (Outlook Web's private JSON RPC) via the One Outlook Web client. Graph mail write/send scopes are denied to the tested clients, and the Graph profile lacks `MailboxSettings.*`; OWS therefore handles mail mutations and both reads and writes for rules (§4).
+- **Native signatures → Outlook Cloud Settings** via the Outlook profile. Signature settings and contents are read there; signature changes are also written there (§4.7–4.8). This is a separate service from OWS mail/rule actions.
 - **Search → Graph `$search`.** It matched Outlook's own top-bar search (Substrate) on recall. Substrate works with our token, but it is parked (§3.3, §5).
 - **Cache folders only.** The mailbox has 25.6k items, two thirds of them Junk, and a full metadata mirror takes about 12 minutes (§3.2).
 - **The id model is simple.** Graph immutable ids survive moves, and they become OWS ids by a base64 alphabet swap (§4.2). Exception: `$search` returns regular ids; they need `translateExchangeIds` (§3.1).
@@ -76,7 +76,7 @@ a mail writer. Probes requested immutable IDs unless otherwise noted.
 
 - **Search ID exception (2026-10-03/04):** `$search` ignored the immutable-ID preference and
   returned regular IDs. GET by a regular ID also left it unchanged. Explicit translation from
-  `restId` to `restImmutableEntryId` worked with the read sign-in and matched listing IDs (3/3).
+  `restId` to `restImmutableEntryId` worked with the Graph sign-in and matched listing IDs (3/3).
   Passing an already immutable ID as `restId` failed the whole translation call with HTTP 400
   `InvalidArgument` (expected `EntryId`). Translate only search IDs; OWS acceptance is in §4.2.
 - **Folder-count optimization (2026-10-04, H30):** combining each folder's date-window count
@@ -88,7 +88,7 @@ a mail writer. Probes requested immutable IDs unless otherwise noted.
   of `message`. Adding a date window did not help. Neither attempted filter yields a count
   excluding meeting mail; no alternative server-side filter is proven.
 
-**Sign-in (live 2026-10-03):** `auth write` asked for its own device code right after `auth read`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The read token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`; re-checked 2026-10-04: `Content.Process.User`, `Family.Read`, `FileStorageContainer.Selected`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Read.Shared`, `People.Read`, `People.Read.All`, `Presence.Read.All`, `ProtectionScopes.Compute.User`, `Sites.ReadWrite.All`, `User.Read`, `User.Read.All`, `User.ReadBasic.All`, `UserAuthenticationMethod.ReadWrite`, `email`, `openid`, `profile`; **no `Calendars.*`**, so `/me/calendarView` was not tried, roadmap X10); the write token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
+**Sign-in (live 2026-10-03):** `auth outlook` asked for its own device code right after `auth graph`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The Graph token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`; re-checked 2026-10-04: `Content.Process.User`, `Family.Read`, `FileStorageContainer.Selected`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Read.Shared`, `People.Read`, `People.Read.All`, `Presence.Read.All`, `ProtectionScopes.Compute.User`, `Sites.ReadWrite.All`, `User.Read`, `User.Read.All`, `User.ReadBasic.All`, `UserAuthenticationMethod.ReadWrite`, `email`, `openid`, `profile`; **no `Calendars.*`**, so `/me/calendarView` was not tried, roadmap X10); the Outlook token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
 
 Not tested: shared mailboxes (no target supplied). The account reports `HasArchive=false`, so
 there is no tenant-specific Online Archive evidence; consult the public mail limitations.
@@ -202,7 +202,7 @@ Public contracts: [site resolution](https://learn.microsoft.com/en-us/graph/api/
 and [calendar search](https://learn.microsoft.com/en-us/graph/search-concept-events).
 Use those for request/response schemas, pagination, query filters and redirect handling.
 
-**Authentication evidence:** the existing encrypted Outlook `read` sign-in resolved an
+**Authentication evidence:** the existing encrypted Outlook `graph` sign-in resolved an
 owner-supplied workbook, obtained its metadata, and read the beginning of its download with
 HTTP 200 and an XLSX-compatible header. No new scopes or interactive sign-in were required.
 The full file was not downloaded, so complete-content integrity is unverified.
@@ -213,7 +213,7 @@ The full file was not downloaded, so complete-content integrity is unverified.
 | Generic file search without a location restriction | HTTP 200; results from multiple SharePoint sites and OneDrive | No proof of complete coverage of all accessible files |
 | Known colleague name (`person`) | HTTP 200; two hits | Wider person/group coverage untested |
 | Mail keyword, subject and body searches | HTTP 200; hits returned | Product folder exclusions were not applied; use official count limitations |
-| Calendar event search (`event`) | HTTP 403 `Forbidden`, requiring `Calendars.Read` or `Calendars.ReadWrite` | Current read token lacks these scopes; another approved auth route is unproven |
+| Calendar event search (`event`) | HTTP 403 `Forbidden`, requiring `Calendars.Read` or `Calendars.ReadWrite` | Current Graph token lacks these scopes; another approved auth route is unproven |
 | Site search and a folder-only file query | HTTP 200; zero hits | No known-hit validation; zero hits establish neither complete coverage nor lack of support |
 
 The sharing-link resolver was not tested: the workbook was addressed through its site/library
@@ -267,11 +267,11 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
   - `CreateAttachmentFromLocalFile` uploads draft attachments (BROWSER). It is relevant only if send-with-attachments is added.
   - The B2 route `/messageservice/ows/…` returned 500 and is not usable.
   - `/outlookgatewayb2/graphql` is Outlook's internal GraphQL, not Microsoft Graph.
-- **Inbox rules (2026-10-04, read attempts only, nothing changed):** the read sign-in (Graph) has no `MailboxSettings.*` scope, so Graph's `messageRules` is out of reach. The write sign-in's Outlook token carries `MailboxSettings.ReadWrite`. Over OWS, `GetInboxRules` (the EWS name) returned `OwaOperationNotSupportedException`; `GetInboxRule` (the name Outlook Web's settings use) exists but returned `NullReferenceException` with an empty request body, because the rule actions use a different envelope (captured 2026-10-04, §4.4).
+- **Inbox rules (2026-10-04, read attempts only, nothing changed):** the Graph sign-in (Graph) has no `MailboxSettings.*` scope, so Graph's `messageRules` is out of reach. The Outlook sign-in's Outlook token carries `MailboxSettings.ReadWrite`. Over OWS, `GetInboxRules` (the EWS name) returned `OwaOperationNotSupportedException`; `GetInboxRule` (the name Outlook Web's settings use) exists but returned `NullReferenceException` with an empty request body, because the rule actions use a different envelope (captured 2026-10-04, §4.4).
 
 ### 4.4 Inbox rules (captured 2026-10-04 in Outlook on the web; owner's throwaway rule only)
 
-Two captures (2026-10-04). In the first, the owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. In the second, two more throwaway rules: Sent to, Subject includes, Move to Archive; disabled, re-enabled, conditions cleared, moved to a user folder, renamed, deleted. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. **Replayed by the connector on 2026-10-04 (STANDALONE, write token): every action works as captured** (see "Replay" at the end of this section).
+Two captures (2026-10-04). In the first, the owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. In the second, two more throwaway rules: Sent to, Subject includes, Move to Archive; disabled, re-enabled, conditions cleared, moved to a user folder, renamed, deleted. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. **Replayed by the connector on 2026-10-04 (STANDALONE, Outlook token): every action works as captured** (see "Replay" at the end of this section).
 
 **A different envelope from item actions (§4.1–4.2).** The rule actions send the request object itself, with no `…JsonRequest` wrapper and no `Body`:
 
@@ -304,7 +304,7 @@ Observed semantics:
 - **A rule has 90 fields** (conditions, `ExceptIf…` exceptions, actions, `Description` texts, `InError`, `SupportedByTask`, `RuleProvider`). The owner's 8 rules use only `MoveToFolder` (8), `SentTo` (6), `SubjectContainsWords` (5), `From` (1), `SubjectOrBodyContainsWords` (1), all with `StopProcessingRules`, all enabled, none in error.
 - Outlook also calls `GetMailboxByIdentity` after each change and `/ows/v1.0/OutlookOptions/MailForwardingNotification` on the rules page; neither is needed to manage rules.
 
-**Replay (2026-10-04, STANDALONE, `Ows.call_request`; one throwaway rule, no other rule touched).** Same URL and headers as the item actions, bearer write token, no cookies.
+**Replay (2026-10-04, STANDALONE, `Ows.call_request`; one throwaway rule, no other rule touched).** Same URL and headers as the item actions, bearer Outlook token, no cookies.
 
 - `GetInboxRule` with `UseServerRulesLoader: true`: `WasSuccessful: true`, `ErrorCode: 0`; answer keys `ErrorCode`, `ErrorMessage`, `Header`, `InboxRuleCollection`, `IsUserError`, `UserPrompt`, `WasSuccessful`. 8 rules, 90 fields each (`Identity` is `{DisplayName, RawIdentity}`; `Enabled`, `Priority`). **`TimeZoneContext` is not needed:** without it, the same 8 rules in the same order.
 - `NewInboxRule` (`Name`, `SentTo` one `PeopleIdentity`, `SubjectContainsWords`, `MoveToFolder: {DisplayName, RawIdentity: <Graph folder id of Archive>}`, `StopProcessingRules: true`; no `__type` on `InboxRule`): success in 2.3 s; the answer also carries `InboxRule`. Read back: 9 rules, the new one `Priority` 1, enabled, its target folder returned as `…:\<folder name>`.
@@ -605,7 +605,7 @@ Settings. It does not prove that every undocumented Graph route fails; recheck f
 equivalent before expanding the private implementation.
 
 **Proven reads (STANDALONE).** All requests below used the connector's existing encrypted, app-owned
-`write` profile (One Outlook Web → Outlook resource), no browser credentials. Reads were sequential
+`outlook` profile (One Outlook Web → Outlook resource), no browser credentials. Reads were sequential
 and did not change mail or signature settings. No extra scopes, vendor authentication or user file
 upload was required. Responses and private snapshots remain outside Git.
 
@@ -665,7 +665,7 @@ proved, but is a snapshot rather than an always-current corporate-default resolv
 ### 4.8 Native signature CRUD and default lifecycle (2026-10-07)
 
 **Scope (STANDALONE).** The owner explicitly requested the remaining live tests. All operations used
-the connector's existing encrypted, bound-account `write` profile against Outlook Cloud Settings,
+the connector's existing encrypted, bound-account `outlook` profile against Outlook Cloud Settings,
 with no browser credentials or new scopes. Only uniquely named synthetic signatures and temporary
 default selections were changed. No real signature contents were overwritten; no messages were
 created, edited or sent. Writes were sent once, with fresh reads to verify their results and cleanup.
@@ -778,7 +778,7 @@ identifiers were retained here.
 
 ### 4.11 Native signature name and inline-image follow-up (2026-10-08)
 
-**Scope.** Live calls used the connector's encrypted, bound read/write profiles and its transport;
+**Scope.** Live calls used the connector's encrypted, bound graph/outlook profiles and its transport;
 no browser credentials were used. Only unique synthetic names and drafts were created. Writes were
 sent once. No real signature content was changed and no message was sent.
 
@@ -808,7 +808,7 @@ of two, a read-only scan found no W8 test names or content, and the original def
 restored. The two synthetic image drafts were moved to Deleted Items (`done: 2`, `unknown: 0`); no
 test draft remains in Drafts. Nothing was permanently deleted.
 
-**Public-tool validation (2026-10-08).** The local MCP server used the encrypted read/write token
+**Public-tool validation (2026-10-08).** The local MCP server used the encrypted graph/outlook token
 profiles to exercise list/get/create/update/delete and default selection with unique synthetic
 signatures. A new-message draft used the selected native default. Graph read-back confirmed its
 signature text, recipient, CID reference and byte-equal inline PNG. One synthetic draft was sent once

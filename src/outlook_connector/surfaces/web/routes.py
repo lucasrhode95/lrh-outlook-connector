@@ -128,7 +128,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             {
                 "account": next((a.username for a in cache.accounts), None),
                 "signed_in": {p.profile: p.signed_in for p in cache.profiles},
-                "sign_in_command": context.tokens.sign_in_command("read"),
+                "sign_in_command": context.tokens.sign_in_command("graph"),
             }
         )
 

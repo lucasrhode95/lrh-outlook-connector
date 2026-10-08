@@ -73,9 +73,9 @@ def load_config() -> dict:
                 "Probe URLs must use HTTPS without credentials, query strings or fragments."
             )
     profiles = settings["profiles"]
-    if not isinstance(profiles, dict) or set(profiles) != {"read", "write", "search"}:
+    if not isinstance(profiles, dict) or set(profiles) != {"graph", "outlook", "search"}:
         raise SystemExit(
-            "profiles must define read, write and search client/scope pairs."
+            "profiles must define graph, outlook and search client/scope pairs."
         )
     pairs = settings["denied_pairs"]
     if not isinstance(pairs, list):

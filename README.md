@@ -20,11 +20,13 @@ A separate Python installation is optional: uv selects an installed Python 3.12 
 
 ```bash
 uv sync
-uv run outlook-connector auth read
-uv run outlook-connector auth write  # drafts, sending, rules, signatures and mailbox changes
+uv run outlook-connector auth graph
+uv run outlook-connector auth outlook  # drafts, sending, rules, signatures and mailbox changes
 ```
 
-Core mail reads, search, exports and attachment downloads use the read sign-in. The write sign-in is also required for inbox-rule and native-signature reads, as well as to draft, send, change mailbox state or manage signature settings.
+The `graph` and `outlook` profile names identify API families; their scopes determine permissions. Existing app sign-ins remain cached because the client IDs and scopes are unchanged.
+
+Core mail reads, search, exports and attachment downloads use the Graph sign-in. The Outlook sign-in is also required for inbox-rule and native-signature reads, as well as to draft, send, change mailbox state or manage signature settings.
 
 > Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens stay in the encrypted local cache.
 
