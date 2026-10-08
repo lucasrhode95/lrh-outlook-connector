@@ -8,8 +8,9 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header class="topbar">
-    <strong class="brand">Outlook connector</strong>
+  <div class="app-shell">
+    <header class="topbar">
+    <strong class="brand"><span class="brand-mark" aria-hidden="true">+</span>Outlook connector</strong>
     <form id="search-form" class="search" autocomplete="off">
       <input id="search" type="search" placeholder="Search mail (e.g. budget review, from:alice, subject:invoice)">
       <button type="submit">Search</button>
@@ -44,54 +45,63 @@
     </span>
   </header>
 
-  <div id="banner" class="banner" hidden></div>
+    <div id="banner" class="banner" hidden></div>
 
-  <main class="layout">
-    <nav class="sidebar">
-      <div class="sidebar-head">
-        <span>Folders</span>
-        <button id="refresh-folders" class="link" title="Reload folders from Outlook">refresh</button>
+    <main class="layout">
+      <nav class="sidebar" aria-label="Mailbox navigation">
+        <div class="sidebar-head">
+          <span>Folders</span>
+          <button id="refresh-folders" class="link" title="Reload folders from Outlook">refresh</button>
+        </div>
+        <ul id="folders"></ul>
+        <section class="scope-filters" aria-labelledby="scope-title">
+          <span id="scope-title" class="section-label">Scope filters</span>
+          <label class="scope-option"><input id="opt-meetings" type="checkbox" autocomplete="off">
+            <span>Invites / RSVPs</span></label>
+          <label class="scope-option" title="Also list, count and export messages in Deleted Items and Junk Email; always on inside those folders">
+            <input id="opt-deleted" type="checkbox"><span>Deleted / Junk</span></label>
+        </section>
+      </nav>
+
+      <section class="list" aria-label="Messages">
+        <div class="list-head">
+          <h1 id="list-title">Inbox</h1>
+          <span id="coverage" class="muted"></span>
+        </div>
+        <div id="conversations"></div>
+        <button id="more" class="more" hidden>Load older messages</button>
+      </section>
+
+      <aside class="reader" aria-label="Message reader">
+        <div class="reader-head">
+          <span class="section-label">Message</span>
+          <span id="reader-title" class="reader-title">Select a message to read it</span>
+        </div>
+        <dl id="reader-meta" class="meta"></dl>
+        <pre id="reader-body" class="body"></pre>
+      </aside>
+    </main>
+
+    <footer class="exportbar" aria-label="Export controls">
+      <div class="export-status"><span id="selection" class="muted">Nothing selected</span></div>
+      <div class="export-options">
+        <label class="switch"><input id="opt-attachments" type="checkbox"> Include attachments</label>
+        <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a conversation reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox"> Include quoted history</label>
+        <span class="files">Files
+          <span class="segmented" role="radiogroup" aria-label="Files">
+            <label title="One file per conversation"><input type="radio" name="files" value="per_conversation" checked><span>Per conversation</span></label>
+            <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
+            <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
+          </span>
+        </span>
       </div>
-      <ul id="folders"></ul>
-    </nav>
-
-    <section class="list">
-      <div class="list-head">
-        <span id="list-title">Inbox</span>
-        <span id="coverage" class="muted"></span>
-        <label class="switch" title="Also list, count and export messages in Deleted Items and Junk Email; always on inside those folders">
-          <input id="opt-deleted" type="checkbox"> Deleted / Junk</label>
-        <label class="switch" title="Show meeting mail: invitations, RSVPs and cancellations. Off: conversations that are only meeting traffic are hidden; those with real replies still show">
-          <input id="opt-meetings" type="checkbox" autocomplete="off"> Invites / RSVPs</label>
-        <button id="export-view" class="link" title="Export every message of this folder and date range">export this view</button>
+      <div class="export-actions">
+        <button id="export-view" class="secondary" title="Export every message of this folder and date range">Export view</button>
+        <button id="clear">Clear</button>
+        <button id="export" class="primary" disabled>Export</button>
       </div>
-      <div id="conversations"></div>
-      <button id="more" class="more" hidden>Load older messages</button>
-    </section>
-
-    <aside class="reader">
-      <div class="reader-head">
-        <span id="reader-title" class="muted">Select a message to read it</span>
-      </div>
-      <dl id="reader-meta" class="meta"></dl>
-      <pre id="reader-body" class="body"></pre>
-    </aside>
-  </main>
-
-  <footer class="exportbar">
-    <span id="selection" class="muted">Nothing selected</span>
-    <label class="switch"><input id="opt-attachments" type="checkbox"> Include attachments</label>
-    <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a conversation reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox"> Include quoted history</label>
-    <span class="files">Files
-      <span class="segmented" role="radiogroup" aria-label="Files">
-        <label title="One file per conversation"><input type="radio" name="files" value="per_conversation" checked><span>Per conversation</span></label>
-        <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
-        <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
-      </span>
-    </span>
-    <button id="clear">Clear</button>
-    <button id="export" class="primary" disabled>Export</button>
-  </footer>
+    </footer>
+  </div>
 
   <script type="module" src="/static/app.js"></script>
 </body>
