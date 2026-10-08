@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H34–H38.
+1. **Performance and cleanup:** H35–H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -26,20 +26,6 @@ Status wording:
 # Performance
 
 # Service and code cleanup
-
-## H34 — Work is repeated inside a single call
-
-**Status:** Pending.
-
-**Current duplication worth removing:**
-
-- mailbox scope/folder categories are recomputed several times during one listing or related operation;
-- conversation-based `set_read_state` lists summaries and then fetches them again;
-- reply draft/send verification rereads messages already fetched earlier in the same call;
-- export selections can run already-finished messages through scope/merge work again;
-- `save_message_mime` checks the message before downloading MIME even though the MIME headers can supply the subject.
-
-**Next:** compute/validate once at the public service entry point and pass the resulting scope/data down to helpers that trust it.
 
 ## H35 — Limits are validated in more than one layer
 
