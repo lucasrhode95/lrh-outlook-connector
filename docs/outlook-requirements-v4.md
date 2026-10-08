@@ -57,12 +57,14 @@ These are the use cases the design must serve. "Phase" refers to §12.
 
 No new Entra registration exists or will be made. The app runs its own MSAL `PublicClientApplication` against Microsoft first-party public clients that research proved usable:
 
-| Role | Client | Resource | Status |
+| Capability | Client / profile | Backend | Status |
 |---|---|---|---|
-| **Reads**: folders, messages, conversations, MIME, attachments, delta, search | Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | `https://graph.microsoft.com/Mail.Read` | Proven: interactive + silent cache |
-| **Writes**: send, move, delete, read state, flag, categories | One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | `https://outlook.office.com/.default` → OWS | Send and every mutation proven (research §4.2) |
+| Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `read` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Proven: interactive + silent cache |
+| Mail changes: create/send drafts, read state, flags, move and soft delete | `write` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
+| Inbox rules: list, read and manage supported rules | `write` · One Outlook Web | OWS `GetInboxRule` and rule actions | Read and change routes proven (research §4.4) |
+| Native roaming signatures: list/read settings and contents; create, update, delete and set defaults | `write` · One Outlook Web | Outlook Cloud Settings | Read and change routes proven (research §§4.7–4.8) |
 
-Every Graph mail write/send scope is denied (`AADSTS65002`) to both clients (research §2). Denied pairs are never requested again.
+Graph mail write/send scopes are denied (`AADSTS65002`) to the tested clients (research §2). The read profile also lacks `MailboxSettings.*`, so inbox-rule access uses OWS. Denied scope pairs are never requested again.
 
 Authentication requirements:
 
@@ -71,7 +73,7 @@ Authentication requirements:
 - `--unsecure` is an explicit development mode: a separate plaintext cache file outside the repository, a warning on every use, never implicit.
 - Interactive sign-in happens only through `outlook-connector auth [read|write]`. UI and MCP calls use silent auth and return an actionable "sign-in required" error.
 - Cross-process cache locking, because several processes may run at once.
-- Sign-in is per client: the read client for the MVP, the write client when send ships. A token is used only if its account matches the bound account (§5).
+- Sign-in is per profile. Core mail reads use the read profile. Mail changes, inbox-rule access and native-signature access use the write profile, including their read-only operations. A token is used only if its account matches the bound account (§5).
 
 ## 5. Account binding and identity
 
@@ -82,7 +84,7 @@ Authentication requirements:
 
 ## 6. Backend
 
-- **Rule: documented Graph for every capability it can serve; OWS only for gaps.** For this tenant that means Graph for all reads and OWS for all writes (research §2). The split is tenant-specific; [architecture §6](architecture.md) describes how to re-route.
+- **Rule: prefer documented Graph when the endpoint and granted profile support the capability; use Outlook-specific services for gaps.** Here Graph handles core mail-data reads and post-write checks; OWS handles mail changes and inbox-rule reads/writes; Outlook Cloud Settings handles native-signature reads/writes. Graph mail-write scopes are denied, and the Graph read profile lacks `MailboxSettings.*`. This split is tenant-specific; [architecture §6](architecture.md) describes the current routing and how to re-route.
 - One backend per capability. A failed or ambiguous write is never retried, and never retried through a different backend.
 
 ## 7. Data model and local cache
@@ -196,9 +198,9 @@ Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` h
 
 ### 11.1 Send (first write phase)
 
-Native Outlook roaming signatures are managed by list_signatures, get_signature,
+Native Outlook roaming signatures are managed through Outlook Cloud Settings by list_signatures, get_signature,
 create_signature, update_signature, delete_signature and set_default_signature. The settings are
-account-bound through the write sign-in; each write is sent once. Names are exact and case-sensitive;
+account-bound through the write sign-in, including settings/content reads; each write is sent once. Names are exact and case-sensitive;
 commas are refused because the name list uses commas as separators. Creation and content update take
 passive HTML and derive the text format; data-image `src` attributes must be quoted without whitespace in the URI. Update changes contents without renaming. New-message and
 reply/forward defaults are independent and may be cleared; deleting a selected signature may leave a

@@ -25,8 +25,9 @@ should configure and rerun the probes before adopting the routing choices below.
 
 ## 1. Summary
 
-- **Reads → Microsoft Graph** via the Outlook Mobile client (`Mail.Read`). Every read the product needs is proven (§3).
-- **Writes → OWS** (Outlook Web's private JSON RPC) via the One Outlook Web client. Graph mail write and send scopes are denied to every usable client (§2), so OWS fills exactly that gap. Send and all mutations are proven (§4).
+- **Core mail-data reads and attachment downloads → Microsoft Graph** via the Outlook Mobile client (`Mail.Read`). Graph also reads back selected OWS changes to verify them. These routes are documented in §3.
+- **Mail changes and inbox-rule access → OWS** (Outlook Web's private JSON RPC) via the One Outlook Web client. Graph mail write/send scopes are denied to the tested clients, and the read profile lacks `MailboxSettings.*`; OWS therefore handles mail mutations and both reads and writes for rules (§4).
+- **Native signatures → Outlook Cloud Settings** via the write profile. Signature settings and contents are read there; signature changes are also written there (§4.7–4.8). This is a separate service from OWS mail/rule actions.
 - **Search → Graph `$search`.** It matched Outlook's own top-bar search (Substrate) on recall. Substrate works with our token, but it is parked (§3.3, §5).
 - **Cache folders only.** The mailbox has 25.6k items, two thirds of them Junk, and a full metadata mirror takes about 12 minutes (§3.2).
 - **The id model is simple.** Graph immutable ids survive moves, and they become OWS ids by a base64 alphabet swap (§4.2). Exception: `$search` returns regular ids; they need `translateExchangeIds` (§3.1).
@@ -52,7 +53,7 @@ reference alone. Probes used the `organizations` authority.
 - [`AADSTS65002`](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes) means the client is not preauthorized for that resource. The recorded denial applies to the tested client/resource configuration at that time. The production baseline preserves its denied pairs; portable probes skip only pairs configured locally for the current environment.
 - **Conclusion for the tested environment:** none of the tested usable clients could write mail through Graph. The Graph/OWS split in [architecture §6](architecture.md) follows from this table and must be re-derived for another tenant.
 
-## 3. Microsoft Graph: reads (STANDALONE, client C)
+## 3. Microsoft Graph: mail-data reads and verification (STANDALONE, client C)
 
 Public contracts: [mail overview](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0),
 [list/filter messages](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0),
@@ -65,8 +66,11 @@ Public contracts: [mail overview](https://learn.microsoft.com/en-us/graph/api/re
 [message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0)
 and [batching](https://learn.microsoft.com/en-us/graph/json-batching).
 Use those references for route syntax, query ordering, pagination and standard response fields.
-The tested product read routes succeeded with client C; the findings below capture integration
-details and exceptions. Probes requested immutable IDs unless otherwise noted.
+The tested product mail-data routes succeeded with client C; the findings below capture integration
+details and exceptions. The product uses Graph for folders, messages, conversations, search,
+attachment metadata/bytes, MIME, and the account profile/photo. It also reads drafts and mailbox
+state back after selected OWS operations; this verifies a write but does not make the Graph adapter
+a mail writer. Probes requested immutable IDs unless otherwise noted.
 
 ### 3.1 Live compatibility findings
 
@@ -223,7 +227,7 @@ This is evidence from that repo, not a repeated Teams sign-in test. Its heteroge
 Substrate Search v2 discovery remains pending; Graph results do not validate that contract.
 Product scope and implementation decisions belong in roadmap X11.
 
-## 4. OWS (`/owa/service.svc`): writes (STANDALONE, client A)
+## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract
 
@@ -257,7 +261,7 @@ The send is a self-send. The mutations ran on four user-named Inbox messages. Ev
 
 ### 4.3 Other OWS knowledge (for the "no Graph" scenario)
 
-- **Read actions proven STANDALONE (2026-10-01), parked while Graph serves reads:** `FindFolder`, `GetFolder`, `FindItem`, `FindConversation`, `GetItem` (`Default` shape caps the body at 2,048 characters), `GetConversationItems`, `GetTimeZone`. `ExecuteSearch` returned 400 with the variants tried. Search would use Substrate instead (§5).
+- **Other read actions proven STANDALONE (2026-10-01), not used for ordinary mail data:** `FindFolder`, `GetFolder`, `FindItem`, `FindConversation`, `GetItem` (`Default` shape caps the body at 2,048 characters), `GetConversationItems`, `GetTimeZone`. Production mail-data reads use Graph (§3); inbox-rule reads use OWS `GetInboxRule` (§4.4). `ExecuteSearch` returned 400 with the variants tried. Search uses Graph `$search`; Substrate remains parked (§5).
 - **BROWSER:** `FindConversation` rows carry cross-folder `GlobalItemIds` / `GlobalMessageCount`, and search results page through a server search folder.
 - **Other routes:**
   - `CreateAttachmentFromLocalFile` uploads draft attachments (BROWSER). It is relevant only if send-with-attachments is added.

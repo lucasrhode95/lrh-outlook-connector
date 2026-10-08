@@ -39,7 +39,7 @@ regeneration and redaction machinery in the repository. Probes must work without
 
 ## The project
 
-A local connector for one user's Exchange Online mailbox: an MCP server for agents and a small local web UI. Reads go through Microsoft Graph; writes (drafts, send, mailbox changes) go through Outlook Web (OWS).
+A local connector for one user's Exchange Online mailbox: an MCP server for agents and a small local web UI. Core mail-data reads go through Microsoft Graph. Outlook Web Service (OWS) handles mail changes and inbox-rule access; Outlook Cloud Settings handles native signature settings.
 
 - What it must do: `docs/outlook-requirements-v4.md`
 - How it is built: `docs/architecture.md`

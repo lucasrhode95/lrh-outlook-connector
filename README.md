@@ -21,8 +21,10 @@ A separate Python installation is optional: uv selects an installed Python 3.12 
 ```bash
 uv sync
 uv run outlook-connector auth read
-uv run outlook-connector auth write  # optional: drafts, sending, rules, signatures and mailbox changes
+uv run outlook-connector auth write  # drafts, sending, rules, signatures and mailbox changes
 ```
+
+Core mail reads, search, exports and attachment downloads use the read sign-in. The write sign-in is also required for inbox-rule and native-signature reads, as well as to draft, send, change mailbox state or manage signature settings.
 
 > Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens stay in the encrypted local cache.
 
@@ -33,7 +35,7 @@ Replace `/path/to/lrh-outlook-connector` with the absolute path to your clone.
 **Claude Code** — add the server from a terminal:
 
 ```bash
-claude mcp add --transport stdio outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
+claude mcp add --transport stdio lrh-outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
 ```
 
 See the [Claude Code MCP guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
@@ -41,7 +43,7 @@ See the [Claude Code MCP guide](https://docs.anthropic.com/en/docs/claude-code/m
 **Codex CLI** — register the same stdio command:
 
 ```bash
-codex mcp add outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
+codex mcp add lrh-outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
 ```
 
 See the [Codex MCP guide](https://developers.openai.com/codex/mcp/).
@@ -51,7 +53,7 @@ See the [Codex MCP guide](https://developers.openai.com/codex/mcp/).
 ```json
 {
   "servers": {
-    "outlook-connector": {
+    "lrh-outlook-connector": {
       "type": "stdio",
       "command": "uv",
       "args": [
@@ -78,7 +80,7 @@ uv run outlook-connector ui
 
 ![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](docs/ui-preview.svg)
 
-> **Message preview:** The web UI is intended for manual message exports. The preview is plain text, not rendered HTML; it shows how extracted message content will appear in an export.
+> The web UI is intended for manual message exports. The preview is plain text, not rendered HTML; it shows how extracted message content will appear in an export.
 
 ## MCP tools
 
