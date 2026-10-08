@@ -15,11 +15,15 @@ const state = {
   conversations: new Map(),    // key -> { key, conversationId, messages: Map(id -> summary), expanded, complete, size, sizeAtLeast }
   selectedConversations: new Set(),
   selectedMessages: new Set(),
-  attachments: new Map(), // message id -> its files (null while asked), for the list's chips
+  attachments: new Map(), // message id -> its files, for the list's chips
+  attachmentRequests: new Set(), // message ids currently being enriched with file names
   activeMessage: null,
   listRequest: 0,        // newest list/search load; older responses are ignored
+  folderRequest: 0,      // newest folder load; older refreshes are ignored
   readerRequest: 0,      // same for the reader pane
 };
+
+let bannerOwner = null;
 
 // ------------------------------------------------------------------ helpers
 
@@ -37,31 +41,36 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-function showBanner(message) {
+function showBanner(message, owner = null) {
   const banner = $("banner");
   banner.textContent = message;
   banner.hidden = !message;
+  bannerOwner = message ? owner : null;
 }
 
-async function api(path, options = {}) {
+// A retry clears only its own previous error; unrelated background successes leave it visible.
+function clearBanner(owner) {
+  if (owner && bannerOwner === owner) showBanner("");
+}
+
+async function api(path, options = {}, owner = null, isCurrent = () => true) {
   let response;
   try {
     response = await fetch(path, { ...options, headers: { "X-Session-Token": TOKEN, ...(options.headers || {}) } });
   } catch {
-    showBanner("The UI server has stopped. Run `outlook-connector ui` again.");
+    if (isCurrent()) showBanner("The UI server has stopped. Run `outlook-connector ui` again.", owner);
     throw new Error("server unreachable");
   }
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
     try { message = (await response.json()).error || message; } catch { /* not JSON */ }
-    showBanner(message);
+    if (isCurrent()) showBanner(message, owner);
     throw new Error(message);
   }
-  showBanner("");
   return response;
 }
 
-const json = async (path, options) => (await api(path, options)).json();
+const json = async (path, options, owner, isCurrent) => (await api(path, options, owner, isCurrent)).json();
 
 function fold(text) {
   return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -160,21 +169,30 @@ function query(params) {
 // ------------------------------------------------------------------ folders
 
 async function loadFolders(refresh = false) {
+  const request = ++state.folderRequest;
+  clearBanner("folders");
   if (!$("folders").children.length || refresh) $("folders").replaceChildren(el("li", { class: "loading-item" }, spinner("Loading folders…")));
-  const folders = await json(`/api/folders?${query({ refresh })}`);
-  state.folders = new Map(folders.map((f) => [f.id, f]));
   const list = $("folders");
-  if (state.folder === "inbox") { // the landing folder, requested by alias before its id was known
-    const inbox = folders.find((f) => f.well_known === "inbox");
-    if (inbox) state.folder = inbox.id;
+  try {
+    const folders = await json(`/api/folders?${query({ refresh })}`, undefined, "folders", () => request === state.folderRequest);
+    if (request !== state.folderRequest) return;
+    state.folders = new Map(folders.map((f) => [f.id, f]));
+    if (state.folder === "inbox") { // the landing folder, requested by alias before its id was known
+      const inbox = folders.find((f) => f.well_known === "inbox");
+      if (inbox) state.folder = inbox.id;
+    }
+    list.replaceChildren(folderItem(null, "All mail (recent)", 0, null));
+    for (const folder of folders) {
+      const depth = (folder.path.match(/\//g) || []).length;
+      list.append(folderItem(folder.id, folder.name, depth, folder.unread));
+    }
+    list.append(el("li", { id: "folder-search-empty", class: "folder-empty", hidden: true }, "No folders match that search."));
+    renderFolderFilter();
+  } catch {
+    if (request === state.folderRequest) {
+      list.replaceChildren(el("li", { class: "folder-load-error", role: "status" }, "Could not load folders. Use refresh to try again."));
+    }
   }
-  list.replaceChildren(folderItem(null, "All mail (recent)", 0, null));
-  for (const folder of folders) {
-    const depth = (folder.path.match(/\//g) || []).length;
-    list.append(folderItem(folder.id, folder.name, depth, folder.unread));
-  }
-  list.append(el("li", { id: "folder-search-empty", class: "folder-empty", hidden: true }, "No folders match that search."));
-  renderFolderFilter();
 }
 
 function renderFolderFilter() {
@@ -191,15 +209,23 @@ function renderFolderFilter() {
 }
 
 function folderItem(id, name, depth, unread) {
-  const item = el("li", { class: state.folder === id && state.mode === "list" ? "active" : "", title: name, "data-folder-name": name },
-    el("span", { style: `padding-left:${depth * 14}px` }, name),
+  const active = state.folder === id && state.mode === "list";
+  const button = el("button", { type: "button", class: "folder-button", title: name, "aria-current": active ? "page" : undefined },
+    el("span", { class: "folder-name", style: `padding-left:${depth * 14}px` }, name),
     unread ? el("span", { class: "count" }, unread) : null);
-  item.addEventListener("click", () => {
+  const item = el("li", { class: active ? "active" : "", "data-folder-name": name }, button);
+  button.addEventListener("click", () => {
     state.folder = id;
     state.folderName = id ? name : "Recent mail";
     state.mode = "list";
     $("list-title").textContent = state.folderName;
-    for (const li of $("folders").children) li.classList.toggle("active", li === item);
+    for (const li of $("folders").children) {
+      const selected = li === item;
+      li.classList.toggle("active", selected);
+      const folderButton = li.querySelector(".folder-button");
+      if (selected) folderButton?.setAttribute("aria-current", "page");
+      else folderButton?.removeAttribute("aria-current");
+    }
     renderExportView();
     loadList(true);
   });
@@ -250,6 +276,7 @@ function spinner(text) {
 // This keeps a slow response for a previously clicked folder from replacing the current one.
 async function loadPage(reset, path, apply, loadingText) {
   const request = ++state.listRequest;
+  clearBanner("list");
   if (reset) {
     resetConversations();
     $("conversations").replaceChildren(spinner(loadingText));
@@ -260,14 +287,14 @@ async function loadPage(reset, path, apply, loadingText) {
     $("more").replaceChildren(el("span", { class: "spinner", "aria-hidden": "true" }), " Loading…");
   }
   try {
-    const result = await json(path);
+    const result = await json(path, undefined, "list", () => request === state.listRequest);
     if (request !== state.listRequest) return; // superseded by a newer click: drop this response
     apply(result);
     state.cursor = result.cursor;
     showCoverage(result.coverage);
     render();
     loadSizes(request);
-    loadAttachmentNames(request);
+    loadAttachmentNames();
   } catch {
     if (request !== state.listRequest) return;
     if (reset) $("conversations").replaceChildren(el("p", { class: "muted pad" }, "Could not load messages (see the message above)."));
@@ -303,11 +330,13 @@ function runSearch(reset) {
 // plain rows and conversations show an accurate count. Rows look as before until the counts arrive.
 async function loadSizes(request) {
   const pending = [...state.conversations.values()].filter((t) => t.conversationId && t.size === undefined).map((t) => t.conversationId);
+  if (pending.length) clearBanner("sizes");
   for (let start = 0; start < pending.length; start += 200) {
     let sizes;
     try {
       sizes = await json("/api/conversation-sizes", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), scope: { deleted_items: showDeletedItems() } }) });
+        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), scope: { deleted_items: showDeletedItems() } }) },
+        "sizes", () => request === state.listRequest);
     } catch {
       return; // counts are a refinement; the rows keep working without them
     }
@@ -323,21 +352,26 @@ async function loadSizes(request) {
 
 // File names for the chips under messages with attachments: one batched request per 200 messages
 // (Graph takes them 20 at a time). Rows work without them.
-async function loadAttachmentNames(request = state.listRequest) {
+async function loadAttachmentNames() {
   const pending = [...state.conversations.values()].flatMap((t) => [...t.messages.values()])
-    .filter((m) => m.has_attachments && !state.attachments.has(m.id)).map((m) => m.id);
+    .filter((m) => m.has_attachments && !state.attachments.has(m.id) && !state.attachmentRequests.has(m.id)).map((m) => m.id);
+  if (pending.length) clearBanner("attachments");
   for (let start = 0; start < pending.length; start += 200) {
     const ids = pending.slice(start, start + 200);
-    for (const id of ids) state.attachments.set(id, null); // asked; not asked again
+    for (const id of ids) state.attachmentRequests.add(id);
     let names;
+    const current = () => ids.some((id) => [...state.conversations.values()].some((conversation) => conversation.messages.has(id)));
     try {
       names = await json("/api/attachments", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message_ids: ids }) });
+        body: JSON.stringify({ message_ids: ids }) }, "attachments", current);
     } catch {
+      for (const id of ids) state.attachmentRequests.delete(id);
       return;
     }
+    for (const id of ids) state.attachmentRequests.delete(id);
     for (const [id, items] of Object.entries(names)) state.attachments.set(id, items);
-    if (request === state.listRequest) render();
+    const visibleIds = new Set([...state.conversations.values()].flatMap((conversation) => [...conversation.messages.keys()]));
+    if (Object.keys(names).some((id) => visibleIds.has(id))) render();
   }
 }
 
@@ -438,7 +472,7 @@ function fileChips(message) {
     const kind = FILE_COLORS[name.split(".").pop().toLowerCase()] || "other";
     if (file.kind === "reference") return el("span", { class: "chip", title: "Cloud link" }, icon("file", kind), name);
     return el("button", { type: "button", class: "chip", title: `Download ${name}`,
-      onclick: (event) => { event.stopPropagation(); download(`/api/messages/${encodeURIComponent(message.id)}/attachments/${encodeURIComponent(file.id)}`, {}); } },
+      onclick: () => download(`/api/messages/${encodeURIComponent(message.id)}/attachments/${encodeURIComponent(file.id)}`, {}, "attachment").catch(() => {}) },
       icon("file", kind), name);
   }));
 }
@@ -458,8 +492,13 @@ function clickRow(event, checkbox, open) {
   open();
 }
 
+function rowAction(checkbox, open, attrs, ...children) {
+  return el("button", { type: "button", class: "row-action", ...attrs,
+    onclick: (event) => clickRow(event, checkbox, open) }, ...children);
+}
+
 function selectBox(title, checked, disabled, onchange) {
-  const box = el("input", { type: "checkbox", title, disabled, onclick: (event) => event.stopPropagation(), onchange });
+  const box = el("input", { type: "checkbox", title, "aria-label": title, disabled, onchange });
   box.checked = checked;
   return box;
 }
@@ -482,17 +521,19 @@ function renderSingle(conversation) {
     });
   const response = message.meeting && RESPONSES.has(message.meeting.kind);
   return el("div", { class: "conversation" },
-    el("div", { class: rowClasses("conversation-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response }),
-      onclick: (event) => clickRow(event, checkbox, () => openMessage(message.id)) },
+    el("div", { class: rowClasses("conversation-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response }) },
       checkbox,
-      el("span", { class: "toggle" }),
-      el("div", { class: "lines" },
-        el("div", { class: "who" }, who(message.sender), ...badges(message, state.folder === null)),
-        subjectLine(message),
-        response ? null : el("div", { class: "preview" }, message.preview || ""),
-        meetingPanel(message.meeting),
-        fileChips(message)),
-      sideColumn(message.received_at, { flagged: message.flagged, attachments: message.has_attachments })));
+      el("div", { class: "row-content" },
+        rowAction(checkbox, () => openMessage(message.id), { class: "row-action conversation-action",
+          "aria-label": `Open message: ${message.subject || "(no subject)"}` },
+          el("span", { class: "toggle", "aria-hidden": "true" }),
+          el("div", { class: "lines" },
+            el("div", { class: "who" }, who(message.sender), ...badges(message, state.folder === null)),
+            subjectLine(message),
+            response ? null : el("div", { class: "preview" }, message.preview || ""),
+            meetingPanel(message.meeting)),
+          sideColumn(message.received_at, { flagged: message.flagged, attachments: message.has_attachments })),
+        fileChips(message))));
 }
 
 function renderConversation(conversation) {
@@ -507,16 +548,19 @@ function renderConversation(conversation) {
   const checkbox = selectBox("Export the whole conversation", state.selectedConversations.has(conversation.conversationId), !selectable,
     (event) => { toggle(state.selectedConversations, conversation.conversationId, event.target.checked); render(); });
   const meeting = conversationMeeting(messages);
-  const row = el("div", { class: rowClasses("conversation-row", { unread }), onclick: (event) => clickRow(event, checkbox, () => expand(conversation)) },
+  const row = el("div", { class: rowClasses("conversation-row", { unread }) },
     checkbox,
-    el("span", { class: "toggle" }, icon(conversation.expanded ? "chevronDown" : "chevronRight")),
-    el("div", { class: "lines" },
-      el("div", { class: "who" }, senders, el("span", { class: "conversation-count" }, countLabel(conversation, messages.length))),
-      el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
-      el("div", { class: "preview" }, newest.preview || ""),
-      meetingPanel(meeting)),
-    sideColumn(newest.received_at,
-      { flagged: messages.some((m) => m.flagged), attachments: messages.some((m) => m.has_attachments) }));
+    rowAction(checkbox, () => expand(conversation), { class: "row-action conversation-action",
+      "aria-label": `${conversation.expanded ? "Collapse" : "Expand"} conversation: ${newest.subject || "(no subject)"}`,
+      "aria-expanded": String(conversation.expanded) },
+      el("span", { class: "toggle", "aria-hidden": "true" }, icon(conversation.expanded ? "chevronDown" : "chevronRight")),
+      el("div", { class: "lines" },
+        el("div", { class: "who" }, senders, el("span", { class: "conversation-count" }, countLabel(conversation, messages.length))),
+        el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
+        el("div", { class: "preview" }, newest.preview || ""),
+        meetingPanel(meeting)),
+      sideColumn(newest.received_at,
+        { flagged: messages.some((m) => m.flagged), attachments: messages.some((m) => m.has_attachments) })));
   const node = el("div", { class: "conversation" }, row);
   if (conversation.expanded) {
     node.append(el("div", { class: "messages" }, messages.map((m) => renderMessage(m, conversation)),
@@ -540,15 +584,17 @@ function renderMessage(message, conversation) {
     (event) => { toggle(state.selectedMessages, message.id, event.target.checked); renderSelection(); });
   const response = message.meeting && RESPONSES.has(message.meeting.kind);
   return el("div", { class: rowClasses("msg-row", { unread: message.is_read === false, active: state.activeMessage === message.id, response, matched: message.matched }),
-    title: message.matched ? "Matches the search" : undefined,
-    onclick: (event) => clickRow(event, checkbox, () => openMessage(message.id)) },
+    title: message.matched ? "Matches the search" : undefined },
     checkbox,
-    el("div", { class: "lines" },
-      el("div", { class: "who" }, kindBadge(message.meeting), who(message.sender), ...badges(message, true)),
-      response ? null : el("div", { class: "preview" }, message.preview || message.subject || ""),
-      meetingPanel(message.meeting),
-      fileChips(message)),
-    sideColumn(message.received_at, { flagged: message.flagged, attachments: message.has_attachments }));
+    el("div", { class: "row-content" },
+      rowAction(checkbox, () => openMessage(message.id), { class: "row-action message-action",
+        "aria-label": `Open message: ${message.subject || "(no subject)"}` },
+        el("div", { class: "lines" },
+          el("div", { class: "who" }, kindBadge(message.meeting), who(message.sender), ...badges(message, true)),
+          response ? null : el("div", { class: "preview" }, message.preview || message.subject || ""),
+          meetingPanel(message.meeting)),
+        sideColumn(message.received_at, { flagged: message.flagged, attachments: message.has_attachments })),
+      fileChips(message)));
 }
 
 function toggle(set, value, on) {
@@ -558,16 +604,20 @@ function toggle(set, value, on) {
 async function expand(conversation) {
   conversation.expanded = !conversation.expanded;
   if (conversation.expanded && conversation.conversationId && !conversation.complete && !conversation.loading) {
+    clearBanner("conversation");
     conversation.loading = true;
     render();
     try {
-      const full = await json(`/api/conversations/${encodeURIComponent(conversation.conversationId)}?${query({ deleted_items: showDeletedItems() })}`);
+      const full = await json(`/api/conversations/${encodeURIComponent(conversation.conversationId)}?${query({ deleted_items: showDeletedItems() })}`,
+        undefined, "conversation", () => state.conversations.get(conversation.key) === conversation);
       for (const entry of full.messages) conversation.messages.set(entry.message.id, { ...entry.message, matched: conversation.messages.get(entry.message.id)?.matched });
       // incomplete coverage: the conversation is larger than the server lists (a "1000+" conversation)
       conversation.complete = full.coverage.complete;
       conversation.size = full.messages.length;
       conversation.sizeAtLeast = !full.coverage.complete;
       loadAttachmentNames();
+    } catch {
+      // The API helper shows the error; collapsing and reopening the row can retry it.
     } finally {
       conversation.loading = false;
     }
@@ -578,6 +628,7 @@ async function expand(conversation) {
 // ------------------------------------------------------------------ reader
 
 async function openMessage(id) {
+  clearBanner("reader");
   state.activeMessage = id;
   render();
   const request = ++state.readerRequest;
@@ -587,7 +638,8 @@ async function openMessage(id) {
   const body = $("opt-full").checked ? "full" : "unique"; // one setting for the reader and exports
   let content;
   try {
-    content = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body })}`); // the whole body
+    content = await json(`/api/messages/${encodeURIComponent(id)}?${query({ body })}`, undefined, "reader",
+      () => request === state.readerRequest); // the whole body
   } catch {
     if (request === state.readerRequest) $("reader-title").textContent = "Could not load the complete message.";
     return;
@@ -608,12 +660,13 @@ function attachmentButton(messageId, attachment) {
   const label = attachment.name || "attachment";
   if (attachment.kind === "reference") return el("span", { class: "muted attachment" }, `${label} (cloud link)`);
   return el("button", { type: "button", class: "attachment", title: "Download",
-    onclick: () => download(`/api/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`, {}) }, label);
+    onclick: () => download(`/api/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachment.id)}`, {}, "attachment").catch(() => {}) }, label);
 }
 
 // Fetch with the session token and hand the response to the browser as a download.
-async function download(path, options) {
-  const response = await api(path, options);
+async function download(path, options, owner = null) {
+  clearBanner(owner);
+  const response = await api(path, options, owner);
   const url = URL.createObjectURL(await response.blob());
   const link = el("a", { href: url, download: filenameFrom(response.headers.get("Content-Disposition")) });
   document.body.append(link);
@@ -687,10 +740,10 @@ async function runExport(button, request, label) {
   button.disabled = true;
   button.textContent = "Exporting…";
   try {
-    const response = await download("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) });
-    // Parts that could not be exported: the file's header line, shown until the next request.
+    const response = await download("/api/export", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request) }, "export");
+    // Parts that could not be exported: the file's header line, shown until the next export retry.
     const errors = response.headers.get("X-Export-Errors");
-    if (errors) showBanner(decodeURIComponent(errors).replace("below", "in the file"));
+    if (errors) showBanner(decodeURIComponent(errors).replace("below", "in the file"), "export");
   } catch { /* the banner shows the error */ } finally {
     button.textContent = label;
     renderSelection();
@@ -762,7 +815,11 @@ function setDateRange(start, end) {
   renderCalendar();
 }
 
-function setCalendarOpen(open) {
+function focusCalendarDate(key) {
+  $("calendar-days").querySelector(`[data-date="${key}"]`)?.focus();
+}
+
+function setCalendarOpen(open, { restoreFocus = false } = {}) {
   $("calendar").hidden = !open;
   $("range-toggle").setAttribute("aria-expanded", String(open));
   if (open) {
@@ -774,6 +831,7 @@ function setCalendarOpen(open) {
     picker.choosingEnd = false;
     picker.draftStart = null;
     renderCalendar();
+    focusCalendarDate($("since").value || dateKey(new Date()));
     return;
   }
   const range = `${$("since").value}|${$("until").value}`;
@@ -782,6 +840,7 @@ function setCalendarOpen(open) {
     renderExportView();
     (state.mode === "search" ? runSearch : loadList)(true);
   }
+  if (restoreFocus) $("range-toggle").focus();
 }
 
 function renderCalendar() {
@@ -802,7 +861,9 @@ function renderCalendar() {
     if (start && end && key >= start && key <= end) classes.push("in-range");
     if (start && key === start) classes.push("range-start");
     if (end && key === end) classes.push("range-end");
-    days.push(el("button", { type: "button", class: classes.join(" "), "aria-label": day.toLocaleDateString(undefined, { dateStyle: "full" }),
+    days.push(el("button", { type: "button", class: classes.join(" "), "data-date": key,
+      "aria-label": day.toLocaleDateString(undefined, { dateStyle: "full" }),
+      "aria-pressed": String(Boolean(start && end && key >= start && key <= end)),
       onclick: () => chooseDate(key) }, day.getDate()));
   }
   $("calendar-days").replaceChildren(...days);
@@ -813,23 +874,24 @@ function chooseDate(key) {
     picker.draftStart = key;
     picker.choosingEnd = true;
     setDateRange(key, key);
+    focusCalendarDate(key);
     return;
   }
   setDateRange(picker.draftStart, key);
   picker.choosingEnd = false;
-  setCalendarOpen(false);
+  setCalendarOpen(false, { restoreFocus: true });
 }
 
 $("range-toggle").addEventListener("click", () => setCalendarOpen($("calendar").hidden));
 $("previous-month").addEventListener("click", () => { picker.month.setMonth(picker.month.getMonth() - 1); renderCalendar(); });
 $("next-month").addEventListener("click", () => { picker.month.setMonth(picker.month.getMonth() + 1); renderCalendar(); });
-$("clear-dates").addEventListener("click", () => { picker.choosingEnd = false; setDateRange("", ""); setCalendarOpen(false); });
-$("calendar-done").addEventListener("click", () => setCalendarOpen(false));
+$("clear-dates").addEventListener("click", () => { picker.choosingEnd = false; setDateRange("", ""); setCalendarOpen(false, { restoreFocus: true }); });
+$("calendar-done").addEventListener("click", () => setCalendarOpen(false, { restoreFocus: true }));
 document.addEventListener("pointerdown", (event) => {
   if (!$("calendar").hidden && !$("range-picker").contains(event.target)) setCalendarOpen(false);
 });
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !$("calendar").hidden) setCalendarOpen(false);
+  if (event.key === "Escape" && !$("calendar").hidden) setCalendarOpen(false, { restoreFocus: true });
 });
 $("more").addEventListener("click", () => (state.mode === "search" ? runSearch : loadList)(false));
 $("export-view").addEventListener("click", () => runExport($("export-view"), viewRequest(), "Export view"));
@@ -839,10 +901,19 @@ $("opt-deleted").addEventListener("change", () => (state.mode === "search" ? run
 $("opt-meetings").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
 $("clear").addEventListener("click", () => { state.selectedConversations.clear(); state.selectedMessages.clear(); render(); });
 $("export").addEventListener("click", () => runExport($("export"), exportRequest(), "Export"));
-setInterval(() => api("/api/heartbeat", { method: "POST" }).catch(() => {}), 60_000);
+setInterval(() => {
+  clearBanner("heartbeat");
+  api("/api/heartbeat", { method: "POST" }, "heartbeat").catch(() => {});
+}, 60_000);
 
 (async function start() {
-  const status = await json("/api/status");
+  let status;
+  clearBanner("status");
+  try {
+    status = await json("/api/status", undefined, "status");
+  } catch {
+    return; // the API helper has shown the startup error
+  }
   $("account-name").textContent = status.account || "";
   if (!status.signed_in.read) {
     showBanner(`Not signed in. Run \`${status.sign_in_command}\` in a terminal, then reload this page.`);
