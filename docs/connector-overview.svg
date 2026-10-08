@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="760" viewBox="0 0 1500 760" role="img" aria-labelledby="title description">
+  <title id="title">Outlook connector overview</title>
+  <desc id="description">Claude Code, Claude Desktop, Codex, and other local MCP clients, along with the local browser UI, connect to a connector on this computer. The connector reads mail through Microsoft Graph and uses Outlook Web for mailbox writes. ChatGPT web and desktop are labeled as remote HTTP MCP clients and do not connect to this local stdio server.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6f9fc"/><stop offset="1" stop-color="#eaf2f8"/></linearGradient>
+    <linearGradient id="connector" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16385f"/><stop offset="1" stop-color="#245c78"/></linearGradient>
+    <marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M1 1L11 6L1 11Z" fill="#4b7187"/></marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#183153" flood-opacity=".12"/></filter>
+    <style>
+      text{font-family:Arial,Helvetica,sans-serif;fill:#17324d}.title{font-size:38px;font-weight:700}.subtitle{font-size:18px;fill:#526b80}.card{fill:#fff;stroke:#d5e2ec;stroke-width:2}.cardtitle{font-size:21px;font-weight:700}.small{font-size:15px;fill:#526b80}.label{font-size:14px;font-weight:700;letter-spacing:.5px;fill:#3a6e81}.client{font-size:17px;font-weight:600}.muted{fill:#71869a}.flow{fill:none;stroke:#4b7187;stroke-width:3;marker-end:url(#arrow)}.row{font-size:12px;fill:#40586e}
+    </style>
+  </defs>
+  <rect width="1500" height="760" rx="28" fill="url(#bg)"/>
+  <text x="64" y="72" class="title">Outlook, connected locally</text>
+  <text x="64" y="105" class="subtitle">Search, read, export, and manage your mailbox from the tools you already use.</text>
+
+  <text x="64" y="157" class="label">LOCAL MCP CLIENTS</text>
+  <g filter="url(#shadow)">
+    <rect x="64" y="177" width="300" height="205" rx="20" class="card"/>
+    <text x="94" y="218" class="cardtitle">Use your MCP client</text>
+    <rect x="92" y="239" width="244" height="36" rx="10" fill="#edf4f8"/><text x="110" y="263" class="client">Claude Code / Desktop</text>
+    <rect x="92" y="283" width="244" height="36" rx="10" fill="#edf4f8"/><text x="110" y="307" class="client">Codex</text>
+    <rect x="92" y="327" width="244" height="36" rx="10" fill="#edf4f8"/><text x="110" y="351" class="client">Other local MCP clients</text>
+  </g>
+  <path d="M364 281C430 281 438 281 500 281" class="flow"/>
+  <text x="389" y="263" class="small">stdio</text>
+
+  <g filter="url(#shadow)">
+    <rect x="64" y="420" width="300" height="250" rx="20" class="card"/>
+    <text x="92" y="458" class="cardtitle">Local browser UI</text>
+    <text x="92" y="482" class="small">Illustrative preview · synthetic text</text>
+    <rect x="91" y="501" width="246" height="143" rx="12" fill="#f4f7fa" stroke="#dce5ed"/>
+    <rect x="91" y="501" width="246" height="27" rx="12" fill="#e6eef4"/>
+    <circle cx="108" cy="514" r="4" fill="#9eb1bf"/><circle cx="122" cy="514" r="4" fill="#9eb1bf"/><circle cx="136" cy="514" r="4" fill="#9eb1bf"/>
+    <text x="105" y="551" class="row" font-weight="700">Inbox · sample conversations</text>
+    <line x1="105" y1="562" x2="322" y2="562" stroke="#dce5ed"/>
+    <text x="105" y="582" class="row">Sample sender</text><text x="197" y="582" class="row">Illustrative update</text>
+    <line x1="105" y1="591" x2="322" y2="591" stroke="#dce5ed"/>
+    <text x="105" y="611" class="row">Sample sender</text><text x="197" y="611" class="row">Planning notes</text>
+    <text x="105" y="633" class="row">No real mailbox content</text>
+  </g>
+  <path d="M364 544C430 544 438 410 500 410" class="flow"/>
+  <text x="390" y="494" class="small">localhost</text>
+
+  <g>
+    <rect x="64" y="690" width="300" height="48" rx="12" fill="#e4ebf1" stroke="#c8d5df"/>
+    <text x="84" y="711" class="small" font-weight="700">ChatGPT web / desktop</text>
+    <text x="84" y="730" class="small">Remote HTTP MCP only · not this local stdio server</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="500" y="225" width="410" height="270" rx="26" fill="url(#connector)"/>
+    <circle cx="552" cy="280" r="25" fill="#81d2c7"/>
+    <path d="M541 281h22m-11-11v22" stroke="#16385f" stroke-width="4" stroke-linecap="round"/>
+    <text x="594" y="275" font-size="24" font-weight="700" fill="#fff">Outlook connector</text>
+    <text x="545" y="328" font-size="17" fill="#d8e9f2">Runs on your computer · starts on demand</text>
+    <rect x="545" y="360" width="320" height="52" rx="13" fill="#ffffff" fill-opacity=".13"/>
+    <text x="565" y="383" font-size="15" font-weight="700" fill="#fff">READ</text><text x="625" y="383" font-size="15" fill="#e4f0f5">Microsoft Graph</text>
+    <text x="565" y="402" font-size="14" fill="#c7e2e9">Messages · conversations · attachments</text>
+    <rect x="545" y="425" width="320" height="48" rx="13" fill="#ffffff" fill-opacity=".13"/>
+    <text x="565" y="454" font-size="15" font-weight="700" fill="#fff">WRITE</text><text x="625" y="454" font-size="15" fill="#e4f0f5">Outlook Web</text>
+  </g>
+
+  <path d="M910 360H1080" class="flow"/>
+  <text x="951" y="337" class="small">read and write</text>
+  <g filter="url(#shadow)">
+    <rect x="1080" y="274" width="340" height="174" rx="24" class="card"/>
+    <rect x="1120" y="316" width="60" height="47" rx="8" fill="#d9eaf5" stroke="#6c9bb5" stroke-width="2"/>
+    <path d="M1120 321l30 23 30-23" fill="none" stroke="#39728e" stroke-width="3"/>
+    <text x="1200" y="330" class="cardtitle">Outlook</text>
+    <text x="1200" y="359" class="small">Your Exchange Online mailbox</text>
+    <text x="1120" y="410" class="small">Mail stays in your account.</text>
+  </g>
+  <text x="64" y="746" class="small muted">Product names are labels; no product logos or real mailbox data are shown.</text>
+</svg>

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="3585" viewBox="0 0 2600 3585" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, or signs in. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes and Mutations. The service depends only on the MailReader and MailWriter ports in remote/ports.py, implemented by GraphMailReader over Graph and OwsMailWriter over Outlook Web; both send through one Transport, which takes a token from TokenProvider for every request. Mailbox keeps only the folder cache and the account binding in the local Store. AppContext in bootstrap.py builds all of it once per process. Hovering an item shows its details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, or signs in. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Rules and Signatures. The service depends on the MailReader, MailWriter, RuleWriter and SignatureStore ports in remote/ports.py. GraphMailReader, OwsMailWriter, OwsRules and CloudSettings implement those ports; remote requests share one Transport and TokenProvider. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -64,7 +64,7 @@
 <text class="card-subtitle" x="990" y="551"><tspan class="code">surfaces/web/web_main.py</tspan> <tspan class="code">serve_ui()</tspan> · <tspan class="code">routes.py</tspan>: Starlette JSON API + static JS</text>
 <rect x="100" y="588" width="810" height="367" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="118" y="626">Read</text>
-<g><title>Mail folders with paths (e.g. Inbox/Projects/Project Alpha), well-known aliases and counts. → Mailbox.folders</title><text class="detail" x="118" y="656">• <tspan class="code">list_folders</tspan></text></g>
+<g><title>Mail folders with paths (e.g. Inbox/Work/Example), well-known aliases and counts. → Mailbox.folders</title><text class="detail" x="118" y="656">• <tspan class="code">list_folders</tspan></text></g>
 <g><title>Messages newest first, from the server; folder optional (whole mailbox), date window, scope flags, cursor. → Mailbox.list_messages</title><text class="detail" x="118" y="683">• <tspan class="code">list_messages</tspan></text></g>
 <g><title>Server-side search of mail only; hits grouped by conversation in rank order, with each conversation's message_count. → Mailbox.search</title><text class="detail" x="118" y="710">• <tspan class="code">search_messages</tspan></text></g>
 <g><title>A whole conversation across folders, oldest first; body=unique strips quoted history. → Conversations.get_conversation</title><text class="detail" x="118" y="737">• <tspan class="code">get_conversation</tspan></text></g>
@@ -196,7 +196,7 @@
 <rect x="640" y="2034" width="1180" height="1035" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M640 2108 V2048 Q640 2034 654 2034 H1806 Q1820 2034 1820 2048 V2108 Z" fill="#183153"/>
 <text class="card-title" x="660" y="2067">REMOTE</text>
-<text class="card-subtitle" x="660" y="2091"><tspan class="code">remote/</tspan> · the only code that knows URLs, Graph/OWS JSON and id formats</text>
+<text class="card-subtitle" x="660" y="2091"><tspan class="code">remote/</tspan> · Microsoft protocols and adapters for MailReader, MailWriter, RuleWriter, SignatureStore</text>
 <rect x="660" y="2128" width="560" height="221" fill="#f2f7fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="676" y="2142" width="32" height="26" rx="5" fill="#2b6cb0"/>
 <text class="badge" x="692" y="2161" text-anchor="middle">R</text>
@@ -230,12 +230,12 @@
 <g><title>graph_mapping.py converts every Graph shape into domain models; nothing else knows Graph field names.</title><text class="detail" x="678" y="2528">JSON → models: <tspan class="code">graph_mapping.py</tspan></text></g>
 <g><title>$search returns regular ids; one translateExchangeIds call per page turns them into the immutable ids every other call uses.</title><text class="detail" x="678" y="2555"><tspan class="code">$search</tspan> ids → immutable ids</text></g>
 <rect x="1240" y="2399" width="560" height="224" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="1258" y="2434"><tspan class="code">OwsMailWriter</tspan><tspan class="detail" dx="12">ows_mail.py</tspan></text>
-<text class="group-title" x="1258" y="2471">Implements MailWriter</text>
+<text class="section-title" x="1258" y="2434"><tspan class="code">OwsMailWriter · OwsRules</tspan></text>
+<text class="group-title" x="1258" y="2471">Implements MailWriter and RuleWriter</text>
 <g><title>CreateItem with SaveOnly (draft) or SendAndSaveCopy (send); replies use ReplyToItem with an HTML body.</title><text class="detail" x="1258" y="2501"><tspan class="code">CreateItem</tspan>: drafts, send</text></g>
 <g><title>UpdateItem with one SetItemField per message; send_draft uses SendAndSaveCopy on the draft.</title><text class="detail" x="1258" y="2528"><tspan class="code">UpdateItem</tspan>: read, flag, send_draft</text></g>
 <g><title>MoveItem to a folder; DeleteItem with MoveToDeletedItems (soft delete).</title><text class="detail" x="1258" y="2555"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
-<g><title>ows_mapping.py builds request bodies; ids.py swaps the base64 alphabet between Graph and OWS ids.</title><text class="detail" x="1258" y="2582">JSON: <tspan class="code">ows_mapping.py</tspan> · <tspan class="code">ids.py</tspan></text></g>
+<g><title>CloudSettings implements SignatureStore for native roaming signatures.</title><text class="detail" x="1258" y="2582">Also <tspan class="code">CloudSettings</tspan> · <tspan class="code">SignatureStore</tspan></text></g>
 <rect x="660" y="2669" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="678" y="2704"><tspan class="code">Graph</tspan><tspan class="detail" dx="12">graph.py</tspan></text>
 <g><title>One JSON request; POST is for read-style APIs (search), so it is retried like a GET.</title><text class="detail" x="678" y="2741">• <tspan class="code">get</tspan> · <tspan class="code">post</tspan></text></g>
@@ -247,7 +247,7 @@
 <rect x="1240" y="2669" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1258" y="2704"><tspan class="code">Ows</tspan><tspan class="detail" dx="12">ows.py</tspan></text>
 <g><title>One item action in the JsonRequest envelope; returns the item results in request order (ResponseClass/ResponseCode).</title><text class="detail" x="1258" y="2741">• <tspan class="code">call(action, body)</tspan></text></g>
-<g><title>The bare-request style of the inbox-rule actions; success is WasSuccessful/ErrorCode. Proven live, not yet used by a tool.</title><text class="detail" x="1258" y="2768">• <tspan class="code">call_request(action, ...)</tspan></text></g>
+<g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="2768">• <tspan class="code">call_request(action, ...)</tspan></text></g>
 <g><title>Claims of the write token: the account writes act as.</title><text class="detail" x="1258" y="2795">• <tspan class="code">account()</tspan></text></g>
 <rect x="660" y="2882" width="1140" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="678" y="2917"><tspan class="code">Transport</tspan><tspan class="detail" dx="12">transport.py</tspan></text>
@@ -277,8 +277,8 @@
 <g><title>Delete the cache; or an offline view of it (no network, no token values).</title><text class="detail" x="678" y="3389">• <tspan class="code">sign_out()</tspan> · <tspan class="code">status()</tspan></text></g>
 <rect x="1240" y="3233" width="560" height="232" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1258" y="3271">Profiles</text>
-<g><title>→ Graph Mail.Read (and 17 other Graph scopes). Required.</title><text class="detail" x="1258" y="3301">• read: Outlook Mobile client</text></g>
-<g><title>→ outlook.office.com (Mail.ReadWrite, Mail.Send, MailboxSettings.ReadWrite). Needed for drafts, sending and changes.</title><text class="detail" x="1258" y="3328">• write: One Outlook Web client</text></g>
+<g><title>Graph Mail.Read. Required for mail reads.</title><text class="detail" x="1258" y="3301">• read: Outlook Mobile client</text></g>
+<g><title>→ outlook.office.com. Needed for drafts, sending, rules and mailbox changes.</title><text class="detail" x="1258" y="3328">• write: One Outlook Web client</text></g>
 <text class="group-title" x="1258" y="3367">Cache</text>
 <g><title>token-cache.bin under the data folder, encrypted by Windows for your user; a lock file serialises refreshes across processes.</title><text class="detail" x="1258" y="3397">DPAPI-encrypted file · cross-process lock</text></g>
 <g><title>tenant id + object id must match, or AccountMismatch.</title><text class="detail" x="1258" y="3424">both profiles must be the same account</text></g>
@@ -299,17 +299,17 @@
 <g><title>Everything else reads through it.</title><text class="detail" x="1938" y="420">• <tspan class="code">Mailbox(reader, store)</tspan></text></g>
 <text class="detail" x="1938" y="447">• <tspan class="code">Conversations(mailbox)</tspan></text>
 <text class="detail" x="1938" y="474">• <tspan class="code">Exports(conversations)</tspan> · <tspan class="code">Files(mailbox)</tspan></text>
-<g><title>The MailWriter adapter; uses the write sign-in only when a write is made.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter(Ows(transport, tokens))</tspan></text></g>
-<text class="detail" x="1938" y="528">• <tspan class="code">Writes(mailbox, writer, account)</tspan></text>
-<text class="detail" x="1938" y="555">• <tspan class="code">Mutations(mailbox, writer, check)</tspan></text>
+<g><title>Mailbox and inbox-rule adapters use the account-bound write profile.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter · OwsRules</tspan></text></g>
+<text class="detail" x="1938" y="528">• <tspan class="code">Writes · Mutations · Rules</tspan></text>
+<text class="detail" x="1938" y="555">• <tspan class="code">Signatures(CloudSettings, account)</tspan></text>
 <rect x="1900" y="656" width="620" height="522" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
 <text class="note-title" x="1924" y="696">How to read it</text>
 <text class="detail" x="1924" y="736">Each layer calls only the one below it.</text>
-<text class="detail" x="1924" y="772">The service sees only the two ports, so</text>
+<text class="detail" x="1924" y="772">The service sees only its ports, so</text>
 <text class="detail" x="1924" y="808">Graph and Outlook Web stay swappable.</text>
-<text class="detail" x="1924" y="844">Reads go to Graph (blue), writes to</text>
-<text class="detail" x="1924" y="880">Outlook Web (amber); both through the</text>
-<text class="detail" x="1924" y="916">one <tspan class="code">Transport</tspan>, with a token per request.</text>
+<text class="detail" x="1924" y="844">Mail reads use Graph (blue), mailbox</text>
+<text class="detail" x="1924" y="880">writes use OWS (amber), signatures use</text>
+<text class="detail" x="1924" y="916">Cloud Settings; all share one Transport.</text>
 <text class="detail" x="1924" y="952">Nothing stays in memory between</text>
 <text class="detail" x="1924" y="988">processes: cursors carry their state.</text>
 <text class="detail" x="1924" y="1024"></text>
@@ -335,7 +335,13 @@
 <g><title>Outlook Web's private JSON API; the write sign-in. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1938" y="2424"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text></g>
 <g><title>Drafts, sending, read state, flags.</title><text class="detail" x="1938" y="2451"><tspan class="code">CreateItem</tspan> · <tspan class="code">UpdateItem</tspan></text></g>
 <g><title>Moves and soft deletes.</title><text class="detail" x="1938" y="2478"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
-<g><title>GetInboxRule, NewInboxRule, SetInboxRule, Enable/Disable, SetInboxAndSweepRules, RemoveInboxRule (W9).</title><text class="detail" x="1938" y="2505">inbox rules: proven, no tool yet</text></g>
+<g><title>OWS rule actions support reading and confirmed changes to supported inbox rules.</title><text class="detail" x="1938" y="2505">inbox rules: read and supported writes</text></g>
+<rect x="1920" y="2582" width="580" height="130" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="1938" y="2614"><tspan class="code">Cloud Settings</tspan></text>
+<text class="detail" x="1938" y="2648">Native roaming signatures · read and write</text>
+<text class="detail" x="1938" y="2678">Account-bound write profile</text>
+<path class="write-flow" d="M1800 2962 H1840 V2648 H1916"/>
+<text class="flow-label" x="1800" y="2634" text-anchor="middle">signature API</text>
 <rect x="1920" y="3233" width="580" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1938" y="3268"><tspan class="code">Entra ID</tspan></text>
 <g><title>Microsoft's sign-in service.</title><text class="detail" x="1938" y="3305"><tspan class="code">login.microsoftonline.com</tspan></text></g>
