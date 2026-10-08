@@ -47,25 +47,32 @@ For development only, `--unsecure` uses a separate **plaintext** cache file in t
 claude mcp add lrh-outlook -- C:/Users/<you>/dev/lrh-outlook-connector/.venv/Scripts/outlook-connector.exe mcp
 ```
 
-The client starts one `outlook-connector mcp` process per session. Read tools: `list_folders`,
-`list_messages`, `search_messages`, `get_conversation`, `get_message`, `list_attachments`,
-`download_attachment`, `save_message_mime`, `export_messages`, `auth_status`. Reading
-never changes the mailbox, not even read state.
+The client starts one `outlook-connector mcp` process per session. Read tools: list_folders, list_messages, search_messages, get_conversation, get_message,
+list_attachments, download_attachment, save_message_mime, export_messages, auth_status,
+list_signatures and get_signature. Reading never changes the mailbox, not even read state.
 
-Write tools (they need `outlook-connector auth write`): `create_draft` accepts exactly one of
-`text_body` or `html_body`, for new mail and replies. It saves once and requires Graph read-back,
-returning the Microsoft draft id, full server text/HTML, and verification findings. Plain text is
-escaped without Markdown conversion; intentional HTML is passed through except active web content.
-Replies report quoted-history checks. Drafts are composed once; there is no edit tool. To change a
-draft, create a replacement with the full intended content (use the same `reply_to_message_id` for a
-reply), verify its read-back, then move the old draft to Deleted Items with `delete_messages` and use
-the new id. Never delete the old draft first. Tell the user the previous version is in Deleted Items.
-Body edits and attachments added in Outlook are not carried into the replacement. There is no
-version check against the old draft; read it first if needed. Every change gets a new id, and a
-subject- or recipient-only change also recreates the whole draft.
-After the user explicitly asks to send, `send_draft(draft_id)` sends that existing draft without
-changing its content. There is no direct send or confirmation-code API. Sends are never retried;
-unknown outcomes require checking Sent Items and Outbox before sending again.
+Write tools (they need the write sign-in): native signatures use list_signatures, get_signature,
+create_signature, update_signature, delete_signature and set_default_signature. These manage
+Outlook's native roaming-signature settings; the organization's recipient-dependent add-in is not
+handled. Names are exact and case-sensitive, cannot contain commas, and a rename is create-new then
+delete-old. A deleted selected signature can leave a dangling default, so choose a valid default when
+needed. Every settings write is sent once.
+
+create_draft accepts exactly one of text_body or html_body, for new mail and replies. It freshly
+resolves and inserts the corresponding Outlook native default unless include_signature=false; an
+optional signature selects one exact name. A missing or unreadable selection raises rather than
+falling back. Embedded signature images become inline attachments with CID references. It saves once
+and requires Graph read-back, returning the Microsoft draft id, full server text/HTML, and verification
+findings. Plain text is escaped without Markdown conversion; intentional HTML is passed through
+except active web content. Replies report quoted-history checks. Drafts are composed once; there is
+no edit tool. To change a draft, create a replacement with the full intended content (use the same
+reply_to_message_id for a reply), verify its read-back, then move the old draft to Deleted Items
+with delete_messages and use the new id. Never delete the old draft first. Tell the user the
+previous version is in Deleted Items. Body edits and attachments added in Outlook are not carried
+into the replacement. The replacement resolves the current default again; pass signature again to
+keep a specifically selected signature. There is no version check against the old draft; read it
+first if needed. Every change gets a new id, and a subject- or recipient-only change also recreates
+the whole draft.
 
 Inbox rules (write sign-in, including reads): `list_rules`, `create_rule`, `update_rule`,
 `reorder_rules`, `delete_rule`. Conditions: From, Sent to, Subject contains, Subject-or-body contains.

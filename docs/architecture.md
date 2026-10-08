@@ -199,24 +199,39 @@ lrh-outlook-connector/
   - `move` (`MoveItem`; a well-known target by `DistinguishedFolderId` as proven, any other folder by `FolderId`, pending a live check, V3);
   - `delete` (`DeleteItem` with `MoveToDeletedItems`; there is **no hard delete**).
   Conversation read state is done per message with `UpdateItem` (all copies in scope), so `ApplyConversationAction` is not used.
+- Native signature images resolved by the service are included as CID-linked inline file attachments
+  in both new-message and reply CreateItem bodies.
+
 - Mutations return an outcome per message (`None`, or Outlook's `ResponseCode`). Never retries.
 
-### 5.6 `domain/models.py` and `errors.py`
+### 5.6 remote/cloud_settings.py
 
-- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies, and `meeting` on meeting mail: kind, start, end, location, out of date; read from Graph's `eventMessage` fields in the same listing, so no extra requests), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ConversationMessage` + `Conversation`, `ConversationSize`, `ExportRequest`, `ExportArtifact`. Drafts add `OutgoingMessage` (explicit text/HTML and reply context), private `DraftMessage`, `DraftResult` and `SendResult`; mutations add `ItemResult` and `MutationResult`.
+- CloudSettings implements the SignatureStore port for Outlook native roaming signatures. It uses
+  the encrypted, account-bound write profile and Cloud Settings endpoint; it does not use browser
+  credentials or store a local copy.
+- Reads fetch the name list and both defaults fresh. Each signature content read verifies its scope
+  matches the current list setting. Writes use one PATCH or DELETE request and are never retried.
+  The opaque account scope is carried from the live list setting into writes.
+- Names are exact and case-sensitive. Commas are refused because the server exposes the list as a
+  comma-joined value; names are URL-encoded for content reads. Content updates do not rename, and
+  deletion does not repair a selected default.
+
+### 5.7 `domain/models.py` and `errors.py`
+
+- Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies, and `meeting` on meeting mail: kind, start, end, location, out of date; read from Graph's `eventMessage` fields in the same listing, so no extra requests), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ConversationMessage` + `Conversation`, `ConversationSize`, `ExportRequest`, `ExportArtifact`. Drafts add OutgoingMessage (explicit text/HTML, reply context and signature selection), private DraftMessage (including inline images), DraftResult and SendResult. Signature tools return SignatureList, SignatureDetails and SignatureWriteResult; mutations add ItemResult and MutationResult.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
 - `ExportError` (step, status, code, message, request id, likely cause, `retry`, fix) describes a gap in an export or conversation body.
 - Errors: `AuthenticationRequired`, `AccountMismatch`, `NotFound`, `InvalidRequest`, `Throttled`, `Upstream`, `WriteOutcomeUnknown`. Each surface maps them to its own protocol. A transport error carries Microsoft's answer as a `Failure` (status, code, shortened message, request id), which batch results also report per item.
 
-### 5.7 `store/`
+### 5.8 `store/`
 
 - One SQLite database per account fingerprint under the user data directory. WAL mode, `busy_timeout`, a connection per operation, short transactions.
 - Holds only the account binding (owner fingerprint) and the **folder cache** (id, parent, alias, counts, and a TTL timestamp).
 - No message data at all: no summaries, bodies, attachment bytes or mailbox mirror (research §3.2). Mail deleted on the server is gone here too (decided 2026-10-02: no local retention). The summary cache was removed on 2026-10-04 with its only uses (MCP `list_messages(refresh=false)`, the UI's cached first draw, exports by id and the `.eml` file name).
 - When the owner fingerprint does not match, the existing database is left untouched and a separate one is used.
 
-### 5.8 `service/`
+### 5.9 `service/`
 
 **`mailbox.py`:**
 - `list_folders` and every scope decision use the folder cache only while it is younger than 10 minutes (whichever process saved it; within a long process the map is reloaded at the same age). An older or empty cache, or `refresh=true`, waits for Graph, whose folder levels are fetched in parallel (under a second). Decided 2026-10-04: processes are short-lived and often start after days idle, so the former stale-while-revalidate served a weeks-old tree to the call that needed it, which missed folders created meanwhile (fatal for the per-folder listing below). One refresh at a time per process.
@@ -244,6 +259,13 @@ lrh-outlook-connector/
 - `create_draft` validates explicit text/HTML, recipients, subject and reply context; text becomes
   escaped minimal HTML preserving whitespace and NBSP. Intentional HTML passes through, with only
   active web content refused. The private writer takes `DraftMessage`, always HTML.
+- signatures.py validates exact names and passive HTML; commas are not allowed in names. It checks
+  write-profile account ownership, freshly reads native settings and contents, and refuses
+  missing/unreadable defaults or a configuration that changes during a read. It does not cache
+  settings or emulate the organization's recipient-dependent add-in. create_draft resolves the
+  correct default or explicit name, adds one signature block after the body, converts data-URI images
+  into CID-linked inline attachments, and verifies the saved image bytes on Graph read-back.
+  include_signature=false skips signature lookup entirely.
 - Drafts are composed once. A change creates a full replacement and verifies its read-back before the
   old draft is moved to Deleted Items; the new id replaces the old one. Never delete first. Changes
   in Outlook and attachments added there are not carried over. There is no version check against
@@ -299,7 +321,7 @@ lrh-outlook-connector/
   - a failed download becomes an `[EXPORT ERROR]` block ("The attachment <name> could not be downloaded.") and an `export_error` on its JSONL record.
 - `packaging.py` decides the output: one flat `.txt` only when the result is a single TXT with no attachment files, otherwise one `.zip` (TXTs at the root, `<stem>/` folders for attachments). The file is created exclusively in the exports directory (a numbered suffix on a name clash, so concurrent exports never overwrite each other).
 
-### 5.9 `surfaces/`
+### 5.10 `surfaces/`
 
 **`mcp_main.py`:**
 - FastMCP over stdio. Each tool is a few lines: validate, call the service, return a model.
@@ -337,8 +359,11 @@ The backend split is a **tenant-specific outcome**, not a design preference. The
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** `remote/ports.py` defines two protocols: `MailReader` (folders, list, get, conversation, search, attachments, MIME) and `MailWriter` (create_draft, send_draft, set_read, set_flag, move, delete). The service depends **only on these ports**, never on a concrete backend.
-- **Adapters.** `remote/graph_mail.py` implements `MailReader`. `remote/ows_mail.py` implements `MailWriter`. Each adapter maps its protocol to the same `domain` models, so swapping an adapter never changes the service, surfaces, store or tests above it.
+- **Ports.** remote/ports.py defines MailReader (folders, messages, conversations, search, attachments
+  and MIME), MailWriter (drafts, sends and mailbox changes) and SignatureStore (native signature
+  settings and contents). The service depends only on these ports, never on a concrete backend.
+- **Adapters.** remote/graph_mail.py implements MailReader; remote/ows_mail.py implements MailWriter;
+  remote/cloud_settings.py implements SignatureStore. Each adapter keeps its wire format in remote.
 - **Wiring.** `bootstrap.py` picks one adapter per port, and one token profile per adapter, from `config.py`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change
@@ -379,6 +404,8 @@ What never changes: `domain/`, `service/`, `store/`, `surfaces/`, and their test
 | `download_attachment(id, attachment_id)` · `save_message_mime(id)` | `files` | read-only (local file) |
 | `auth_status()` | `tokens.status` (offline) | read-only |
 | `export_messages(conversation_ids?, message_ids?, since?, until?, folder?, scope, limit<=2000, format=txt\|jsonl, include_attachments, combine, body)` | `export.orchestrator` | read-only (local file) |
+| list_signatures() and get_signature(name) | signatures | read-only |
+| create_signature(name, html), update_signature(name, html), delete_signature(name), set_default_signature(name, for) | signatures | write, single attempt |
 | `create_draft(..., text_body?, html_body?)` | `writes.create_draft` | not read-only, not destructive, closed world |
 | `send_draft(draft_id)` | `writes.send_draft` | destructive, open-world |
 | `list_rules()` | `rules.list_rules` | read-only, write sign-in |

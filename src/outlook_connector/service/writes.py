@@ -26,6 +26,7 @@ from outlook_connector.domain.models import (
     Attachment,
     DraftMessage,
     DraftResult,
+    InlineImage,
     Message,
     OutgoingMessage,
     Recipient,
@@ -34,15 +35,19 @@ from outlook_connector.domain.models import (
 from outlook_connector.remote.ports import MailWriter
 from outlook_connector.service.conversations import base_subject
 from outlook_connector.service.mailbox import Mailbox
+from outlook_connector.service.signatures import Signatures
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
 
 
 class Writes:
-    def __init__(self, mailbox: Mailbox, writer: MailWriter, account: Account) -> None:
+    def __init__(
+        self, mailbox: Mailbox, writer: MailWriter, account: Account, signatures: Signatures
+    ) -> None:
         self.mailbox = mailbox
         self.writer = writer
         self.account = account
+        self.signatures = signatures
 
     async def create_draft(self, message: OutgoingMessage) -> DraftResult:
         """Entry point: validate body, envelope and reply arguments; save once and read back."""
@@ -53,7 +58,7 @@ class Writes:
             raise WriteOutcomeUnknown(
                 "Outlook did not report a draft id; check Drafts before creating again."
             )
-        result = await self._read_back(draft_id)
+        result = await self._read_back(draft_id, expected=resolved.inline_images)
         if resolved.reply_to_message_id and result.verified:
             try:
                 problem = await self._reply_problem(draft_id, resolved.reply_to_message_id)
@@ -117,6 +122,16 @@ class Writes:
         elif message.reply_all:
             raise InvalidRequest("reply_all needs reply_to_message_id.")
         _validate_envelope(to, cc, bcc, subject)
+        inline_images: list[InlineImage] = []
+        if message.include_signature:
+            selected = await self.signatures.resolve_for_draft(
+                message.signature, is_reply=bool(message.reply_to_message_id)
+            )
+            if selected:
+                page += selected.html
+                inline_images = selected.images
+                if len(page) > MAX_BODY_CHARS:
+                    raise InvalidRequest(f"Body must be at most {MAX_BODY_CHARS} characters.")
         return DraftMessage(
             to=to,
             cc=cc,
@@ -125,9 +140,10 @@ class Writes:
             html_body=page,
             reply_to_message_id=message.reply_to_message_id,
             reply_all=message.reply_all,
+            inline_images=inline_images,
         )
 
-    async def _read_back(self, draft_id: str, *, expected: list[Attachment] | None = None) -> DraftResult:
+    async def _read_back(self, draft_id: str, *, expected: list[InlineImage] | None = None) -> DraftResult:
         """Assumes (not re-checked here): reliable id from a single successful write. Retries reads only."""
         for attempt in range(3):
             try:
@@ -139,14 +155,34 @@ class Writes:
                 cids = re.findall(r"cid:([^\"' >]+)", page.body_html or "", re.IGNORECASE)
                 if cids or expected:
                     attachments = await self.mailbox.reader.list_attachments(draft_id)
-                    if expected and Counter(a.name for a in expected) - Counter(a.name for a in attachments):
-                        findings.append("The server draft is missing expected attachments.")
                     found = await self.mailbox.reader.attachment_content_ids(
                         {draft_id: [a.id for a in attachments if a.is_inline]}
                     )
-                    present = set(found.get(draft_id, {}).values())
+                    content_ids = found.get(draft_id, {})
+                    present = {cid for cid in content_ids.values() if cid}
                     if any(cid not in present for cid in cids):
                         findings.append("The server draft references missing inline images.")
+                    if expected:
+                        by_cid = {
+                            content_ids.get(attachment.id): attachment
+                            for attachment in attachments
+                            if attachment.is_inline
+                        }
+                        with tempfile.TemporaryDirectory(prefix="outlook-signature-check-") as folder:
+                            for index, image in enumerate(expected):
+                                attachment = by_cid.get(image.content_id)
+                                if attachment is None:
+                                    findings.append(
+                                        "The server draft is missing an expected signature image."
+                                    )
+                                    continue
+                                target = Path(folder) / str(index)
+                                await self.mailbox.reader.download_attachment(draft_id, attachment.id, target)
+                                if (
+                                    hashlib.sha256(target.read_bytes()).digest()
+                                    != hashlib.sha256(image.content).digest()
+                                ):
+                                    findings.append("A signature image changed in the server draft.")
                 return DraftResult(
                     id=draft_id,
                     status="saved",

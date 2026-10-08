@@ -9,7 +9,9 @@ messages named by id (§11.2), each with a result per message.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Annotated, Literal
+from inspect import Parameter
+from inspect import Signature as FunctionSignature
+from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
@@ -39,6 +41,9 @@ from outlook_connector.domain.models import (
     Scope,
     SearchResult,
     SendResult,
+    SignatureDetails,
+    SignatureList,
+    SignatureWriteResult,
 )
 from outlook_connector.service.files import SavedFile
 
@@ -95,6 +100,16 @@ status, likely_cause, retry, fix).
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
 many small ones. On a throttling error, wait at least a minute before retrying.
+- Native signatures: all signature tools, including list_signatures and get_signature, need the
+write sign-in. list_signatures reports Outlook's exact, case-sensitive native names, the new-message
+and reply/forward defaults, and whether contents are readable. get_signature returns the HTML and
+text. create_signature, update_signature, delete_signature and set_default_signature change Outlook
+settings once; they are not retried. Names cannot contain commas. A deleted signature can
+remain selected as a dangling default, so set a valid default after deletion when needed. To copy an
+Outlook draft signature, get its HTML, download its CID-referenced inline images, replace each CID
+image with a data:image URI containing those bytes, then save the resulting HTML as a native
+signature. create_draft freshly resolves and inserts the default for new mail or replies;
+signature selects a named signature and include_signature=false suppresses all signatures.
 - Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
 Drafts are composed once, never edited. To change one, create a replacement with the full intended
 content (use the same reply_to_message_id for a reply), check its server read-back, then delete the
@@ -137,6 +152,9 @@ DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHin
 SEND = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=True)
 CHANGE = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False)
 RULE_WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
+SIGNATURE_WRITE = ToolAnnotations(
     readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
 )
 RELOCATE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=False)
@@ -379,6 +397,54 @@ def build_server(context: AppContext) -> FastMCP:
         """Propose/confirm removing a supported inbox rule; changes future mail handling, never retries."""
         return await (await services()).rules.delete_rule(rule_id, user_confirmation)
 
+    @mcp.tool(annotations=READ_ONLY)
+    async def list_signatures() -> SignatureList:
+        """List exact native Outlook signature names, defaults and content readability."""
+        return await (await services()).signatures.list_signatures()
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_signature(name: str) -> SignatureDetails:
+        """Read the current HTML and text of one native Outlook signature."""
+        return await (await services()).signatures.get_signature(name)
+
+    @mcp.tool(annotations=SIGNATURE_WRITE)
+    async def create_signature(name: str, html: str) -> SignatureWriteResult:
+        """Create one native Outlook signature from passive HTML, including embedded data images."""
+        return await (await services()).signatures.create_signature(name, html)
+
+    @mcp.tool(annotations=SIGNATURE_WRITE)
+    async def update_signature(name: str, html: str) -> SignatureWriteResult:
+        """Replace the contents of an existing native Outlook signature; this does not rename it."""
+        return await (await services()).signatures.update_signature(name, html)
+
+    @mcp.tool(annotations=SIGNATURE_WRITE)
+    async def delete_signature(name: str) -> SignatureWriteResult:
+        """Delete one native Outlook signature; Outlook may leave its default pointer dangling."""
+        return await (await services()).signatures.delete_signature(name)
+
+    async def set_default_signature(**arguments: Any) -> SignatureWriteResult:
+        """Set the required new, reply or both native defaults; name=null clears the selected default."""
+        return await (await services()).signatures.set_default_signature(arguments["name"], arguments["for"])
+
+    # MCP exposes the required field as the exact contract name "for"; Python accepts it through
+    # **arguments because "for" is a reserved keyword.
+    setattr(  # noqa: B010
+        set_default_signature,
+        "__signature__",
+        FunctionSignature(
+            [
+                Parameter("name", Parameter.POSITIONAL_ONLY, annotation=str | None),
+                Parameter(
+                    "for",
+                    Parameter.POSITIONAL_ONLY,
+                    annotation=Literal["new", "reply", "both"],
+                ),
+            ],
+            return_annotation=SignatureWriteResult,
+        ),
+    )
+    mcp.tool(annotations=SIGNATURE_WRITE)(set_default_signature)
+
     @mcp.tool(annotations=DRAFT)
     async def create_draft(
         to: list[str] | None = None,
@@ -389,9 +455,14 @@ def build_server(context: AppContext) -> FastMCP:
         html_body: str | None = None,
         reply_to_message_id: str | None = None,
         reply_all: bool = False,
+        signature: str | None = None,
+        include_signature: bool = True,
     ) -> DraftResult:
         """Save a new message or reply and return server read-back.
 
+        By default, freshly resolves and inserts the Outlook native default for new mail or replies.
+        Set signature to select a native signature by exact name, or include_signature=False to
+        suppress all signatures. A missing or unreadable selected signature raises instead of falling back.
         Drafts are composed once. To change one, create a full replacement (using the same
         ``reply_to_message_id`` for a reply), verify its read-back, then delete the old draft with
         ``delete_messages`` and use the new id. Never delete first. Outlook edits and attachments
@@ -408,6 +479,8 @@ def build_server(context: AppContext) -> FastMCP:
                 html_body=html_body,
                 reply_to_message_id=reply_to_message_id,
                 reply_all=reply_all,
+                signature=signature,
+                include_signature=include_signature,
             )
         )
 

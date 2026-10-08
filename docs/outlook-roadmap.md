@@ -11,11 +11,9 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **W8:** native signatures: CRUD, default selection, and the default inserted into new drafts
-   unless told otherwise.
-2. **Correctness:** H19, H22 and H26.
-3. **Performance and cleanup:** H30–H32 and H34–H38.
-4. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
+1. **Correctness:** H19, H22 and H26.
+2. **Performance and cleanup:** H30–H32 and H34–H38.
+3. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
 
@@ -25,89 +23,6 @@ Status wording:
 - **Later** — useful work outside the current build sequence.
 
 # Send and mailbox features
-
-## W8 — Native signatures
-
-**Status:** Decided, not built (scope confirmed 2026-10-07). Drafts are composed once; changes use
-verified replacement drafts.
-
-**Scope: native Outlook signatures only.** The connector reads and writes the signatures stored in
-the user's Outlook settings (roaming signatures, Cloud Settings adapter; contracts and live evidence
-in [research §4.7](outlook-api-research.md#47-native-roaming-signature-discovery-and-standalone-reads-2026-10-07)
-and [§4.8](outlook-api-research.md#48-native-signature-crud-and-default-lifecycle-2026-10-07)).
-Add-in-generated signatures are ignored in code: see *Corporate signature add-in* below. A user who
-wants agent drafts to carry the corporate signature makes a native signature equal to it.
-
-**MCP tools:**
-
-- `list_signatures()`: names, which one is the new-message default and which the reply/forward
-  default (either may be none), and whether each listed name has readable contents.
-- `get_signature(name)`: HTML and text contents.
-- `create_signature(name, html)`, `update_signature(name, html)`, `delete_signature(name)`:
-  native signature CRUD (proven contracts, research §4.8). One write each, never retried; a
-  rejected write raises. The agent may read back to confirm if it wants.
-- `set_default_signature(name | none, for)`: `for` is **required**: `new`, `reply` or `both`.
-  Applies to Outlook itself, nothing stored locally. One write, never retried; a rejection raises.
-
-**Draft creation (`create_draft`):**
-
-- By default, insert the right native default, read fresh: the new-message default for new mail, the
-  reply/forward default for replies. An explicitly empty default inserts nothing.
-- Optional `signature` (name), described as rarely needed ("omit to use your Outlook default"),
-  and `include_signature: bool = True`. With `include_signature=false` no signature is inserted;
-  a name supplied with it is ignored and noted in the draft's existing findings (if that note would
-  need new reporting machinery, ignore it silently).
-- A named signature, or a configured default, that does not exist or has no readable contents
-  raises. No fallback to another signature.
-- Placement once, at creation: the message body, then one `<div id="Signature"
-  data-signature-name="{name}">` block (the Outlook Web convention, research §4.6); for replies,
-  Exchange appends the quoted history after it.
-- Native signature HTML carries images as `data:` URIs: convert them into inline attachments with
-  matching `cid:` references. Text-only contents are escaped like `text_body` (drafts are HTML).
-- Changing a draft means delete-and-recreate after the replacement read-back. The replacement resolves
-  the default again, so a default changed in between applies, and a specifically named signature must
-  be passed again.
-
-**Intended workflow — copying a signature from a draft into a native signature:** the user creates
-a draft in Outlook (the corporate add-in inserts its signature there), then asks the agent to read
-it and save that signature as a native one. The agent reads the draft's HTML (`get_message`,
-`body=html`), extracts the `#Signature` block and calls `create_signature`/`update_signature`.
-The draft's signature images are `cid:` references to inline attachments, while native signatures
-embed images as `data:` URIs: converting them (download the inline attachment, embed it) is part
-of this feature, either in `create_signature` or as a documented agent step.
-
-**Implementation constraints from live findings:** a raw name-list entry may have no readable
-contents, and deleting a selected signature can leave a dangling default. Cloud Settings normalizes
-HTML wrappers, line breaks and id prefixes, so verify visible text and decoded image bytes rather
-than byte-identical HTML. Names are the identifiers (no stable ids): check them against a fresh
-list.
-
-**Research first (live, before building the tools):** with throwaway signatures only, never the
-user's real ones, and recorded in research §4.8:
-
-1. **Rename:** how Outlook renames a signature (same entry under a new name, or delete and
-   re-create), and whether the new-message/reply defaults follow the new name or dangle.
-2. **Case:** whether names are case-sensitive, and whether two names differing only in case can
-   coexist.
-3. **Commas and special characters:** whether a name containing a comma is accepted (the name list
-   is comma-joined), and how names with spaces, accents and other characters round-trip through
-   the list, contents and default settings.
-4. **Images:** that a signature created with a `data:` URI image (converted from a draft's `cid:`
-   inline attachment) reads back intact and renders when inserted into a new draft.
-
-Let the results shape name validation in `create_signature`/`update_signature` and whether
-`update_signature` supports renaming at all.
-
-**Corporate signature add-in (documented, not handled in code):** in this tenant the official
-signature is generated per message by the organization-deployed, mandatory officeatwork "Mail
-Signature" add-in (rollout July 2026), from the user's profile and add-in settings, and differs for
-internal and external recipients. It inserts into the message being composed; it does not write
-native signature settings, and it does not touch drafts created by the connector. Details in
-research §4.6.
-
-**Remaining validation:** synthetic fixtures for missing references, no default, missing default
-contents, name encoding, configuration changes and account ownership; then public-tool behavior,
-draft image attachments, new-message/reply placement and recipient rendering.
 
 # Correctness and reliability
 
