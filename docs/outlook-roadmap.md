@@ -29,7 +29,7 @@ inspect unrelated mailbox content.
 
 **Status:** Candidate; read-only feasibility proven 2026-10-07, no product tool implemented.
 
-**Evidence:** the existing read sign-in can search for and begin downloading a known SharePoint
+**Evidence:** the existing Graph sign-in can search for and begin downloading a known SharePoint
 file; unrestricted file search and known-person search also worked. Limits and unproven cases
 are recorded once in [research §3.7](outlook-api-research.md#37-file-and-cross-category-search-feasibility-2026-10-07).
 
@@ -49,6 +49,6 @@ orchestrates these providers. Calendar authentication remains a separate blocker
 
 **Goal:** search Exchange calendar events (subject, time, organizer, attendees, agenda and Teams join link) and hand a Teams meeting's chat id to `lrh-teams` when useful.
 
-**Current blocker:** the read profile has no `Calendars.*` scope, so Graph `/me/calendarView` is not available through the current read sign-in.
+**Current blocker:** the Graph profile has no `Calendars.*` scope, so Graph `/me/calendarView` is not available through the current Graph sign-in.
 
-**Next when revisited:** find or prove a sign-in/client route that grants `Calendars.Read`; the existing write token is a candidate to test. Keep calendar/event data in this connector and meeting chat in `lrh-teams`.
+**Next when revisited:** find or prove a sign-in/client route that grants `Calendars.Read`; the existing Outlook token is a candidate to test. Keep calendar/event data in this connector and meeting chat in `lrh-teams`.

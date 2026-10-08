@@ -357,7 +357,7 @@ async def test_claims_challenge_is_passed_on(fake: FakeGraph) -> None:
 
 async def test_token_still_rejected_after_renewal_asks_to_sign_in(fake: FakeGraph) -> None:
     fake.reject_tokens = 2
-    with pytest.raises(AuthenticationRequired, match="outlook-connector auth read"):
+    with pytest.raises(AuthenticationRequired, match="outlook-connector auth graph"):
         await reader_for(fake).list_folders()
 
 

@@ -48,8 +48,9 @@ from outlook_connector.domain.models import (
 from outlook_connector.service.files import SavedFile
 
 INSTRUCTIONS = """\
-The signed-in user's own Outlook mailbox: reads through Microsoft Graph, drafts and sending through \
-Outlook Web. Reading never changes the mailbox, not even read state.
+The signed-in user's own Outlook mailbox. Microsoft Graph handles core mail-data reads; Outlook \
+Web Service (OWS) handles mail changes and inbox-rule access; Outlook Cloud Settings handles native \
+signature settings. Reading never changes the mailbox, not even read state.
 
 - Finding mail: search_messages for topics (server-side search, accent-insensitive, supports \
 subject:/from:/to: terms) and list_messages for recent mail or a date window (folder optional; \
@@ -111,7 +112,7 @@ per 10 minutes (a $batch counts each of its up to 20 items). This connector pace
 Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
 many small ones. On a throttling error, wait at least a minute before retrying.
 - Native signatures: all signature tools, including list_signatures and get_signature, need the
-write sign-in. list_signatures reports Outlook's exact, case-sensitive native names, the new-message
+Outlook sign-in. list_signatures reports Outlook's exact, case-sensitive native names, the new-message
 and reply/forward defaults, and whether contents are readable. get_signature returns the HTML and
 text. create_signature, update_signature, delete_signature and set_default_signature change Outlook
 settings once; they are not retried. Names cannot contain commas. A deleted signature can
@@ -146,7 +147,8 @@ Only after explicit human confirmation repeat the exact request with that code. 
 Never confirm on the user's behalf. \
 Each write is sent once and read back; unknown means check Outlook before repeating. \
 Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
-- Writes need the write sign-in (`outlook-connector auth write`).
+- Core mail-data reads use the Graph sign-in. Mail changes, inbox-rule access and native-signature \
+  access use the Outlook sign-in (`outlook-connector auth outlook`).
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
 not the sign-in: do not ask the user to sign in again for it.
@@ -186,7 +188,7 @@ def _utc(value: datetime | None) -> datetime | None:
 
 
 def build_server(context: AppContext) -> FastMCP:
-    mcp = FastMCP("lrh-outlook", instructions=INSTRUCTIONS, log_level="WARNING")
+    mcp = FastMCP("lrh-outlook-connector", instructions=INSTRUCTIONS, log_level="WARNING")
 
     async def services() -> Services:
         return await context.services()
@@ -200,7 +202,7 @@ def build_server(context: AppContext) -> FastMCP:
             "profiles": {
                 p.profile: {"signed_in": p.signed_in, "purpose": p.purpose} for p in status.profiles
             },
-            "sign_in_command": context.tokens.sign_in_command("read"),
+            "sign_in_command": context.tokens.sign_in_command("graph"),
         }
 
     @mcp.tool(annotations=READ_ONLY)
@@ -390,7 +392,7 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_rules() -> list[InboxRule]:
-        """Current inbox rules in order. Unsupported rules are read-only; needs the write sign-in."""
+        """Current inbox rules in order. Unsupported rules are read-only; needs the Outlook sign-in."""
         return await (await services()).rules.list_rules()
 
     @mcp.tool(annotations=RULE_WRITE)

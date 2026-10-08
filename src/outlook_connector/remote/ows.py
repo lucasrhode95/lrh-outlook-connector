@@ -1,8 +1,9 @@
-"""Outlook Web's JSON RPC (OWS, ``/owa/service.svc``): the write path (architecture §5.5).
+"""Outlook Web's JSON RPC (OWS, ``/owa/service.svc``): mail changes and inbox rules (architecture §5.5).
 
-A gap fill: the tested deployment did not grant Graph writes to the selected clients (research §2), so every
-write goes here with the ``write`` token. Only the ``ows*`` modules know OWS JSON. Contracts are the ones
-proven in research §4.1–4.2; anything else is marked where it is used.
+A gap fill: the tested deployment did not grant Graph writes to the selected clients (research §2), so mail
+changes go here with the ``outlook`` token, which also supports inbox-rule reads.
+Only the ``ows*`` modules know OWS JSON. Contracts are the ones proven in research §4.1–4.2;
+anything else is marked where it is used.
 
 - Bearer only: no cookies, no canary. Payloads up to 2,048 URL-encoded characters travel in the
   ``X-OWA-UrlPostData`` header with an empty body, larger ones in the body.
@@ -29,7 +30,7 @@ from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnkn
 from outlook_connector.remote.transport import Transport
 
 OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
-PROFILE = "write"  # Outlook Web calls use the write sign-in
+PROFILE = "outlook"  # Outlook Web calls use the Outlook sign-in
 SERVER_VERSION = "V2018_01_08"
 URL_POST_DATA_LIMIT = 2048
 MAX_ERROR_TEXT = 200
@@ -44,7 +45,7 @@ class Ows:
         self._tokens = tokens
 
     def account(self) -> dict[str, Any]:
-        """Claims of the write token (tid, oid, upn): the account writes act as."""
+        """Claims of the Outlook token (tid, oid, upn): the account writes act as."""
         return self._tokens.get_token(PROFILE).claims()
 
     async def call(self, action: str, body: dict[str, Any], *, strict: bool = True) -> list[dict[str, Any]]:
