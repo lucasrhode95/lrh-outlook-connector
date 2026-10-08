@@ -366,6 +366,8 @@ leave the README belong in the requirements/architecture docs if they are not al
 - Describe the current state only: drop history such as "removed 2026-10-04", "decided 2026-10-04"
   and "(the summary cache was removed…)". Decisions and dates stay in the research record.
 - Every file or module mentioned (e.g. "5.1 `auth/tokens.py`") links to that file with a relative link.
+- Remove "11. Build order" (renumber the following section) and repoint the roadmap's
+  "Build/module map" link, which targets it, to "4. Repository layout".
 
 # Later
 
