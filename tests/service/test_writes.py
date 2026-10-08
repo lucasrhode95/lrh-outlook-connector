@@ -15,12 +15,14 @@ from outlook_connector.domain.errors import (
     Upstream,
 )
 from outlook_connector.domain.models import OutgoingMessage
+from outlook_connector.remote.cloud_settings import CloudSettings
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
+from outlook_connector.service.signatures import Signatures
 from outlook_connector.service.writes import Writes
 from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, StaticTokens, sample_mailbox
@@ -41,7 +43,8 @@ def make_writes(fake: FakeGraph, tmp_path: Path, tokens: Any = None, account: Ac
     tokens = tokens or StaticTokens()
     transport = Transport(tokens, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
     mailbox = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
-    return Writes(mailbox, OwsMailWriter(Ows(transport, tokens)), account)
+    signatures = Signatures(CloudSettings(transport, tokens), account)
+    return Writes(mailbox, OwsMailWriter(Ows(transport, tokens)), account, signatures)
 
 
 @pytest.fixture
