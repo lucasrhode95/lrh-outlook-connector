@@ -68,7 +68,7 @@ python research/probes/auth.py --status
 `auth.py` prints a device-code link and code. Sign in in any browser. Tokens are stored as
 **plaintext** in `.local/probe-tokens.json` (git-ignored). Delete that file when you are done.
 The probes check the optional expected account and reject mixed-account caches.
-These helpers are independent of the production app's encrypted MSAL cache.
+These helpers are independent of the production app's encrypted MSAL cache. The local probe config and token file use profile names as keys. When reusing them, rename `read`/`write` config keys to `graph`/`outlook` (keep `search`), then sign in again with `auth.py graph` and `auth.py outlook` to repopulate the token entries. The production app cache remains usable because its client IDs and requested scopes did not change.
 
 ## Order for a new tenant (or a re-check)
 

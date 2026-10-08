@@ -55,7 +55,14 @@ class FakeTokens:
 
     def status(self) -> CacheStatus:
         return CacheStatus(
-            "encrypted", Path("x"), True, (), (ProfileStatus("graph", "c", (), "reads", True, None),)
+            "encrypted",
+            Path("x"),
+            True,
+            (),
+            (
+                ProfileStatus("graph", "c", (), "Microsoft Graph", True, None),
+                ProfileStatus("outlook", "c", (), "Outlook APIs", False, None),
+            ),
         )
 
 

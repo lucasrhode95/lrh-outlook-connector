@@ -216,7 +216,7 @@
 <g><title>Save into Drafts without sending; the draft's id when the backend reports it.</title><text class="detail" x="1258" y="2200">• <tspan class="code">create_draft</tspan></text></g>
 <g><title>Send and keep a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2227">• <tspan class="code">send</tspan></text></g>
 <g><title>Send an existing draft as it is, keeping a copy in Sent Items.</title><text class="detail" x="1258" y="2254">• <tspan class="code">send_draft</tspan></text></g>
-<g><title>Identity claims (tid, oid, upn) of the credential writes use.</title><text class="detail" x="1258" y="2281">• <tspan class="code">account</tspan></text></g>
+<g><title>Identity claims (tid, oid, upn) of the Outlook credential.</title><text class="detail" x="1258" y="2281">• <tspan class="code">account</tspan></text></g>
 <g><title>Read or unread; one outcome per message.</title><text class="detail" x="1529" y="2200">• <tspan class="code">set_read</tspan></text></g>
 <g><title>Flag or unflag; one outcome per message.</title><text class="detail" x="1529" y="2227">• <tspan class="code">set_flag</tspan></text></g>
 <g><title>Move to a folder; one outcome per message.</title><text class="detail" x="1529" y="2254">• <tspan class="code">move</tspan></text></g>
@@ -276,7 +276,7 @@
 <rect x="1240" y="3233" width="560" height="232" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1258" y="3271">Profiles</text>
 <g><title>Graph Mail.Read. Required for mail reads.</title><text class="detail" x="1258" y="3301">• graph: Outlook Mobile client</text></g>
-<g><title>→ outlook.office.com. Needed for drafts, sending, rules and mailbox changes.</title><text class="detail" x="1258" y="3328">• outlook: One Outlook Web client</text></g>
+<g><title>→ outlook.office.com. Needed for mail changes, inbox rules and native signatures.</title><text class="detail" x="1258" y="3328">• outlook: One Outlook Web client</text></g>
 <text class="group-title" x="1258" y="3367">Cache</text>
 <g><title>token-cache.bin under the data folder, encrypted by Windows for your user; a lock file serialises refreshes across processes.</title><text class="detail" x="1258" y="3397">DPAPI-encrypted file · cross-process lock</text></g>
 <g><title>tenant id + object id must match, or AccountMismatch.</title><text class="detail" x="1258" y="3424">both profiles must be the same account</text></g>
@@ -297,7 +297,7 @@
 <g><title>Everything else reads through it.</title><text class="detail" x="1938" y="420">• <tspan class="code">Mailbox(reader, store)</tspan></text></g>
 <text class="detail" x="1938" y="447">• <tspan class="code">Conversations(mailbox)</tspan></text>
 <text class="detail" x="1938" y="474">• <tspan class="code">Exports(conversations)</tspan> · <tspan class="code">Files(mailbox)</tspan></text>
-<g><title>Mailbox and inbox-rule adapters use the account-bound Outlook profile.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter · OwsRules</tspan></text></g>
+<g><title>Mail-change and inbox-rule adapters use the Outlook profile.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter · OwsRules</tspan></text></g>
 <text class="detail" x="1938" y="528">• <tspan class="code">Writes · Mutations · Rules</tspan></text>
 <text class="detail" x="1938" y="555">• <tspan class="code">Signatures(CloudSettings, account)</tspan></text>
 <rect x="1900" y="656" width="620" height="522" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
@@ -305,12 +305,12 @@
 <text class="detail" x="1924" y="736">Each layer calls only the one below it.</text>
 <text class="detail" x="1924" y="772">The service sees only its ports, so</text>
 <text class="detail" x="1924" y="808">Graph and Outlook Web stay swappable.</text>
-<text class="detail" x="1924" y="844">Mail reads use Graph (blue), mailbox</text>
-<text class="detail" x="1924" y="880">writes use OWS (amber), signatures use</text>
-<text class="detail" x="1924" y="916">Cloud Settings; all share one Transport.</text>
-<text class="detail" x="1924" y="952">Nothing stays in memory between</text>
-<text class="detail" x="1924" y="988">processes: cursors carry their state.</text>
-<text class="detail" x="1924" y="1024"></text>
+<text class="detail" x="1924" y="844">Graph (blue) profile: core mail data and</text>
+<text class="detail" x="1924" y="880">verification. Outlook (amber) profile:</text>
+<text class="detail" x="1924" y="916">mail changes, rules, and signatures.</text>
+<text class="detail" x="1924" y="952">API flows are neutral; one shared Transport.</text>
+<text class="detail" x="1924" y="988">Nothing stays in memory between</text>
+<text class="detail" x="1924" y="1024">processes: cursors carry their state.</text>
 <text class="detail" x="1924" y="1060">Hover an item for its details: open this</text>
 <text class="detail" x="1924" y="1096">file directly in a browser (tooltips do</text>
 <text class="detail" x="1924" y="1132">not show when it is embedded as an image).</text>
