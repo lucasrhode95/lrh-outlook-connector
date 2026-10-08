@@ -60,6 +60,32 @@ async def test_folders_are_walked_recursively_with_aliases(fake: FakeGraph) -> N
     assert folders["f-project"].parent_id == "f-proj" and folders["f-project"].well_known is None
 
 
+async def test_count_messages_returns_count_and_newest_date(
+    fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queries: list[dict[str, str]] = []
+    original_route = fake.route
+
+    def capture(method, path, params, prefer, request):  # type: ignore[no-untyped-def]
+        if path.endswith("/mailFolders/f-inbox/messages"):
+            queries.append(params)
+        return original_route(method, path, params, prefer, request)
+
+    monkeypatch.setattr(fake, "route", capture)
+    counts = await reader_for(fake).count_messages(folder_ids=["f-inbox"], since=None, until=None)
+
+    assert counts["f-inbox"].count == 2
+    assert counts["f-inbox"].newest_received_at == datetime(2026, 9, 30, 12, tzinfo=UTC)
+    assert queries == [
+        {
+            "$count": "true",
+            "$top": "1",
+            "$select": "receivedDateTime",
+            "$orderby": "receivedDateTime desc",
+        }
+    ]
+
+
 async def test_list_messages_newest_first_with_date_window_and_paging(fake: FakeGraph) -> None:
     reader = reader_for(fake)
     page, link = await reader.list_messages(

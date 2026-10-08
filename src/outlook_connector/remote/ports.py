@@ -34,6 +34,14 @@ class FetchedMessages:
     failed: dict[str, Failure] = field(default_factory=dict)  # not fetched (throttled, error): why
 
 
+@dataclass(frozen=True)
+class FolderCount:
+    """A folder's date-window count and newest received timestamp, returned by one count request."""
+
+    count: int
+    newest_received_at: datetime | None
+
+
 class MailReader(Protocol):
     async def list_folders(self) -> list[Folder]: ...
 
@@ -68,9 +76,9 @@ class MailReader(Protocol):
 
     async def count_messages(
         self, *, folder_ids: list[str], since: datetime | None, until: datetime | None
-    ) -> dict[str, int]:
-        """Server count of messages in the window per folder (not its subfolders). A folder whose
-        count is unavailable is left out, so one failure never hides the others' counts."""
+    ) -> dict[str, FolderCount]:
+        """Count messages and find the newest date in the window per folder, excluding subfolders.
+        A failed folder is left out, so one failure never hides the others' results."""
         ...
 
     async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message: ...

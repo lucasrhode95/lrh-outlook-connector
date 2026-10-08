@@ -28,6 +28,7 @@ import hashlib
 import time
 from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from math import ceil
 from typing import Any
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
@@ -48,7 +49,7 @@ from outlook_connector.domain.models import (
     SearchResult,
     UserProfile,
 )
-from outlook_connector.remote.ports import MailReader
+from outlook_connector.remote.ports import FolderCount, MailReader
 from outlook_connector.service import cursors
 from outlook_connector.service.scope import validate_scope
 from outlook_connector.store.db import Store
@@ -59,7 +60,6 @@ SYNC_ISSUES_FOLDERS = ("syncissues", "conflicts", "localfailures", "serverfailur
 OUTGOING_FOLDERS = ("sentitems", "drafts", "outbox")
 FILTERED_PAGES = 10  # server pages scanned at most for one filtered page
 PER_FOLDER_SHARE = 2 / 3  # list folder by folder when left-out folders hold this share of the mailbox
-MIN_FOLDER_CHUNK = 10  # messages read at a time from one folder in a per-folder listing
 MAX_SIZE_LOOKUPS = 200
 SEEN_LIMIT = 400  # fingerprints a cursor carries: two pages of the largest size
 COMPACT_DROP = {
@@ -246,6 +246,7 @@ class Mailbox:
 
         notes: list[str] = []
         window_excluded: dict[str, int] = {}
+        folder_counts: dict[str, FolderCount] | None = None
         link: str | None = None
         offsets: dict[str, int] | None = None  # per-folder listing: folder id -> messages returned
         hidden = set() if folder_id else (await self.reach(()))[1]
@@ -259,10 +260,12 @@ class Mailbox:
         elif not folder_id:
             share, note = await self._left_out_share(set(skip) | hidden)
             if share >= PER_FOLDER_SHARE:
-                offsets, window_excluded = await self._folders_with_mail(set(skip) | hidden, since, until)
+                offsets, window_excluded, folder_counts = await self._folders_with_mail(
+                    set(skip) | hidden, since, until
+                )
                 notes.append(note)
         if offsets is not None:
-            fetched, offsets = await self._merged_folders(offsets, since, until, limit)
+            fetched, offsets = await self._merged_folders(offsets, since, until, limit, folder_counts)
             complete = not offsets
             filtered = not scope.meeting_mail
         else:
@@ -342,7 +345,7 @@ class Mailbox:
 
     async def _folders_with_mail(
         self, left_out: set[str], since: datetime | None, until: datetime | None
-    ) -> tuple[dict[str, int], dict[str, int]]:
+    ) -> tuple[dict[str, int], dict[str, int], dict[str, FolderCount]]:
         """Initial folder offsets and excluded Deleted/Junk counts, from the same count batch.
 
         Assumes (not re-checked here): complete left-out folder ids and a validated listing window.
@@ -356,25 +359,31 @@ class Mailbox:
             fid for fid in folders if fid in left_out and categories.get(fid) == "deleted_or_junk"
         ]
         try:
-            counts = await self.reader.count_messages(
+            counts: dict[str, FolderCount] = await self.reader.count_messages(
                 folder_ids=in_scope + excluded_folders, since=since, until=until
             )
         except ConnectorError:
             counts = {}
-        offsets = {fid: 0 for fid in in_scope if (counts[fid] if fid in counts else folders[fid].total)}
+        offsets = {fid: 0 for fid in in_scope if (counts[fid].count if fid in counts else folders[fid].total)}
         excluded: dict[str, int] = {}
         if all(fid in counts for fid in excluded_folders):
-            excluded_count = sum(counts[fid] for fid in excluded_folders)
+            excluded_count = sum(counts[fid].count for fid in excluded_folders)
             excluded = {"deleted_or_junk": excluded_count} if excluded_count else {}
-        return offsets, excluded
+        return offsets, excluded, counts
 
     async def _merged_folders(
-        self, offsets: dict[str, int], since: datetime | None, until: datetime | None, limit: int
+        self,
+        offsets: dict[str, int],
+        since: datetime | None,
+        until: datetime | None,
+        limit: int,
+        folder_counts: dict[str, FolderCount] | None = None,
     ) -> tuple[list[MessageSummary], dict[str, int]]:
         """The newest ``limit`` messages across the folders, merged newest first, and each folder's
         new position (folders with nothing left are dropped). Each folder is read from its position
-        in small chunks that grow as the merge takes from it, so little is read and not used; the
-        folders that need more are read in parallel (the transport keeps Exchange's limit of 4).
+        in count-weighted chunks, so busy folders often need just one read. The count batch's newest
+        dates defer folders that cannot contribute; missing dates stay eligible. Reads are parallel
+        within the transport's existing limit of 4.
 
         Assumes (not re-checked here): ``offsets`` holds only in-scope folders (``list_messages`` drops
         left-out, hidden and deleted ones), and ``limit`` and the window were validated by
@@ -384,7 +393,26 @@ class Mailbox:
         read = dict(offsets)  # how far each folder has been read
         buffers: dict[str, list[MessageSummary]] = {fid: [] for fid in offsets}
         more = dict.fromkeys(offsets, True)
-        chunk = dict.fromkeys(offsets, max(MIN_FOLDER_CHUNK, -(-limit // max(len(offsets), 1))))
+        folders = await self.folder_map()
+        weights = {
+            fid: max(
+                1,
+                folder_counts[fid].count
+                if folder_counts and fid in folder_counts
+                else folders[fid].total or 0,
+            )
+            for fid in offsets
+        }
+        total_weight = sum(weights.values()) or 1
+        chunk = {
+            fid: min(limit, max(1, ceil(limit * weight / total_weight) + 1))
+            for fid, weight in weights.items()
+        }
+        upper_bounds: dict[str, float | None] = {}
+        for fid in offsets:
+            folder_count = folder_counts.get(fid) if folder_counts is not None else None
+            newest = folder_count.newest_received_at if folder_count is not None else None
+            upper_bounds[fid] = newest.timestamp() if newest is not None else None
 
         gone: set[str] = set()
 
@@ -397,17 +425,53 @@ class Mailbox:
             except NotFound:  # the folder was deleted meanwhile: its mail is gone or in Deleted Items
                 gone.add(fid)
                 more[fid] = False
+                upper_bounds[fid] = float("-inf")
                 return
             buffers[fid] += page
             read[fid] += len(page)
             more[fid] = bool(link and page)
+            upper_bounds[fid] = _stamp(page[-1]) if page else float("-inf")
             chunk[fid] = size * 2
 
         taken: list[MessageSummary] = []
+
+        def cutoff() -> float | None:
+            known = taken + [message for buffer in buffers.values() for message in buffer]
+            if len(known) < limit:
+                return None
+            ordered = sorted(known, key=_stamp, reverse=True)
+            return _stamp(ordered[limit - 1])
+
         while len(taken) < limit:
             empty = [fid for fid in buffers if not buffers[fid] and more[fid]]
             if empty:
-                await asyncio.gather(*(fill(fid) for fid in empty))
+                current_cutoff = cutoff()
+                if current_cutoff is None:
+                    pending = sorted(
+                        empty,
+                        key=lambda fid: (
+                            upper_bounds[fid] is None,
+                            upper_bounds[fid] if upper_bounds[fid] is not None else float("inf"),
+                            weights[fid],
+                        ),
+                        reverse=True,
+                    )
+                    selected: list[str] = []
+                    expected = len(taken) + sum(len(buffer) for buffer in buffers.values())
+                    for fid in pending:
+                        selected.append(fid)
+                        expected += chunk[fid]
+                        if expected >= limit:
+                            break
+                else:
+                    selected = []
+                    for fid in empty:
+                        newest = upper_bounds[fid]
+                        if newest is None or newest >= current_cutoff:
+                            selected.append(fid)
+                if selected:
+                    await asyncio.gather(*(fill(fid) for fid in selected))
+                    continue
             heads = [fid for fid in buffers if buffers[fid]]
             if not heads:
                 break
@@ -436,7 +500,7 @@ class Mailbox:
             counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
         except Exception:  # a courtesy for planning; never fail the listing for it
             return None
-        return sum(counts.values()) if len(counts) == len(set(in_scope)) else None
+        return sum(count.count for count in counts.values()) if len(counts) == len(set(in_scope)) else None
 
     async def conversation_sizes(
         self, conversation_ids: list[str], *, scope: Scope = DEFAULT_SCOPE
