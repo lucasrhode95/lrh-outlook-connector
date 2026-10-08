@@ -1,6 +1,6 @@
 """Generic Microsoft Graph plumbing: URLs, paging, JSON batching, downloads.
 
-Every request asks for immutable ids. Continuation links are opaque and must stay on the Graph host.
+Every request asks for immutable ids. Continuation links pass through unchanged after Graph-root validation.
 """
 
 from __future__ import annotations
@@ -82,12 +82,10 @@ class Graph:
         return data if isinstance(data, dict) else {}
 
     async def page(
-        self, path_or_link: str, params: Mapping[str, Any] | None = None, *, prefer: tuple[str, ...] = ()
+        self, path_or_link: str, params: Mapping[str, Any] | None = None
     ) -> tuple[list[dict[str, Any]], str | None]:
         """One page of a collection and the opaque link to the next page (if any)."""
-        data = await self.get(
-            path_or_link, None if path_or_link.startswith("https://") else params, prefer=prefer
-        )
+        data = await self.get(path_or_link, None if path_or_link.startswith("https://") else params)
         items = [x for x in data.get("value", []) if isinstance(x, dict)]
         link = data.get("@odata.nextLink")
         return items, link if isinstance(link, str) else None
@@ -98,12 +96,11 @@ class Graph:
         params: Mapping[str, Any] | None = None,
         *,
         max_items: int,
-        prefer: tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], bool]:
         """Follow pages up to ``max_items``. Returns (items, truncated)."""
-        items, link = await self.page(path, params, prefer=prefer)
+        items, link = await self.page(path, params)
         while link and len(items) < max_items:
-            more, link = await self.page(link, prefer=prefer)
+            more, link = await self.page(link)
             items.extend(more)
         return items[:max_items], bool(link) or len(items) > max_items
 
