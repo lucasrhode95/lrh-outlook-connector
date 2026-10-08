@@ -293,7 +293,7 @@ class Mailbox:
             notes.append("Filters apply after paging, so a page can hold fewer than limit messages.")
         total = None
         if include_total and state is None:
-            total = await self._count(folder_id, since, until, skip)
+            total = await self._count(folder_id, since, until, skip, known_counts=folder_counts)
             if total is not None:
                 notes.append(
                     "server_total counts the server's messages in scope (copies counted separately). "
@@ -484,9 +484,15 @@ class Mailbox:
         return taken, left
 
     async def _count(
-        self, folder_id: str | None, since: datetime | None, until: datetime | None, skip: dict[str, str]
+        self,
+        folder_id: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        skip: dict[str, str],
+        known_counts: dict[str, FolderCount] | None = None,
     ) -> int | None:
         """The server's count for the scope: the named folder, or every reachable folder not left out.
+        Complete per-folder counts are reused when available.
 
         Assumes (not re-checked here): ``folder_id`` was resolved and ``skip`` built by ``list_messages``
         for the same scope.
@@ -496,6 +502,8 @@ class Mailbox:
         else:
             folders, hidden = await self.reach(())
             in_scope = [fid for fid in folders if fid not in hidden and fid not in skip]
+        if known_counts is not None and all(fid in known_counts for fid in in_scope):
+            return sum(known_counts[fid].count for fid in in_scope)
         try:
             counts = await self.reader.count_messages(folder_ids=in_scope, since=since, until=until)
         except Exception:  # a courtesy for planning; never fail the listing for it
