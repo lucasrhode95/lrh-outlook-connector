@@ -12,10 +12,14 @@
     <header class="topbar">
     <strong class="brand">Outlook connector</strong>
     <form id="search-form" class="search" autocomplete="off">
-      <input id="search" type="search" placeholder="Search mail (e.g. budget review, from:alice, subject:invoice)">
+      <div class="search-field">
+        <input id="search" type="search" aria-label="Search mail" placeholder="Search mail (e.g. budget review, from:alice, subject:invoice)">
+        <button id="search-clear" class="search-clear" type="button" aria-label="Clear mail search" hidden>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+        </button>
+      </div>
       <button type="submit">Search</button>
     </form>
-    <input id="filter" type="search" placeholder="Filter loaded conversations" aria-label="Filter loaded conversations">
     <div class="range-picker" id="range-picker">
       <button id="range-toggle" class="range-toggle" type="button" aria-haspopup="dialog" aria-expanded="false"
               title="Message date range">
@@ -49,9 +53,20 @@
 
     <main class="layout">
       <nav class="sidebar" aria-label="Mailbox navigation">
-        <div class="sidebar-head">
-          <span>Folders</span>
-          <button id="refresh-folders" class="link" title="Reload folders from Outlook">refresh</button>
+        <div id="sidebar-head" class="sidebar-head">
+          <span id="folder-heading" class="sidebar-title">Folders</span>
+          <div class="sidebar-tools">
+            <div class="search-field folder-search-field">
+              <input id="folder-filter" type="search" autocomplete="off" aria-controls="folders" placeholder="Search folders" aria-label="Find folders shown in the list">
+              <button id="folder-filter-clear" class="search-clear" type="button" aria-label="Clear folder search and close" hidden>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+              </button>
+            </div>
+            <button id="folder-search-toggle" class="icon-button" type="button" aria-label="Search folders" aria-controls="folders" aria-expanded="false" title="Search folders">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+            </button>
+            <button id="refresh-folders" class="link" title="Reload folders from Outlook">refresh</button>
+          </div>
         </div>
         <ul id="folders"></ul>
         <section class="scope-filters" aria-labelledby="scope-title">
@@ -65,7 +80,18 @@
 
       <section class="list" aria-label="Messages">
         <div class="list-head">
-          <h1 id="list-title">Inbox</h1>
+          <div id="conversation-search-head" class="list-heading">
+            <h1 id="list-title">Inbox</h1>
+            <button id="conversation-search-toggle" class="icon-button" type="button" aria-label="Search loaded conversations" aria-controls="conversations" aria-expanded="false" title="Search loaded conversations">
+              <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+            </button>
+            <div class="search-field conversation-search-field">
+              <input id="filter" type="search" autocomplete="off" aria-controls="conversations" placeholder="Search loaded conversations" aria-label="Search loaded conversations">
+              <button id="filter-clear" class="search-clear" type="button" aria-label="Clear conversation search and close" hidden>
+                <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+              </button>
+            </div>
+          </div>
           <span id="coverage" class="muted"></span>
         </div>
         <div id="conversations"></div>
