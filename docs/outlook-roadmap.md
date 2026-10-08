@@ -11,8 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H38.
-2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
+1. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
 
@@ -26,14 +25,6 @@ Status wording:
 # Performance
 
 # Service and code cleanup
-
-## H38 — Small dead-code cleanup
-
-**Status:** Pending, low priority.
-
-**Current state:** the recent constructor cleanup removed some unused test seams, but the review still has a handful of small leftovers to remove or retype after H37 so the same code is not churned twice. Known candidates include unused attachment/content-id representation, an exclusion-reason type that is not actually used as a type, never-used optional parameters on Graph helpers, an impossible HTML fallback in export code, and stale comments.
-
-**Next:** do one dead-code pass after the structural cleanup and delete only what the current test suite proves unused. Keep the account-ownership checks intentionally.
 
 # Documentation
 

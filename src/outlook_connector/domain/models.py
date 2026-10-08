@@ -25,7 +25,7 @@ Detail = Literal["compact", "full"]
 
 # Why messages were left out of a result (Coverage.excluded, ExportArtifact.messages_excluded keys).
 ExclusionReason = Literal["deleted_or_junk", "outgoing", "hidden", "meeting_mail"]
-EXCLUSION_TEXT: dict[str, str] = {
+EXCLUSION_TEXT: dict[ExclusionReason, str] = {
     "deleted_or_junk": "in Deleted Items or Junk Email (scope.deleted_items=false)",
     "outgoing": "in Sent Items, Drafts or Outbox (scope.sent_items=false)",
     "hidden": "in hidden folders, Sync Issues, or outside the mail folders (out of reach)",
@@ -172,7 +172,7 @@ class Coverage(Compact):
 
     complete: bool
     server_total: int | None = None  # includes meeting mail, even when results hide it
-    excluded: dict[str, int] = Field(default_factory=dict)
+    excluded: dict[ExclusionReason, int] = Field(default_factory=dict)
     notes: list[str] = Field(default_factory=list)
 
 
@@ -288,7 +288,7 @@ class ExportArtifact(Compact):
     message_count: int
     text_files: int
     attachment_files: int
-    messages_excluded: dict[str, int] = Field(default_factory=dict)  # ExclusionReason -> count
+    messages_excluded: dict[ExclusionReason, int] = Field(default_factory=dict)
     unavailable_message_ids: list[str] = Field(default_factory=list)  # bodies not fetched (marked in file)
     export_errors: dict[str, int] = Field(default_factory=dict)  # ExportStep -> failures, marked in file
     error_summary: str | None = None  # the file header's "Export errors: ..." line
