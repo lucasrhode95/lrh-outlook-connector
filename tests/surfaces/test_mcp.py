@@ -19,7 +19,7 @@ READ_TOOLS = {
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
     "list_rules",
 }  # fmt: skip
-WRITE_TOOLS = {"create_draft", "edit_draft", "send_draft"}
+WRITE_TOOLS = {"create_draft", "send_draft"}
 CHANGE_TOOLS = {"set_read_state", "set_flag"}
 RELOCATE_TOOLS = {
     "move_messages",
@@ -88,15 +88,30 @@ async def test_tools_and_annotations(server: FastMCP) -> None:
     assert send and not send.readOnlyHint and send.destructiveHint and send.openWorldHint
     assert "never attempt to sign in" in (server.instructions or "")
     assert "Never confirm on the user's behalf" in (server.instructions or "")
+    assert "Drafts are composed once" in (server.instructions or "")
+    assert "Never delete first" in (server.instructions or "")
 
 
-async def test_draft_edit_then_send(server: FastMCP, fake: FakeGraph) -> None:
-    draft = await call(server, "create_draft", to=["bob@example.com"], subject="Hi", text_body="Hello Bob")
-    assert draft["verified"] and draft["text_body"] == "Hello Bob"
-    updated = await call(server, "edit_draft", draft_id=draft["id"], html_body="<b>Updated</b>")
-    assert updated["html_body"] == "<b>Updated</b>"
-    sent = await call(server, "send_draft", draft_id=draft["id"])
-    assert sent["status"] == "sent" and fake.sent_drafts == [draft["id"]]
+async def test_draft_replacement_is_created_and_verified_before_deletion(
+    server: FastMCP, fake: FakeGraph
+) -> None:
+    original = await call(
+        server, "create_draft", to=["bob@example.com"], subject="First", text_body="First version"
+    )
+    replacement = await call(
+        server, "create_draft", to=["bob@example.com"], subject="Second", text_body="Second version"
+    )
+    assert original["verified"] and replacement["verified"]
+    assert original["id"] != replacement["id"]
+    assert replacement["message"]["subject"] == "Second"
+    assert replacement["text_body"] == "Second version"
+
+    deleted = await call(server, "delete_messages", message_ids=[original["id"]])
+    assert deleted["counts"] == {"done": 1}
+    assert fake.messages[original["id"]].folder == fake.aliases["deleteditems"]
+    assert fake.messages[replacement["id"]].is_draft
+    # Keep the fake mailbox tidy after checking the public replacement workflow.
+    await call(server, "delete_messages", message_ids=[replacement["id"]])
     tools = {t.name: t for t in await server.list_tools()}
     assert set(tools["send_draft"].inputSchema["properties"]) == {"draft_id"}
 

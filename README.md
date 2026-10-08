@@ -53,10 +53,16 @@ The client starts one `outlook-connector mcp` process per session. Read tools: `
 never changes the mailbox, not even read state.
 
 Write tools (they need `outlook-connector auth write`): `create_draft` accepts exactly one of
-`text_body` or `html_body`, for new mail and replies. `edit_draft` updates only supplied fields.
-Both save once and require Graph read-back, returning the Microsoft draft id, full server text/HTML,
-and verification findings. Plain text is escaped without Markdown conversion; intentional HTML is
-passed through except active web content. Replies report quoted-history checks.
+`text_body` or `html_body`, for new mail and replies. It saves once and requires Graph read-back,
+returning the Microsoft draft id, full server text/HTML, and verification findings. Plain text is
+escaped without Markdown conversion; intentional HTML is passed through except active web content.
+Replies report quoted-history checks. Drafts are composed once; there is no edit tool. To change a
+draft, create a replacement with the full intended content (use the same `reply_to_message_id` for a
+reply), verify its read-back, then move the old draft to Deleted Items with `delete_messages` and use
+the new id. Never delete the old draft first. Tell the user the previous version is in Deleted Items.
+Body edits and attachments added in Outlook are not carried into the replacement. There is no
+version check against the old draft; read it first if needed. Every change gets a new id, and a
+subject- or recipient-only change also recreates the whole draft.
 After the user explicitly asks to send, `send_draft(draft_id)` sends that existing draft without
 changing its content. There is no direct send or confirmation-code API. Sends are never retried;
 unknown outcomes require checking Sent Items and Outbox before sending again.

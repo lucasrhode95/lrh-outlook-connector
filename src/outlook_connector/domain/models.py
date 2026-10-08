@@ -324,19 +324,6 @@ class OutgoingMessage(BaseModel):
     reply_all: bool = False
 
 
-class DraftEdit(BaseModel):
-    """Only supplied fields change; omitted fields are kept."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    to: list[str] | None = None
-    cc: list[str] | None = None
-    bcc: list[str] | None = None
-    subject: str | None = None
-    text_body: str | None = None
-    html_body: str | None = None
-
-
 class DraftMessage(Compact):
     """Private validated HTML write input."""
 

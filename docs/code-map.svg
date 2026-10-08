@@ -75,7 +75,6 @@
 <g><title>Save the original message (MIME) as a local .eml file and return its path. → Files.save_mime</title><text class="detail" x="118" y="887">• <tspan class="code">save_message_mime</tspan></text></g>
 <g><title>Export conversations, messages and/or a date range to one local file (TXT or JSONL, optional attachments); returns its path. → Exports.export</title><text class="detail" x="118" y="914">• <tspan class="code">export_messages</tspan></text></g>
 <text class="group-title" x="514" y="626">Write</text>
-<g><title>Edit only supplied fields on an existing draft; require Graph read-back. → Writes.edit_draft</title><text class="detail" x="514" y="656">• <tspan class="code">edit_draft</tspan></text></g>
 <g><title>Send the existing server draft unchanged, once, after human approval. → Writes.send_draft</title><text class="detail" x="514" y="683">• <tspan class="code">send_draft</tspan></text></g>
 <g><title>Save explicit text or HTML into Drafts; require Graph read-back. → Writes.create_draft</title><text class="detail" x="514" y="710">• <tspan class="code">create_draft</tspan></text></g>
 <g><title>Mark messages (or whole conversations) read or unread; read receipts are never sent. A result per message. → Mutations.set_read</title><text class="detail" x="514" y="737">• <tspan class="code">set_read_state</tspan></text></g>
@@ -152,7 +151,6 @@
 <rect x="673" y="1482" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="691" y="1517"><tspan class="code">Writes</tspan><tspan class="detail" dx="12">writes.py</tspan></text>
 <text class="group-title" x="691" y="1554">Methods</text>
-<g><title>Exactly what would be sent, validated and resolved (reply recipients and subject), with its confirmation code. Changes nothing.</title><text class="detail" x="691" y="1584">• <tspan class="code">edit_draft(id, changes)</tspan></text></g>
 <g><title>Save the message (or reply) into Drafts; replies are checked for intact quoted history. Nothing is sent.</title><text class="detail" x="691" y="1611">• <tspan class="code">create_draft(message)</tspan></text></g>
 <g><title>Send a message the user confirmed with its code; once, never retried. An unclear answer is checked against Sent Items.</title><text class="detail" x="691" y="1638">• <tspan class="code">send(message, code)</tspan></text></g>
 <g><title>Refuses to write unless the write sign-in is the same Microsoft account as the read sign-in.</title><text class="detail" x="691" y="1665">• <tspan class="code">check_account()</tspan></text></g>
