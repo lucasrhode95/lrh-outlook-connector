@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1600" viewBox="0 0 2600 1600" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector architecture</title>
-  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph reads mail; OWS handles drafts, sending, rules and mailbox changes; Cloud Settings handles native roaming signatures. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache and account binding.</desc>
+  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads and verification; OWS handles mail changes and inbox-rule reads and writes; Cloud Settings handles native signature reads and writes. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache and account binding.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -28,7 +28,7 @@
 
   <rect width="2600" height="1600" fill="#fff"/>
   <text class="title" x="1300" y="70" text-anchor="middle">Outlook connector architecture</text>
-  <text class="subtitle" x="1300" y="110" text-anchor="middle">Short-lived processes · Graph mail reads · OWS mailbox writes · Cloud Settings signatures · minimal local state</text>
+  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail data · OWS mail changes and rules · Cloud Settings signatures · minimal local state</text>
 
   <!-- MCP surface. -->
   <rect x="80" y="170" width="790" height="210" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -155,16 +155,16 @@
   <rect x="1198" y="1078" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1214" y="1097" text-anchor="middle">W</text>
   <text class="section-title code" x="1240" y="1098">ows.py · ows_mail.py · ows_rules.py</text>
-  <text class="detail" x="1200" y="1130">drafts · send · rules · read · flag</text>
-  <text class="detail" x="1200" y="1160">move · soft delete · never retried</text>
+  <text class="detail" x="1200" y="1130">drafts · send · read state · flags</text>
+  <text class="detail" x="1200" y="1160">move · soft delete · inbox-rule reads/writes</text>
 
   <!-- Remote to Microsoft. -->
   <path class="read-flow" d="M1680 1008 H1916"/>
   <text class="flow-label" x="1800" y="994" text-anchor="middle">HTTPS reads</text>
   <path class="write-flow" d="M1680 1113 H1916"/>
-  <text class="flow-label" x="1800" y="1099" text-anchor="middle">OWS writes</text>
+  <text class="flow-label" x="1800" y="1099" text-anchor="middle">OWS mail + rule calls</text>
   <path class="write-flow" d="M1680 1160 H1870 V1220 H1916"/>
-  <text class="flow-label" x="1800" y="1208" text-anchor="middle">signature API</text>
+  <text class="flow-label" x="1800" y="1208" text-anchor="middle">signature reads/writes</text>
   <text class="detail" x="1940" y="1228">Cloud Settings · native roaming signatures</text>
 
   <!-- Sign-in command. -->
@@ -192,7 +192,7 @@
   <rect x="1180" y="1328" width="500" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1198" y="1340" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1214" y="1359" text-anchor="middle">W</text>
-  <text class="section-title" x="1240" y="1361">write profile (optional)</text>
+  <text class="section-title" x="1240" y="1361" font-size="19">write profile (rules · signatures · changes)</text>
   <text class="detail" x="1200" y="1398">One Outlook Web <tspan class="code">9199bf20…</tspan></text>
   <text class="detail" x="1200" y="1428">→ <tspan class="code">outlook.office.com</tspan></text>
 
@@ -219,10 +219,10 @@
   <rect x="1920" y="1050" width="580" height="150" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1938" y="1064" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1954" y="1083" text-anchor="middle">W</text>
-  <text class="section-title" x="1980" y="1085">Outlook Web OWS (private)</text>
+  <text class="section-title" x="1980" y="1085">Outlook Web App OWS (private)</text>
   <text class="detail" x="1940" y="1120"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text>
   <text class="detail" x="1940" y="1150">CreateItem · UpdateItem · MoveItem</text>
-  <text class="detail" x="1940" y="1180">DeleteItem · inbox rules</text>
+  <text class="detail" x="1940" y="1180">DeleteItem · GetInboxRule · rule actions</text>
 
   <rect x="1920" y="1250" width="580" height="194" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title" x="1940" y="1290">Entra ID</text>
@@ -234,17 +234,17 @@
   <!-- Legend. -->
   <rect x="80" y="1500" width="32" height="26" rx="5" fill="#2b6cb0"/>
   <text class="badge" x="96" y="1519" text-anchor="middle">R</text>
-  <text class="flow-label" x="122" y="1520">Graph reads</text>
+  <text class="flow-label" x="122" y="1520">Graph</text>
   <rect x="270" y="1500" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="286" y="1519" text-anchor="middle">W</text>
   <text class="flow-label" x="312" y="1520">OWS / Cloud Settings</text>
-  <path class="read-flow" d="M470 1513 H540"/>
-  <text class="flow-label" x="552" y="1520">read over HTTPS</text>
-  <path class="write-flow" d="M740 1513 H810"/>
-  <text class="flow-label" x="822" y="1520">write over HTTPS</text>
-  <path class="local-flow" d="M1020 1513 H1090"/>
-  <text class="flow-label" x="1102" y="1520">local read and write</text>
-  <path class="call-flow" d="M1320 1513 H1390"/>
-  <text class="flow-label" x="1402" y="1520">call / dependency (points to the callee)</text>
+  <path class="read-flow" d="M540 1513 H610"/>
+  <text class="flow-label" x="622" y="1520">read over HTTPS</text>
+  <path class="write-flow" d="M790 1513 H860"/>
+  <text class="flow-label" x="872" y="1520">write over HTTPS</text>
+  <path class="local-flow" d="M1080 1513 H1150"/>
+  <text class="flow-label" x="1162" y="1520">local read and write</text>
+  <path class="call-flow" d="M1360 1513 H1430"/>
+  <text class="flow-label" x="1442" y="1520">call / dependency (points to the callee)</text>
   <text class="flow-label" x="1900" y="1520">Surfaces never call <tspan class="code">remote/</tspan> or <tspan class="code">store/</tspan> directly.</text>
 </svg>

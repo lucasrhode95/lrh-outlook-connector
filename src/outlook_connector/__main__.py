@@ -139,7 +139,7 @@ def _status(args: argparse.Namespace) -> int:
         print(json.dumps(_status_dict(status, checks), indent=2))
     else:
         _print_status(status, checks)
-    # Only the read profile is required; the write profile is optional until send/mutations exist.
+    # Core mail data needs read; inbox rules, signatures and mail changes need write.
     read_ok = checks.get("read", {"ok": True})["ok"]
     return EXIT_OK if read_ok else EXIT_AUTH_REQUIRED
 

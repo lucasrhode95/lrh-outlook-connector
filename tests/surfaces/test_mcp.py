@@ -233,8 +233,8 @@ async def test_auth_status_is_offline(server: FastMCP, fake: FakeGraph) -> None:
     assert status["profiles"]["read"]["signed_in"] and fake.calls == []
 
 
-def test_server_name_is_not_mistakable_for_an_official_connector(server: FastMCP) -> None:
-    assert server.name == "lrh-outlook"
+def test_server_name_uses_project_brand(server: FastMCP) -> None:
+    assert server.name == "lrh-outlook-connector"
 
 
 async def test_mutation_tools_report_per_message(server: FastMCP, fake: FakeGraph) -> None:

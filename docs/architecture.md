@@ -16,7 +16,7 @@ This document describes how the application is built: processes, layers, modules
 2. **No always-on service.** Every entry point is a short-lived local process started on demand, for one user. Several may run at once, and weeks may pass between runs. It is not designed to be hosted as a long-running MCP or HTTP server (§2).
 3. **One domain implementation, thin surfaces.** The UI and MCP call the same service. Neither reimplements domain decisions.
 4. **Protocol knowledge stays at the edge.** Only the [`remote/`](../src/outlook_connector/remote/) package knows URLs, Graph/OWS JSON, ID formats and paging. The service works with domain models.
-5. **Documented first, gaps filled.** Use Graph for every capability it can serve. OWS (Outlook Web's private JSON RPC) fills only the gaps. The configured Graph profile serves mail reads; OWS fills the write capabilities unavailable to that profile. The split is tenant-specific and swappable (§6).
+5. **Documented first, gaps filled.** Prefer documented Graph capabilities when the endpoint and granted profile support the operation; use Outlook-specific services for the remaining capabilities. In the current wiring, Graph handles mail-data reads and read-after-write checks, OWS handles mail changes and inbox-rule access, and Cloud Settings handles native signature settings. The split depends on tenant grants and is swappable (§6).
 6. **Small modules.** Each responsibility gets its own module from the start. Do not grow a 2,000-line connector or service.
 7. **Current format only.** Follow [AGENTS.md](../AGENTS.md): no migrations or compatibility shims. Development databases are reset, not migrated.
 
@@ -86,7 +86,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 - Encrypted cache via msal-extensions by default, **fail-closed** when unavailable. --unsecure selects a separate, clearly named plaintext cache file in the same data directory, with a warning on every use. Every process finds it at the same path, wherever it was started.
 - Cross-process lock around cache reads and writes.
 - The account fingerprint (tid+oid) must match the store owner (§7).
-- The write profile is optional. Read-only use works without it, and write tools report "write sign-in required".
+- The write profile is optional for core mail reading, search and attachment downloads. Inbox-rule and native-signature reads also use this profile, as do mail and settings changes; tools report "write sign-in required" when it is missing.
 - The recorded AADSTS65002 client/scope pairs (config.DENIED_PAIRS) are never requested; a unit test checks the profiles against them.
 
 ### 5.2 [`remote/transport.py`](../src/outlook_connector/remote/transport.py)
@@ -132,10 +132,10 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.5 [`remote/ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py)
 
 - Split like the Graph side (§5.4): [`ows.py`](../src/outlook_connector/remote/ows.py) is the client (Ows), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py) builds request bodies (pure functions), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) holds OwsMailWriter.
-- OwsMailWriter implements MailWriter. This is a gap fill (§6), replaceable by a Graph writer where Graph mail write scopes are available.
+- OwsMailWriter implements MailWriter for draft creation and sending, read-state and flag changes, moves, and soft deletes. It fills mail-write gaps for this tenant and could be replaced by a Graph writer if the required Graph scopes become available.
 - The bearer-only OWS envelope and write contracts are described in [API research §4.1–4.2](outlook-api-research.md). Payloads ≤ 2,048 characters go in the X-OWA-UrlPostData header. Anchor mailbox, correlation headers.
 - Ows.call(action, body) sends one action and returns its item results; an item whose ResponseClass is not Success/Warning raises an error naming its ResponseCode. The anchor mailbox is the write token's upn.
-- Ows.call_request(action, fields) sends the inbox-rule actions, which use a second style (research §4.4): the request object itself, no JsonRequest wrapper and no Body; the answer's WasSuccessful / ErrorCode decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. Used by OwsRules through the RuleWriter port.
+- Ows.call_request(action, fields) sends inbox-rule reads and changes, which use a second style (research §4.4): the request object itself, no JsonRequest wrapper and no Body; the answer's WasSuccessful / ErrorCode decide success, and an answer without them is an unknown outcome. Same URL and headers, sent once. OwsRules uses it through the RuleWriter port; this includes reading rules as well as creating, updating, ordering, enabling, disabling and deleting them.
 - Actions:
   - create_draft (CreateItem with SaveOnly, into Drafts; replies use EWS's ReplyToItem / ReplyAllToItem with explicit recipients and subject and an HTML body, so the quoted original keeps its formatting and inline images; returns the draft id, mapped to Graph's alphabet);
   - send_draft (UpdateItem with SendAndSaveCopy and no field updates on an existing draft, its ItemId carrying the change key the draft was read at, NeverOverwrite; SendItem is not supported over OWS);
@@ -175,7 +175,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 - One SQLite database per account fingerprint under the user data directory. WAL mode, busy_timeout, a connection per operation, short transactions.
 - Holds only the account binding (owner fingerprint) and the **folder cache** (id, parent, alias, counts, and a TTL timestamp).
-- No message data at all: no summaries, bodies, attachment bytes or mailbox mirror (research §3.2). Mail deleted on the server is not retained locally. Message data is read from Microsoft Graph only.
+- No message data at all: no summaries, bodies, attachment bytes or mailbox mirror (research §3.2). Mail deleted on the server is not retained locally. Mail-folder and message data is read from Microsoft Graph only.
 - When the owner fingerprint does not match, the existing database is left untouched and a separate one is used.
 
 ### 5.9 [`service/`](../src/outlook_connector/service/)
@@ -301,21 +301,19 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 ## 6. Capability routing and portability
 
-Graph serves mail reads with the read profile. OWS serves drafts, sending, rules and mailbox mutations with the write profile. The Cloud Settings adapter serves native roaming signatures with the write profile. The adapters are swappable behind the ports in [`remote/ports.py`](../src/outlook_connector/remote/ports.py); capability evidence and limitations are recorded in [API research §2](outlook-api-research.md).
+The adapters below describe the current tenant's routing, not a universal division between read and write operations. Graph handles ordinary mail-data reads—including attachment bytes and MIME—and verifies selected results after OWS writes. OWS handles mail mutations and both reads and writes for inbox rules. Outlook Cloud Settings handles native signature reads and writes. The write profile is therefore also needed for some read-only tools. These choices depend on tenant permissions; capability evidence and limitations are recorded in [API research §2](outlook-api-research.md).
 
 | Capability | Adapter | Token profile |
 |---|---|---|
-| Folders, messages, conversations, search, attachments and MIME | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | read |
-| Drafts, send, rules and mailbox changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) and [OwsRules](../src/outlook_connector/remote/ows_rules.py) | write |
-| Native roaming signatures | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | write |
+| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | read |
+| Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | write |
+| List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | write |
+| List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | write |
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (folders, messages, conversations, search, attachments
-  and MIME), MailWriter (drafts, sends and mailbox changes) and SignatureStore (native signature
-  settings and contents). The service depends only on these ports, never on a concrete backend.
-- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter;
-  [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
+- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete backend.
+- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
 - **Wiring.** [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port, and one token profile per adapter, from [`config.py`](../src/outlook_connector/config.py). There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change

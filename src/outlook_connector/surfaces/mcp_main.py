@@ -48,8 +48,9 @@ from outlook_connector.domain.models import (
 from outlook_connector.service.files import SavedFile
 
 INSTRUCTIONS = """\
-The signed-in user's own Outlook mailbox: reads through Microsoft Graph, drafts and sending through \
-Outlook Web. Reading never changes the mailbox, not even read state.
+The signed-in user's own Outlook mailbox. Microsoft Graph handles core mail-data reads; Outlook \
+Web Service (OWS) handles mail changes and inbox-rule access; Outlook Cloud Settings handles native \
+signature settings. Reading never changes the mailbox, not even read state.
 
 - Finding mail: search_messages for topics (server-side search, accent-insensitive, supports \
 subject:/from:/to: terms) and list_messages for recent mail or a date window (folder optional; \
@@ -146,7 +147,8 @@ Only after explicit human confirmation repeat the exact request with that code. 
 Never confirm on the user's behalf. \
 Each write is sent once and read back; unknown means check Outlook before repeating. \
 Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
-- Writes need the write sign-in (`outlook-connector auth write`).
+- Core mail-data reads use the read sign-in. Mail changes, inbox-rule access and native-signature \
+  access use the write sign-in (`outlook-connector auth write`).
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
 not the sign-in: do not ask the user to sign in again for it.
@@ -186,7 +188,7 @@ def _utc(value: datetime | None) -> datetime | None:
 
 
 def build_server(context: AppContext) -> FastMCP:
-    mcp = FastMCP("lrh-outlook", instructions=INSTRUCTIONS, log_level="WARNING")
+    mcp = FastMCP("lrh-outlook-connector", instructions=INSTRUCTIONS, log_level="WARNING")
 
     async def services() -> Services:
         return await context.services()
