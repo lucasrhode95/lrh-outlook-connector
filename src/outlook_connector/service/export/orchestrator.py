@@ -144,7 +144,7 @@ class Exports:
                 *(
                     self.conversations.messages(
                         conversation_id,
-                        scope=Scope(sent_items=True, meeting_mail=True, deleted_items=True),
+                        scope=Scope(deleted_items=request.scope.deleted_items),
                         merge_result=False,
                     )
                     for conversation_id in batch
@@ -201,8 +201,7 @@ class Exports:
             _add(excluded, page.coverage.excluded)
             for item in page.items:
                 selected.setdefault(item.id, item)
-            unique = {m.internet_message_id or m.id: m for m in selected.values()}  # copies count once
-            _check_limit(unique, request.limit, more=page.cursor is not None)
+            _check_limit(selected, request.limit, more=page.cursor is not None)
             cursor = page.cursor
             if cursor is None:
                 return
@@ -425,9 +424,10 @@ def _add(total: dict[ExclusionReason, int], counts: dict[ExclusionReason, int]) 
 
 
 def _check_limit(selected: dict[str, MessageSummary], limit: int, *, more: bool = False) -> None:
-    if len(selected) > limit:
+    count = len({m.internet_message_id or m.id for m in selected.values()})
+    if count > limit:
         raise InvalidRequest(
-            f"The selection holds {'more than ' if more else ''}{len(selected)} messages, above "
+            f"The selection holds {'more than ' if more else ''}{count} messages, above "
             f"the limit of {limit} (at most {EXPORT_MAX_MESSAGES}). Narrow the date window or "
             "split the export."
         )

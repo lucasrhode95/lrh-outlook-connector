@@ -49,7 +49,7 @@ uv run outlook-connector ui
 - `list_attachments` — List a message's attachment metadata, including inline image IDs.
 - `download_attachment` — Save an attachment locally; downloads are limited to 150 MB.
 - `save_message_mime` — Save the original message as an `.eml` file.
-- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL.
+- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL. Conversations follow `scope.deleted_items`; sent/meeting filters only narrow folder/date windows. Explicit message ids are authoritative.
 
 ### Rules and signatures
 
@@ -74,7 +74,7 @@ uv run outlook-connector ui
 - `move_messages` — Move selected messages to a folder.
 - `delete_messages` — Move selected messages to Deleted Items.
 
-Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once, and send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
+Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once; a replacement reply keeps the same `reply_to_message_id` and `reply_all` choice. Send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
 
 ## Development
 
