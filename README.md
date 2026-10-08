@@ -60,7 +60,7 @@ uv run outlook-connector ui
 - `delete_rule` — Propose or confirm deletion of a supported inbox rule.
 - `list_signatures` — List native Outlook signatures and defaults.
 - `get_signature` — Read one native signature's HTML and text.
-- `create_signature` — Create a native Outlook signature.
+- `create_signature` — Create a native Outlook signature from passive HTML; quote data-image `src` attributes.
 - `update_signature` — Replace a native signature's contents.
 - `delete_signature` — Delete a native Outlook signature.
 - `set_default_signature` — Set or clear the new-message and reply defaults.
@@ -73,6 +73,8 @@ uv run outlook-connector ui
 - `set_flag` — Flag or unflag selected messages.
 - `move_messages` — Move selected messages to a folder.
 - `delete_messages` — Move selected messages to Deleted Items.
+
+With no native signature settings or default, drafts are unsigned. If Outlook returns no account scope, configure a native signature in Outlook before using signature-write tools.
 
 Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once; a replacement reply keeps the same `reply_to_message_id` and `reply_all` choice. Send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
 

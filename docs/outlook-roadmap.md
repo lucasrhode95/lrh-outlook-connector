@@ -17,7 +17,7 @@ Snapshot **2026-10-08**.
 
 **Evidence:** Public-tool validation sent one synthetic signed message. Read-back retained the
 signature text and inline image reference, but the strict `data-signature-name` check did not pass.
-The Outlook recipient-side rendering was not visually inspected.
+The Outlook recipient-side rendering was not visually inspected. Empty or partially absent native setting records are covered by synthetic tests; the response of a mailbox with no native settings has not been confirmed live.
 
 **Next:** Have a human inspect the synthetic signed self-send in Outlook (the copy is in Deleted
 Items after cleanup) and confirm that its signature text and inline image render as expected. Do not

@@ -155,7 +155,8 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
   credentials or store a local copy.
 - Reads fetch the name list and both defaults fresh. Each signature content read verifies its scope
   matches the current list setting. Writes use one PATCH or DELETE request and are never retried.
-  The opaque account scope is carried from the live list setting into writes.
+  The opaque account scope is carried from present settings into writes. Missing list/default records mean no names/defaults; malformed or duplicate records and mismatched scopes still fail. An empty response permits listing and unsigned drafts, but signature writes require a scope returned by Outlook; configure a signature in Outlook first if none is returned.
+- Signature data-image sources must be quoted and match the inline conversion format; unsupported forms are rejected before any write.
 - Names are exact and case-sensitive. Commas are refused because the server exposes the list as a
   comma-joined value; names are URL-encoded for content reads. Content updates do not rename, and
   deletion does not repair a selected default.
