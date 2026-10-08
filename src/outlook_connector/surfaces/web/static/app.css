@@ -76,7 +76,7 @@ button {
 button:hover:not(:disabled) { border-color: #536b81; background: #2a3d50; }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: .5; cursor: default; }
-button:focus-visible, input:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, .brand:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 2px; }
 button.primary { border-color: var(--accent); background: var(--accent); color: #e9ffff; font-weight: 700; }
 button.primary:hover:not(:disabled) { border-color: #23949a; background: #23949a; }
 button.secondary { border-color: transparent; background: var(--chrome); font-weight: 700; }
@@ -160,7 +160,8 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
   border-bottom: 1px solid #365573;
   background: var(--header);
 }
-.brand { display: inline-flex; flex: none; align-items: center; margin-right: 8px; font-size: 18px; }
+.brand { display: inline-flex; flex: none; align-items: center; margin-right: 8px; color: inherit; font-size: 18px; text-decoration: none; }
+.brand:hover { color: inherit; }
 .search { display: flex; flex: 1 1 360px; gap: 8px; min-width: 240px; }
 .search .search-field { flex: 1; }
 .search input { flex: 1; }
