@@ -6,76 +6,22 @@ the requirements and architecture; completed live evidence belongs in the resear
 Snapshot **2026-10-08**.
 
 - Product requirements: [Requirements v4](outlook-requirements-v4.md)
-- Build/module map: [architecture §11](architecture.md)
+- Build/module map: [architecture §4 Repository layout](architecture.md#4-repository-layout)
 - API evidence: [API research](outlook-api-research.md)
 
-## Current priority
+# Human checks
 
-1. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
+## W8 — Recipient-side signature rendering
 
-Status wording:
+**Status:** Open; visual verification needs a human (2026-10-08).
 
-- **Decided, not built** — behavior is settled; implementation remains.
-- **Pending** — a concrete problem and next fix are known.
-- **Decision needed** — an owner choice remains.
-- **Later** — useful work outside the current build sequence.
+**Evidence:** Public-tool validation sent one synthetic signed message. Read-back retained the
+signature text and inline image reference, but the strict `data-signature-name` check did not pass.
+The Outlook recipient-side rendering was not visually inspected.
 
-# Correctness and reliability
-
-# Performance
-
-# Service and code cleanup
-
-# Documentation
-
-## W12 — Landing README rewrite and architecture doc cleanup
-
-**Status:** Decided, not built (2026-10-08). Last: do it after every item above is finished, so it
-describes the final tool set.
-
-**README, in this order:**
-
-1. **What it is, in a nutshell.** One short sentence ("a connector that lets you connect to your
-   Outlook account and…") and a short, direct bullet list that makes the reader want to know more, e.g.:
-   search messages by subject and contents; export individual messages or entire conversations or
-   folders, *attachments included*; draft, send or reply to emails; move messages between folders;
-   manage the rules that file or delete mail automatically; … (match the final tool set).
-2. **A diagram (SVG), marketing in spirit,** like `docs/architecture.svg` but for readers, not
-   developers: MCP clients on the left (Claude, Codex/ChatGPT, "any other MCP client") and the local
-   web UI (a small screenshot, captioned e.g. "custom UI for browsing and downloading conversations"),
-   all with arrows into the connector, which connects to Outlook. Product names; use logos only where
-   their usage is permitted. Note: ChatGPT (web/desktop) only connects to remote MCP servers over
-   HTTP, so it cannot use this local stdio server today; show what actually works (Claude Code,
-   Claude Desktop, Codex, other local MCP clients) or mark ChatGPT accordingly.
-3. **Setup:** `uv sync`, then the sign-in commands. A `>` note: credentials are entered only on
-   Microsoft's sign-in page, never seen by the application; tokens are kept in the encrypted local
-   cache. Then the UI command, with a larger version of the UI screenshot.
-4. **MCP tools:** every tool by name with a one-line description; no arguments. A short hint where it
-   helps (e.g. "filters such as folder, dates and scope"), nothing longer.
-5. **Development:** how to run the checks and tests (as today), plus the links to roadmap,
-   requirements, architecture and API research, moved here from the top.
-
-Keep the command cheatsheet style that already works; cut the verbose "Use it" prose. Details that
-leave the README belong in the requirements/architecture docs if they are not already there.
-
-**docs/architecture.md:**
-
-- Under "4. Repository layout", embed `docs/code-map.svg`.
-- Describe the current state only: drop history such as "removed 2026-10-04", "decided 2026-10-04"
-  and "(the summary cache was removed…)". Decisions and dates stay in the research record.
-- Every file or module mentioned (e.g. "5.1 `auth/tokens.py`") links to that file with a relative link.
-- Remove "11. Build order" (renumber the following section) and repoint the roadmap's
-  "Build/module map" link, which targets it, to "4. Repository layout".
-
-**docs/outlook-roadmap.md (final review, as the very last step):**
-
-- Keep only what is still open: pending implementation or decisions, live tests not yet run, and
-  checks that need a human (e.g. recipient-side rendering). Remove everything finished, including
-  W12 itself, the "Current priority" entries that no longer apply and status-wording entries no
-  longer used.
-- If nothing open remains, delete the file and remove every link to it (README, `CLAUDE.md` and
-  `AGENTS.md`, which must stay identical, and the other docs). "Later" items such as X10 and X11 count
-  as open: keep them unless the owner drops them.
+**Next:** Have a human inspect the synthetic signed self-send in Outlook (the copy is in Deleted
+Items after cleanup) and confirm that its signature text and inline image render as expected. Do not
+inspect unrelated mailbox content.
 
 # Later
 
