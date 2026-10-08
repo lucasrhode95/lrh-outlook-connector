@@ -4,8 +4,8 @@ Remote first: every call asks Outlook (Graph). The local store caches the folder
 message data is kept locally, so a message deleted on the server is gone here too.
 
 Scope filters list, search, conversation reads, sizes and folder/date-window exports.
-Selected export conversations and message ids stay whole. A folder counts with its
-parents:
+Export conversations follow Deleted/Junk scope; explicit message ids are authoritative.
+A folder counts with its parents:
 - Deleted Items and Junk Email are left out unless ``scope.deleted_items`` (a folder asked for by
   name is always included).
   Sent Items, Drafts and Outbox are included unless ``scope.sent_items`` is false. List and

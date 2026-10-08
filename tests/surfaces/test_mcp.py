@@ -220,7 +220,7 @@ async def test_attachment_download_and_export_return_local_paths(server: FastMCP
     eml = await call(server, "save_message_mime", message_id="m1")
     assert eml["path"].endswith(".eml")
     artifact = await call(server, "export_messages", conversation_ids=["c-rel"])
-    assert Path(artifact["path"]).exists() and artifact["message_count"] == 4
+    assert Path(artifact["path"]).exists() and artifact["message_count"] == 3
 
 
 async def test_errors_are_reported_as_tool_errors(server: FastMCP) -> None:
