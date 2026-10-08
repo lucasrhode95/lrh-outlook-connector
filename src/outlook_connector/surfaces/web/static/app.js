@@ -883,7 +883,8 @@ function chooseDate(key) {
   }
   setDateRange(picker.draftStart, key);
   picker.choosingEnd = false;
-  setCalendarOpen(false, { restoreFocus: true });
+  $("calendar-hint").textContent = "Range selected. Click a date to start another, or press Done.";
+  focusCalendarDate(key);
 }
 
 $("range-toggle").addEventListener("click", () => setCalendarOpen($("calendar").hidden));
