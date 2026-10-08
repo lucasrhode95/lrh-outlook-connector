@@ -10,6 +10,7 @@ import pytest
 
 from outlook_connector.domain.errors import (
     AuthenticationRequired,
+    DownloadLimitExceeded,
     Failure,
     InvalidRequest,
     NotFound,
@@ -27,11 +28,15 @@ async def _no_sleep(_s: float) -> None:
     return None
 
 
-def reader_for(fake: FakeGraph) -> GraphMailReader:
+def graph_for(fake: FakeGraph) -> Graph:
     transport = Transport(
         StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep
     )
-    return GraphMailReader(Graph(transport))
+    return Graph(transport)
+
+
+def reader_for(fake: FakeGraph) -> GraphMailReader:
+    return GraphMailReader(graph_for(fake))
 
 
 @pytest.fixture
@@ -220,6 +225,15 @@ async def test_attachment_listings_include_content_ids_without_per_item_reads(
     size = await reader.download_attachment("m3", "a1", tmp_path / "numbers.xlsx")
     assert size == len(b"xlsx-bytes") and (tmp_path / "numbers.xlsx").read_bytes() == b"xlsx-bytes"
     assert await reader.download_mime("m1", tmp_path / "m1.eml") > 0
+
+
+async def test_download_limit_is_a_typed_connector_error(fake: FakeGraph, tmp_path: Path) -> None:
+    with pytest.raises(DownloadLimitExceeded) as caught:
+        await graph_for(fake).download(
+            "/me/messages/m3/attachments/a1/$value", tmp_path / "oversized.bin", max_bytes=3
+        )
+    assert caught.value.limit_bytes == 3
+    assert str(caught.value) == ("Download exceeds the connector's local limit of 3 bytes.")
 
 
 async def test_downloads_are_retried_after_throttling_and_dropped_connections(

@@ -58,6 +58,17 @@ class InvalidRequest(ConnectorError):
     """The caller asked for something malformed or unsupported."""
 
 
+class DownloadLimitExceeded(InvalidRequest):
+    """A download exceeded the connector's local size limit."""
+
+    def __init__(self, limit_bytes: int) -> None:
+        self.limit_bytes = limit_bytes
+        mebibytes, remainder = divmod(limit_bytes, 1024 * 1024)
+        self.limit = f"{mebibytes} MB" if remainder == 0 else f"{limit_bytes} bytes"
+        limit_text = f"{self.limit} limit" if remainder == 0 else f"limit of {self.limit}"
+        super().__init__(f"Download exceeds the connector's local {limit_text}.")
+
+
 class NotFound(ConnectorError):
     """The requested item does not exist (or no longer exists) on the server or locally."""
 

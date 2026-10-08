@@ -180,7 +180,7 @@ lrh-outlook-connector/
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. A folder whose sub-request fails is left out of the answer, so one failure (e.g. a folder deleted since the folder list was read) never hides the other counts. The server total needs every in-scope folder counted; the per-folder listing chooses an uncounted folder by its cached total and claims the excluded count only when every excluded folder was counted.
 - `search(query)`: `$search`, field-scoped queries passed through. `$search` returns regular ids, so each page's ids are converted with one `POST /me/translateExchangeIds` call into the immutable ids every other call uses (if that call fails, the page keeps its search ids rather than failing).
 - `list_attachments(id)` and `list_attachments_many(ids)` (batched) select and map the typed fileAttachment contentId directly; there is no per-image lookup.
-- `download_attachment(id, att_id)` and `download_mime(id)` stream to a file. They are retried like other GETs (429/503 after `Retry-After`, gateway errors, a connection that fails or drops mid-download), each time from scratch; what still fails is a domain error (`Upstream` with no status for a lost connection), so an export marks that one attachment instead of failing.
+- `download_attachment(id, att_id)` and `download_mime(id)` stream to a file. They are retried like other GETs (429/503 after `Retry-After`, gateway errors, a connection that fails or drops mid-download), each time from scratch; what still fails is a domain error (`Upstream` with no status for a lost connection), so an export marks that one attachment instead of failing. Raw attachment and message MIME downloads stop at the connector's local 150 MB guard; exports classify an oversized attachment and direct the user to Outlook.
 - Every operation is named for error messages ("While listing attachments: …").
 
 **`graph_mapping.py`:** maps every Graph shape to `domain.models`. Unknown fields are ignored. Missing optional fields become `None`.
@@ -251,7 +251,7 @@ lrh-outlook-connector/
 - `bodies()` returns a body or an `ExportError` for every message (still throttled, access denied, deleted meanwhile); the text shows the `[EXPORT ERROR]` block (`failures.py`) in place of the body.
 
 **`failures.py`:**
-- One classification of failed Microsoft requests for exports and conversations: `export_error(step, failure)` turns the remote layer's `Failure` (status, code, shortened message, request id; status `None` = no response) into an `ExportError` with the likely cause, `retry` and the fix: 429/503 throttled (retry), other 5xx or no response service or network (retry), 403 access denied, 404 deleted or moved during the export, anything else unexpected (report it with the request id).
+- One classification of failed Microsoft requests for exports and conversations: `export_error(step, failure)` turns the remote layer's `Failure` (status, code, shortened message, request id; status `None` = no response) into an `ExportError` with the likely cause, `retry` and the fix: 429/503 throttled (retry), other 5xx or no response service or network (retry), 403 access denied, 404 deleted or moved during the export, anything else unexpected (report it with the request id). `error_from` separately classifies the known local 150 MB attachment download limit and recommends downloading that attachment directly from Outlook.
 - `error_block` renders the TXT block used by exports and `get_conversation` (which also returns the `ExportError` itself); `error_summary` writes the export header's one "Export errors: …" line.
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
@@ -318,7 +318,7 @@ lrh-outlook-connector/
   - inline images when the rendered body references their `cid:`; if content id or rendered body is unavailable, include rather than silently drop;
   - `itemAttachment` → `.eml`;
   - sanitized, deduplicated names; identical files (same bytes, e.g. a signature logo on every message) are stored once per output file, and every message points to that file;
-  - a failed download becomes an `[EXPORT ERROR]` block ("The attachment <name> could not be downloaded.") and an `export_error` on its JSONL record.
+  - a failed download becomes an `[EXPORT ERROR]` block ("The attachment <name> could not be downloaded.") and an `export_error` on its JSONL record. If it exceeds the 150 MB connector limit, the error says to download it directly from Outlook.
 - `packaging.py` decides the output: one flat `.txt` only when the result is a single TXT with no attachment files, otherwise one `.zip` (TXTs at the root, `<stem>/` folders for attachments). The file is created exclusively in the exports directory (a numbered suffix on a name clash, so concurrent exports never overwrite each other).
 
 ### 5.10 `surfaces/`
@@ -327,7 +327,7 @@ lrh-outlook-connector/
 - FastMCP over stdio. Each tool is a few lines: validate, call the service, return a model.
 - Bounded responses with self-contained cursors.
 - Attachments, MIME and export artifacts are returned as local file paths, never inline base64.
-- Server instructions explain the scope object, what is out of reach (hidden folders, non-mail items; search is mail only), merged copies, coverage and cursors, `scope.sent_items=false` for "latest mail", `include_total`, the export options (`format=jsonl` for analysis), Graph's throttling limits (no parallel tool calls; prefer one folder/date-window export), and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
+- Server instructions explain the scope object, what is out of reach (hidden folders, non-mail items; search is mail only), merged copies, coverage and cursors, `scope.sent_items=false` for "latest mail", `include_total`, the export options (`format=jsonl` for analysis), Graph's throttling limits (no parallel tool calls; prefer one folder/date-window export), the 150 MB attachment download limit, and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
 - List and search results are compact by default (`detail="full"` for every field).
 
 **`web/`:**
