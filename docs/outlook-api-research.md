@@ -435,6 +435,16 @@ storage, would require additional evidence.
 | 96, 97 | SharePoint image downloads | Two complete PNG response bodies, 10,836 and 206,953 bytes. |
 | 101 | OWS `UpdateItem`, `SaveOnly` | HTML containing two tables and four CID images saved successfully. No send operation captured. |
 
+**Organization rollout (owner's mailbox, read 2026-10-07).** Three internal announcements describe
+the add-in: a standardized global signature from 2026-07-15, "applied automatically across all
+company email platforms", with contents generated from each employee's HR profile (myGPS);
+per-user display options (phone toggles, professional credentials, a NAM customer-survey toggle)
+set in the Mail Signature add-in panel on the "Corporate Signature RemainCo" template; and, from
+2026-08-17, a simplified signature (name, title, logo) for internal-only mail versus the full one
+for external mail, plus an Arial 11 pt standard font. The add-in is therefore recipient-dependent
+and has no single stored equivalent. The owner confirmed that drafts created by the connector are
+not modified by the add-in or by Outlook. The connector uses native signatures only (roadmap W8).
+
 **Corporate template pipeline.** The vendor settings response contains three SharePoint library
 definitions and 15 content-language entries. The downloaded package contains `template.njk`
 (7,559 bytes), `metadata.json` (4,385 bytes), `images.json` (671 bytes), and five embedded PNGs.

@@ -11,8 +11,8 @@ Snapshot **2026-10-07**.
 
 ## Current priority
 
-1. **W10 → W8:** remove `edit_draft` (drafts are composed once), then signature listing/content
-   retrieval and fresh default resolution, including missing signatures and dangling defaults.
+1. **W10 → W8:** remove `edit_draft` (drafts are composed once), then native signatures: CRUD,
+   default selection, and the default inserted into new drafts unless told otherwise.
 2. **Correctness:** H19, H22 and H26.
 3. **Performance and cleanup:** H30–H32 and H34–H38.
 
@@ -63,44 +63,66 @@ what they are doing, and an agent may check the draft with the read tools first 
 Every change, including recipient- or subject-only ones, is delete-and-recreate: one simple,
 predictable rule.
 
-## W8 — Signatures
+## W8 — Native signatures
 
-**Status:** Decided, not built. Public tools and automatic draft integration remain.
+**Status:** Decided, not built (scope confirmed 2026-10-07). Depends on W10.
 
-**Goal:** retrieve the user's current native Outlook default automatically when composing a new
-message. Resolve the reply/forward default separately, and list/retrieve configured signatures
-reliably. No user-supplied file or frozen imported copy is required.
+**Scope: native Outlook signatures only.** The connector reads and writes the signatures stored in
+the user's Outlook settings (roaming signatures, Cloud Settings adapter; contracts and live evidence
+in [research §4.7](outlook-api-research.md#47-native-roaming-signature-discovery-and-standalone-reads-2026-10-07)
+and [§4.8](outlook-api-research.md#48-native-signature-crud-and-default-lifecycle-2026-10-07)).
+Add-in-generated signatures are ignored in code: see *Corporate signature add-in* below. A user who
+wants agent drafts to carry the corporate signature makes a native signature equal to it.
 
-**Backend:** Graph first. Microsoft's [roaming-signature documentation](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater)
-identifies a Graph capability gap; use the proven Outlook Cloud Settings adapter for native
-configuration and Graph for draft/attachment reads. API contracts and live evidence are in
-[research §4.7](outlook-api-research.md#47-native-roaming-signature-discovery-and-standalone-reads-2026-10-07)
-and [§4.8](outlook-api-research.md#48-native-signature-crud-and-default-lifecycle-2026-10-07).
+**MCP tools:**
 
-**Remaining implementation:**
+- `list_signatures()`: names, which one is the new-message default and which the reply/forward
+  default (either may be none), and whether each listed name has readable contents.
+- `get_signature(name)`: HTML and text contents.
+- `create_signature(name, html)`, `update_signature(name, html)`, `delete_signature(name)`:
+  native signature CRUD (proven contracts, research §4.8). One write each, never retried; a
+  rejected write raises. The agent may read back to confirm if it wants.
+- `set_default_signature(name | none, for)`: `for` is **required**: `new`, `reply` or `both`.
+  Applies to Outlook itself, nothing stored locally. One write, never retried; a rejection raises.
 
-- Read-only MCP tools `list_signatures` and `get_signature`, with default selections, content
-  availability and missing-reference reporting. Signature-management writes are a separate scope
-  choice from this initial read/default-composition feature; no editor is needed.
-- A signature-reader port and Cloud Settings adapter; resolution and placement belong in the service.
-- Fresh default/content queries during composition, without a persisted signature/default cache.
-  Check account ownership and the relevant revision after retrieval. Respect an explicit no-default
-  setting; report missing configured content or a failed/changed read rather than selecting another
-  signature or using a stale copy.
-- Placement at creation only (W10): new body, then one `<div id="Signature"
+**Draft creation (`create_draft`):**
+
+- By default, insert the right native default, read fresh: the new-message default for new mail, the
+  reply/forward default for replies. An explicitly empty default inserts nothing.
+- Optional `signature` (name), described as rarely needed ("omit to use your Outlook default"),
+  and `include_signature: bool = True`. With `include_signature=false` no signature is inserted;
+  a name supplied with it is ignored and noted in the draft's existing findings (if that note would
+  need new reporting machinery, ignore it silently).
+- A named signature, or a configured default, that does not exist or has no readable contents
+  raises. No fallback to another signature.
+- Placement once, at creation (W10): the message body, then one `<div id="Signature"
   data-signature-name="{name}">` block (the Outlook Web convention, research §4.6); for replies,
-  Exchange appends the quoted history after it. A different signature means composing a new draft.
-  Sending preserves the already saved draft.
-- Convert embedded image data into actual inline attachments with matching CID references.
+  Exchange appends the quoted history after it.
+- Native signature HTML carries images as `data:` URIs: convert them into inline attachments with
+  matching `cid:` references. Text-only contents are escaped like `text_body` (drafts are HTML).
+- "Editing" a draft is delete-and-recreate (W10); the replacement resolves the default again, so a
+  default changed in between applies, and a specifically named signature must be passed again.
+
+**Intended workflow — copying a signature from a draft into a native signature:** the user creates
+a draft in Outlook (the corporate add-in inserts its signature there), then asks the agent to read
+it and save that signature as a native one. The agent reads the draft's HTML (`get_message`,
+`body=html`), extracts the `#Signature` block and calls `create_signature`/`update_signature`.
+The draft's signature images are `cid:` references to inline attachments, while native signatures
+embed images as `data:` URIs: converting them (download the inline attachment, embed it) is part
+of this feature, either in `create_signature` or as a documented agent step.
 
 **Implementation constraints from live findings:** a raw name-list entry may have no readable
-contents, and deleting a selected signature can leave a dangling default. Resolve and verify the
-selected contents. Cloud Settings normalizes HTML wrappers, line breaks and id prefixes, so verify
-visible text and decoded image bytes rather than byte-identical HTML.
+contents, and deleting a selected signature can leave a dangling default. Cloud Settings normalizes
+HTML wrappers, line breaks and id prefixes, so verify visible text and decoded image bytes rather
+than byte-identical HTML. Names are the identifiers (no stable ids): check them against a fresh
+list. Rename, case sensitivity and commas in names are untested.
 
-**Corporate add-in constraint:** native resolution does not execute officeatwork's sender/recipient,
-language or template policies. A rendered-draft snapshot does not establish fresh corporate policy
-evaluation; see [research §4.6](outlook-api-research.md#46-outlook-web-signature-capture-2026-10-07).
+**Corporate signature add-in (documented, not handled in code):** in this tenant the official
+signature is generated per message by the organization-deployed, mandatory officeatwork "Mail
+Signature" add-in (rollout July 2026), from the user's profile and add-in settings, and differs for
+internal and external recipients. It inserts into the message being composed; it does not write
+native signature settings, and it does not touch drafts created by the connector. Details in
+research §4.6.
 
 **Remaining validation:** synthetic fixtures for missing references, no default, missing default
 contents, name encoding, configuration changes and account ownership; then public-tool behavior,
