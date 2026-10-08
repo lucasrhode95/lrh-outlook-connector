@@ -16,6 +16,7 @@ there would remove it from the folder view), so there is never a hard delete.
 
 from __future__ import annotations
 
+import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 
@@ -28,7 +29,7 @@ from outlook_connector.domain.models import (
     MutationResult,
     Scope,
 )
-from outlook_connector.remote.ports import FolderTarget, MailWriter
+from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, FolderTarget, MailWriter
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.scope import validate_scope
 
@@ -57,14 +58,19 @@ class Mutations:
         explicit = _message_ids(message_ids, allow_empty=bool(conversation_ids))
         ids = list(explicit)
         notes = []
-        for conversation_id in dict.fromkeys(conversation_ids or []):
-            expanded, truncated = await self._conversation(conversation_id, scope=scope)
-            ids += expanded
-            if truncated:
-                notes.append(
-                    f"Conversation {conversation_id} was truncated at the 1,000-message listing limit; "
-                    "only listed messages in scope are included."
-                )
+        selected_conversations = list(dict.fromkeys(conversation_ids or []))
+        for start in range(0, len(selected_conversations), MAX_CONCURRENT_REQUESTS):
+            batch = selected_conversations[start : start + MAX_CONCURRENT_REQUESTS]
+            expanded_conversations = await asyncio.gather(
+                *(self._conversation(conversation_id, scope=scope) for conversation_id in batch)
+            )
+            for conversation_id, (expanded, truncated) in zip(batch, expanded_conversations, strict=True):
+                ids += expanded
+                if truncated:
+                    notes.append(
+                        f"Conversation {conversation_id} was truncated at the 1,000-message listing limit; "
+                        "only listed messages in scope are included."
+                    )
         ids = list(dict.fromkeys(ids))
         if not ids:
             raise InvalidRequest("Name at least one message id or a conversation with messages in scope.")
