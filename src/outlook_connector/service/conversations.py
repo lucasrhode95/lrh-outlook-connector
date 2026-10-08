@@ -18,6 +18,7 @@ from outlook_connector.domain.models import (
     Conversation,
     ConversationMessage,
     Coverage,
+    ExclusionReason,
     ExportError,
     ExportStep,
     Message,
@@ -51,7 +52,7 @@ class Conversations:
 
     async def messages(
         self, conversation_id: str, *, scope: Scope, merge_result: bool = True
-    ) -> tuple[list[MessageSummary], dict[str, int], bool]:
+    ) -> tuple[list[MessageSummary], dict[ExclusionReason, int], bool]:
         """All messages of the conversation, oldest first, what was left out by folder, and whether
         the server listing was truncated (more than MAX_CONVERSATION messages).
 

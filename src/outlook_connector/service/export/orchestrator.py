@@ -21,6 +21,7 @@ from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
     Attachment,
+    ExclusionReason,
     ExportArtifact,
     ExportError,
     ExportRequest,
@@ -56,7 +57,7 @@ Downloaded = list[tuple[Attachment, Path | ExportError]]  # the file, or why it 
 @dataclass
 class Selection:
     summaries: list[MessageSummary]
-    excluded: dict[str, int] = field(default_factory=dict)  # ExclusionReason -> messages left out
+    excluded: dict[ExclusionReason, int] = field(default_factory=dict)
     known: dict[str, Message] = field(default_factory=dict)  # fetched with bodies while selecting
 
 
@@ -99,7 +100,7 @@ class Exports:
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
         try:
             downloads = (
-                await self._download(summaries, bodies, found, request, workdir)
+                await self._download(summaries, found, request, workdir)
                 if request.include_attachments
                 else {}
             )
@@ -135,7 +136,7 @@ class Exports:
         Assumes (not re-checked here): ``request`` was validated by ``export``.
         """
         selected: dict[str, MessageSummary] = {}
-        excluded: dict[str, int] = defaultdict(int)
+        excluded: dict[ExclusionReason, int] = defaultdict(int)
         conversation_ids = list(dict.fromkeys(request.conversation_ids))
         for start in range(0, len(conversation_ids), MAX_CONCURRENT_REQUESTS):
             batch = conversation_ids[start : start + MAX_CONCURRENT_REQUESTS]
@@ -173,7 +174,10 @@ class Exports:
         return Selection(sorted(merged, key=oldest_first), dict(excluded), known)
 
     async def _select_folder_or_dates(
-        self, request: ExportRequest, selected: dict[str, MessageSummary], excluded: dict[str, int]
+        self,
+        request: ExportRequest,
+        selected: dict[str, MessageSummary],
+        excluded: dict[ExclusionReason, int],
     ) -> None:
         """Every message in the window, page by page, with the listing's scope rules. Copies on
         different pages are all kept here, so the final merge sees them and names every folder in
@@ -254,7 +258,6 @@ class Exports:
     async def _download(
         self,
         summaries: list[MessageSummary],
-        bodies: dict[str, Message],
         found: dict[str, list[Attachment]],
         request: ExportRequest,
         workdir: Path,
@@ -273,7 +276,7 @@ class Exports:
 
         jobs: list[tuple[str, Attachment, Path]] = []
         for index, summary in enumerate(summaries):
-            page = html.get(summary.id) or bodies.get(summary.id)
+            page = html.get(summary.id)
             page_html = None
             if page is not None:
                 page_html = page.unique_body_html if request.body == "unique" else page.body_html
@@ -416,7 +419,7 @@ def _attachment_record(
     return record
 
 
-def _add(total: dict[str, int], counts: dict[str, int]) -> None:
+def _add(total: dict[ExclusionReason, int], counts: dict[ExclusionReason, int]) -> None:
     for key, count in counts.items():
         total[key] += count
 
@@ -430,7 +433,7 @@ def _check_limit(selected: dict[str, MessageSummary], limit: int, *, more: bool 
         )
 
 
-def _excluded_note(excluded: dict[str, int]) -> str:
+def _excluded_note(excluded: dict[ExclusionReason, int]) -> str:
     parts = [f"{count} {EXCLUSION_TEXT[key]}" for key, count in excluded.items() if count]
     return f" ({'; '.join(parts)} left out)" if parts else ""
 

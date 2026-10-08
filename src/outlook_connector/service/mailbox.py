@@ -40,6 +40,7 @@ from outlook_connector.domain.models import (
     ConversationSize,
     Coverage,
     Detail,
+    ExclusionReason,
     Folder,
     Message,
     MessageContent,
@@ -78,7 +79,7 @@ class Mailbox:
         self.reader = reader
         self.store = store
         self._folders: dict[str, Folder] | None = None
-        self._categories: dict[str, str] = {}
+        self._categories: dict[str, ExclusionReason] = {}
         self._folders_at = 0.0  # time.monotonic() when _folders was last loaded
         self._folder_lock = asyncio.Lock()  # one folder refresh at a time per process
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
@@ -147,12 +148,12 @@ class Mailbox:
         folder = folders.get(folder_id or "")
         return folder is not None and any(f.well_known == alias for f in _ancestry(folder, folders))
 
-    async def exclusions(self, scope: Scope) -> dict[str, str]:
+    async def exclusions(self, scope: Scope) -> dict[str, ExclusionReason]:
         """Folder id -> reason (an ExclusionReason) for every folder this scope leaves out.
 
         Hidden folders are not listed here: ``finish`` always leaves them out.
         """
-        left_out = set() if scope.deleted_items else {"deleted_or_junk"}
+        left_out: set[ExclusionReason] = set() if scope.deleted_items else {"deleted_or_junk"}
         if not scope.sent_items:
             left_out.add("outgoing")
         await self.folder_map()
@@ -188,10 +189,10 @@ class Mailbox:
     async def finish(
         self,
         items: Iterable[MessageSummary],
-        skip: dict[str, str] | None = None,
+        skip: dict[str, ExclusionReason] | None = None,
         *,
         merge_result: bool = True,
-    ) -> tuple[list[MessageSummary], dict[str, int]]:
+    ) -> tuple[list[MessageSummary], dict[ExclusionReason, int]]:
         """Apply folder exclusions, fill folder paths and merge copies. Returns (items, excluded counts).
 
         Items in hidden folders or outside the mail folders are always left out ("hidden").
@@ -202,11 +203,11 @@ class Mailbox:
         items = list(items)
         folders, hidden = await self.reach(m.folder_id for m in items)
         kept: list[MessageSummary] = []
-        excluded: dict[str, int] = {}
+        excluded: dict[ExclusionReason, int] = {}
         for item in items:
             folder_id = item.folder_id or ""
             if item.folder_id and (folder_id in hidden or folder_id not in folders):
-                reason: str | None = "hidden"
+                reason: ExclusionReason | None = "hidden"
             else:
                 reason = (skip or {}).get(folder_id)
             if reason:
@@ -256,7 +257,7 @@ class Mailbox:
         skip = {} if folder_id else await self.exclusions(scope)
 
         notes: list[str] = []
-        window_excluded: dict[str, int] = {}
+        window_excluded: dict[ExclusionReason, int] = {}
         folder_counts: dict[str, FolderCount] | None = None
         link: str | None = None
         offsets: dict[str, int] | None = None  # per-folder listing: folder id -> messages returned
@@ -356,7 +357,7 @@ class Mailbox:
 
     async def _folders_with_mail(
         self, left_out: set[str], since: datetime | None, until: datetime | None
-    ) -> tuple[dict[str, int], dict[str, int], dict[str, FolderCount]]:
+    ) -> tuple[dict[str, int], dict[ExclusionReason, int], dict[str, FolderCount]]:
         """Initial folder offsets and excluded Deleted/Junk counts, from the same count batch.
 
         Assumes (not re-checked here): complete left-out folder ids and a validated listing window.
@@ -376,7 +377,7 @@ class Mailbox:
         except ConnectorError:
             counts = {}
         offsets = {fid: 0 for fid in in_scope if (counts[fid].count if fid in counts else folders[fid].total)}
-        excluded: dict[str, int] = {}
+        excluded: dict[ExclusionReason, int] = {}
         if all(fid in counts for fid in excluded_folders):
             excluded_count = sum(counts[fid].count for fid in excluded_folders)
             excluded = {"deleted_or_junk": excluded_count} if excluded_count else {}
@@ -499,7 +500,7 @@ class Mailbox:
         folder_id: str | None,
         since: datetime | None,
         until: datetime | None,
-        skip: dict[str, str],
+        skip: dict[str, ExclusionReason],
         known_counts: dict[str, FolderCount] | None = None,
     ) -> int | None:
         """The server's count for the scope: the named folder, or every reachable folder not left out.
@@ -767,7 +768,9 @@ def merge_copies(items: list[MessageSummary], outgoing: set[str]) -> list[Messag
     return out
 
 
-def _without_meetings(items: list[MessageSummary], excluded: dict[str, int]) -> list[MessageSummary]:
+def _without_meetings(
+    items: list[MessageSummary], excluded: dict[ExclusionReason, int]
+) -> list[MessageSummary]:
     """Leave out meeting mail, counting it in ``excluded``."""
     kept = [m for m in items if m.meeting is None]
     if len(kept) < len(items):
@@ -799,12 +802,12 @@ def _detail(items: list[MessageSummary], detail: Detail) -> list[MessageSummary]
     return items if detail == "full" else [m.model_copy(update=COMPACT_DROP) for m in items]
 
 
-def folder_categories(folders: dict[str, Folder]) -> dict[str, str]:
+def folder_categories(folders: dict[str, Folder]) -> dict[str, ExclusionReason]:
     """Folder id -> category, judged from the folder and its parents (a folder deleted in Outlook
     moves into Deleted Items with its mail; Sync Issues has subfolders):
     "hidden" (also Sync Issues, which Graph does not mark hidden) > "deleted_or_junk" > "outgoing".
     Folders without one are absent."""
-    out: dict[str, str] = {}
+    out: dict[str, ExclusionReason] = {}
     for folder in folders.values():
         chain = _ancestry(folder, folders)
         aliases = {f.well_known for f in chain if f.well_known}
@@ -829,7 +832,7 @@ def _ancestry(folder: Folder, folders: dict[str, Folder]) -> list[Folder]:
     return chain
 
 
-def _resolve(ref: str, folders: dict[str, Folder], categories: dict[str, str]) -> Folder | None:
+def _resolve(ref: str, folders: dict[str, Folder], categories: dict[str, ExclusionReason]) -> Folder | None:
     """Match among the visible folders; a reference to a hidden folder is refused."""
     visible = {fid: f for fid, f in folders.items() if categories.get(fid) != "hidden"}
     found = _match_folder(ref, visible)
