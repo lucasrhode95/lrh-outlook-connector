@@ -7,7 +7,7 @@ Connect your Outlook mailbox to local MCP clients and a small browser UI.
 - Draft and send email, manage mailbox rules, and organize messages.
 - Browse folders, read messages, and download attachments in the local UI.
 
-![Local MCP clients and the browser UI connect through the Outlook connector to Outlook. The UI card is an illustrative mockup with synthetic text.](docs/connector-overview.svg)
+![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](docs/connector-overview.svg)
 
 ## Setup
 
@@ -29,9 +29,9 @@ The UI opens in your browser and stops after 30 minutes without activity:
 uv run outlook-connector ui
 ```
 
-![Illustrative preview of the local Outlook connector UI. The mailbox labels and message text are synthetic.](docs/ui-preview.svg)
+![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](docs/ui-preview.svg)
 
-*Illustrative UI preview. All visible mailbox text is synthetic.*
+*Screenshot uses mocked mailbox data; no real mailbox content is shown.*
 
 ## MCP tools
 
