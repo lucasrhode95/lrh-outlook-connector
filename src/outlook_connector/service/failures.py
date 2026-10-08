@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Sequence
 
-from outlook_connector.domain.errors import Failure
+from outlook_connector.domain.errors import DownloadLimitExceeded, Failure
 from outlook_connector.domain.models import ExportError, ExportStep
 
 THROTTLING = (429, 503)
@@ -38,7 +38,15 @@ GONE = (
     "not found",
 )
 UNEXPECTED = ("unexpected error", False, "report it with the request id", "unexpected error")
-LABELS = {cause: label for cause, _, _, label in (THROTTLED, SERVICE, DENIED, GONE, UNEXPECTED)}
+DOWNLOAD_LIMIT = (
+    "attachment exceeds the connector's 150 MB download limit",
+    False,
+    "download the attachment directly from Outlook",
+    "connector download limit",
+)
+LABELS = {
+    cause: label for cause, _, _, label in (THROTTLED, SERVICE, DENIED, GONE, UNEXPECTED, DOWNLOAD_LIMIT)
+}
 
 
 def export_error(step: ExportStep, failure: Failure | None, *, message: str | None = None) -> ExportError:
@@ -71,7 +79,16 @@ def export_error(step: ExportStep, failure: Failure | None, *, message: str | No
 
 
 def error_from(step: ExportStep, exc: Exception) -> ExportError:
-    """Classify a raised error: transport errors carry Microsoft's answer as ``failure``."""
+    """Classify raised errors, including the connector's known local download limit."""
+    if isinstance(exc, DownloadLimitExceeded):
+        likely, retry, fix, _ = DOWNLOAD_LIMIT
+        return ExportError(
+            step=step,
+            message=str(exc)[:MAX_MESSAGE],
+            likely_cause=likely,
+            retry=retry,
+            fix=fix,
+        )
     return export_error(step, getattr(exc, "failure", None), message=str(exc))
 
 
