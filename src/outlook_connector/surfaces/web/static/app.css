@@ -238,12 +238,14 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
 .search input { flex: 1; }
 .search > button[type="submit"] { flex: none; border-color: var(--accent); background: var(--accent); color: var(--primary-text); font-weight: 700; }
 .range-picker { position: relative; flex: none; }
-/* Keep room for two localized dates so choosing an end date doesn't resize the control. */
-.range-toggle { position: relative; display: block; width: 320px; padding: 8px 12px; text-align: center; }
-.range-toggle > span { display: block; padding: 0 20px; white-space: nowrap; }
-.range-toggle .chevron { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); }
+/* Keep room for two localized dates and clear/calendar icons without resizing the control. */
+.range-toggle { display: grid; width: 340px; grid-template-columns: 22px minmax(0, 1fr) 22px 14px; align-items: center; gap: 0; padding: 8px 12px; text-align: center; }
+.range-toggle::before { content: ""; }
+.range-toggle > span { grid-column: 2; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.range-toggle .chevron { grid-column: 4; position: static; }
+.date-range-clear { right: 26px; }
 .chevron { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
-.range-toggle[aria-expanded="true"] .chevron { transform: translateY(-50%) rotate(180deg); }
+.range-toggle[aria-expanded="true"] .chevron { transform: rotate(180deg); }
 .calendar {
   position: absolute;
   z-index: 6;
@@ -270,7 +272,6 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
 .calendar-day.in-range { border-radius: 0; background: var(--accent-soft); }
 .calendar-day.range-start, .calendar-day.range-end { border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; }
 .calendar-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-.calendar-hint { flex: 1; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .account { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
 .avatar { display: inline-flex; width: 30px; height: 30px; flex: none; align-items: center; justify-content: center; overflow: hidden; border-radius: 50%; background: var(--avatar-bg); color: var(--avatar-fg); font-size: 11px; font-weight: 700; }
 .avatar:empty { display: none; }
