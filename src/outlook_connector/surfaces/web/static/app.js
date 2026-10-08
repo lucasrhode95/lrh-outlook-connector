@@ -887,9 +887,44 @@ function chooseDate(key) {
   focusCalendarDate(key);
 }
 
+function changeCalendarMonth(offset) {
+  picker.month.setMonth(picker.month.getMonth() + offset);
+  renderCalendar();
+}
+
 $("range-toggle").addEventListener("click", () => setCalendarOpen($("calendar").hidden));
-$("previous-month").addEventListener("click", () => { picker.month.setMonth(picker.month.getMonth() - 1); renderCalendar(); });
-$("next-month").addEventListener("click", () => { picker.month.setMonth(picker.month.getMonth() + 1); renderCalendar(); });
+$("previous-month").addEventListener("click", () => changeCalendarMonth(-1));
+$("next-month").addEventListener("click", () => changeCalendarMonth(1));
+let wheelTimeout = null;
+$("calendar").addEventListener("wheel", (event) => {
+  if ($("calendar").hidden || event.deltaY === 0) return;
+  event.preventDefault();
+  if (wheelTimeout !== null) return;
+  changeCalendarMonth(event.deltaY < 0 ? -1 : 1);
+  wheelTimeout = setTimeout(() => { wheelTimeout = null; }, 220);
+}, { passive: false });
+
+let swipeStart = null;
+$("calendar").addEventListener("touchstart", (event) => {
+  if ($("calendar").hidden || event.touches.length !== 1) {
+    swipeStart = null;
+    return;
+  }
+  swipeStart = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+}, { passive: true });
+$("calendar").addEventListener("touchend", (event) => {
+  if ($("calendar").hidden || !swipeStart || !event.changedTouches.length) {
+    swipeStart = null;
+    return;
+  }
+  const touch = event.changedTouches[0];
+  const deltaX = touch.clientX - swipeStart.x;
+  const deltaY = touch.clientY - swipeStart.y;
+  swipeStart = null;
+  if (Math.abs(deltaX) < 48 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) return;
+  changeCalendarMonth(deltaX > 0 ? -1 : 1);
+}, { passive: true });
+$("calendar").addEventListener("touchcancel", () => { swipeStart = null; }, { passive: true });
 $("clear-dates").addEventListener("click", () => { picker.choosingEnd = false; setDateRange("", ""); setCalendarOpen(false, { restoreFocus: true }); });
 $("calendar-done").addEventListener("click", () => setCalendarOpen(false, { restoreFocus: true }));
 document.addEventListener("pointerdown", (event) => {
