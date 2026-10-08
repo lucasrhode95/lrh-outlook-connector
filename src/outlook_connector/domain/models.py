@@ -26,10 +26,10 @@ Detail = Literal["compact", "full"]
 # Why messages were left out of a result (Coverage.excluded, ExportArtifact.messages_excluded keys).
 ExclusionReason = Literal["deleted_or_junk", "outgoing", "hidden", "meeting_mail"]
 EXCLUSION_TEXT: dict[str, str] = {
-    "deleted_or_junk": "in Deleted Items or Junk Email (include_deleted_items=false)",
-    "outgoing": "in Sent Items, Drafts or Outbox (include_sent_items=false)",
+    "deleted_or_junk": "in Deleted Items or Junk Email (scope.deleted_items=false)",
+    "outgoing": "in Sent Items, Drafts or Outbox (scope.sent_items=false)",
     "hidden": "in hidden folders, Sync Issues, or outside the mail folders (out of reach)",
-    "meeting_mail": "meeting invitations, replies and cancellations (include_meeting_mail=false)",
+    "meeting_mail": "meeting invitations, replies and cancellations (scope.meeting_mail=false)",
 }
 
 
@@ -70,6 +70,30 @@ class Folder(Compact):
     unread: int | None = None
     child_count: int | None = None
     hidden: bool = False  # Graph's isHidden. Hidden folders (and Sync Issues) are out of reach.
+
+
+class Scope(BaseModel):
+    """Shared mailbox scope. True includes more mail; false filters more."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    sent_items: bool = Field(
+        default=True,
+        description="Include Sent Items, Drafts and Outbox (false: only mail you received).",
+    )
+    meeting_mail: bool = Field(
+        default=True,
+        description=(
+            "Include invitations, RSVPs and cancellations (false: leave them out where scope applies)."
+        ),
+    )
+    deleted_items: bool = Field(
+        default=False,
+        description="Include Deleted Items and Junk Email (a folder you name is always included).",
+    )
+
+
+DEFAULT_SCOPE = Scope()
 
 
 MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
@@ -227,7 +251,7 @@ class UserProfile(Compact):
 
 class ConversationSize(Compact):
     conversation_id: str
-    messages: int  # what get_conversation would list with the same include_deleted_items
+    messages: int  # what get_conversation would list with the same scope.deleted_items
     at_least: bool = False  # the conversation is larger than the server listed in one request
 
 
@@ -235,7 +259,10 @@ EXPORT_MAX_MESSAGES = 2000  # hard cap per export
 
 
 class ExportRequest(BaseModel):
-    """What to export: conversations, messages, and/or every message in a range. All are combined."""
+    """What to export: conversations, messages, and/or every message in a folder/date window.
+
+    All selections are combined.
+    """
 
     conversation_ids: list[str] = Field(default_factory=list)
     message_ids: list[str] = Field(default_factory=list)
@@ -243,14 +270,12 @@ class ExportRequest(BaseModel):
     since: datetime | None = None
     until: datetime | None = None
     folder: str | None = None  # path, alias or id; None = whole mailbox
-    include_sent_items: bool = True  # false: leave out Sent Items, Drafts and Outbox (range only)
-    include_meeting_mail: bool = True  # false: leave out invitations, RSVPs, cancellations (range only)
+    scope: Scope = Field(default_factory=Scope)
     limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
     format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
     include_attachments: bool = False
     combine: CombineMode = "per_conversation"
     body: Literal["unique", "full"] = "unique"
-    include_deleted_items: bool = False
 
     @property
     def by_range(self) -> bool:
@@ -258,8 +283,8 @@ class ExportRequest(BaseModel):
             self.since
             or self.until
             or self.folder
-            or not self.include_sent_items
-            or not self.include_meeting_mail
+            or not self.scope.sent_items
+            or not self.scope.meeting_mail
         )
 
 

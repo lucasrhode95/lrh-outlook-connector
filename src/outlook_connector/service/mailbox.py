@@ -4,11 +4,11 @@ Remote first: every call asks Outlook (Graph). The local store caches the folder
 message data is kept locally, so a message deleted on the server is gone here too.
 
 Scope rules shared by list, search, conversations, sizes and export (a folder counts with its parents):
-- Deleted Items and Junk Email are left out unless ``include_deleted_items`` (a folder asked for by
+- Deleted Items and Junk Email are left out unless ``scope.deleted_items`` (a folder asked for by
   name is always included).
-  Sent Items, Drafts and Outbox are included unless ``include_sent_items`` is false. List and
+  Sent Items, Drafts and Outbox are included unless ``scope.sent_items`` is false. List and
   search also leave out meeting mail (invitations, replies to them, cancellations) when
-  ``include_meeting_mail`` is false: a conversation that is only meeting traffic disappears, one
+  ``scope.meeting_mail`` is false: a conversation that is only meeting traffic disappears, one
   with real replies shows through them. Every flag points the same way: true shows more mail.
 - Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
   and items outside the mail folders (e.g. Teams meeting records) are out of reach:
@@ -29,6 +29,7 @@ from typing import Any
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
 from outlook_connector.domain.models import (
+    DEFAULT_SCOPE,
     Attachment,
     BodyKind,
     ConversationHit,
@@ -40,11 +41,13 @@ from outlook_connector.domain.models import (
     MessageContent,
     MessagePage,
     MessageSummary,
+    Scope,
     SearchResult,
     UserProfile,
 )
 from outlook_connector.remote.ports import MailReader
 from outlook_connector.service import cursors
+from outlook_connector.service.scope import validate_scope
 from outlook_connector.store.db import Store
 
 FOLDER_TTL_SECONDS = 600
@@ -140,15 +143,13 @@ class Mailbox:
         folder = folders.get(folder_id or "")
         return folder is not None and any(f.well_known == alias for f in _ancestry(folder, folders))
 
-    async def exclusions(
-        self, *, include_deleted_items: bool, include_sent_items: bool = True
-    ) -> dict[str, str]:
+    async def exclusions(self, scope: Scope) -> dict[str, str]:
         """Folder id -> reason (an ExclusionReason) for every folder this scope leaves out.
 
         Hidden folders are not listed here: ``finish`` always leaves them out.
         """
-        left_out = set() if include_deleted_items else {"deleted_or_junk"}
-        if not include_sent_items:
+        left_out = set() if scope.deleted_items else {"deleted_or_junk"}
+        if not scope.sent_items:
             left_out.add("outgoing")
         categories = folder_categories(await self.folder_map())
         return {folder_id: category for folder_id, category in categories.items() if category in left_out}
@@ -213,9 +214,7 @@ class Mailbox:
         until: datetime | None = None,
         limit: int = 25,
         cursor: str | None = None,
-        include_sent_items: bool = True,
-        include_deleted_items: bool = False,
-        include_meeting_mail: bool = True,
+        scope: Scope = DEFAULT_SCOPE,
         include_total: bool = False,
         detail: Detail = "full",
         skip_returned_copies: bool = True,
@@ -225,29 +224,22 @@ class Mailbox:
         ``skip_returned_copies``: drop copies of a message an earlier page already returned. A caller
         that merges every page at the end (the export) turns it off to keep each copy's folder.
 
-        Entry point: the authoritative check of its arguments (limit, window, folder, cursor); the web
-        routes pass them through unchecked, and the helpers below trust them.
+        Entry point: the authoritative check of its arguments (scope, limit, window, folder, cursor); the web
+        routes validate the scope and pass other inputs through, and the helpers below trust them.
         """
         if not 1 <= limit <= 200:
             raise InvalidRequest("limit must be between 1 and 200.")
+        validate_scope(scope)
         if since and until and since > until:
             raise InvalidRequest("since must not be after until.")
         state = cursors.decode(cursor, "list_messages") if cursor else None
         if state:
             folder_id = state["folder_id"]
             since, until = _dt(state["since"]), _dt(state["until"])
-            include_sent_items = bool(state["include_sent_items"])
-            include_deleted_items = bool(state["include_deleted_items"])
-            include_meeting_mail = bool(state["include_meeting_mail"])
+            scope = Scope.model_validate(state["scope"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
-        skip = (
-            {}
-            if folder_id
-            else await self.exclusions(
-                include_deleted_items=include_deleted_items, include_sent_items=include_sent_items
-            )
-        )
+        skip = {} if folder_id else await self.exclusions(scope)
 
         notes: list[str] = []
         window_excluded: dict[str, int] = {}
@@ -269,15 +261,15 @@ class Mailbox:
         if offsets is not None:
             fetched, offsets = await self._merged_folders(offsets, since, until, limit)
             complete = not offsets
-            filtered = not include_meeting_mail
+            filtered = not scope.meeting_mail
         else:
             fetched = []
             drop = set(skip) | hidden
 
             def kept(m: MessageSummary) -> bool:
-                return m.folder_id not in drop and (include_meeting_mail or m.meeting is None)
+                return m.folder_id not in drop and (scope.meeting_mail or m.meeting is None)
 
-            filtered = bool(drop) or not include_meeting_mail
+            filtered = bool(drop) or not scope.meeting_mail
             for _ in range(FILTERED_PAGES if filtered else 1):
                 page, link = await self.reader.list_messages(
                     folder_id=folder_id, since=since, until=until, page_size=limit, page=link
@@ -288,7 +280,7 @@ class Mailbox:
             complete = link is None
         items, excluded = await self.finish(fetched, skip)
         excluded.update(window_excluded)  # full-window counts only on the first per-folder page
-        items = _without_meetings(items, excluded) if not include_meeting_mail else items
+        items = _without_meetings(items, excluded) if not scope.meeting_mail else items
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
 
         if filtered and not complete:
@@ -299,7 +291,7 @@ class Mailbox:
             if total is not None:
                 notes.append(
                     "server_total counts the server's messages in scope (copies counted separately). "
-                    "It includes meeting mail even when include_meeting_mail=false hides it."
+                    "It includes meeting mail even when scope.meeting_mail=false hides it."
                 )
         next_cursor = None
         if not complete:
@@ -311,9 +303,7 @@ class Mailbox:
                 since=_iso(since),
                 until=_iso(until),
                 seen=seen,
-                include_sent_items=include_sent_items,
-                include_deleted_items=include_deleted_items,
-                include_meeting_mail=include_meeting_mail,
+                scope=scope.model_dump(mode="json"),
             )
         return MessagePage(
             items=_detail(items, detail),
@@ -446,23 +436,24 @@ class Mailbox:
         return sum(counts.values()) if len(counts) == len(set(in_scope)) else None
 
     async def conversation_sizes(
-        self, conversation_ids: list[str], *, include_deleted_items: bool = False
+        self, conversation_ids: list[str], *, scope: Scope = DEFAULT_SCOPE
     ) -> list[ConversationSize]:
         """How many messages each conversation has, counted the way get_conversation lists them.
 
         One batched server listing of folders and Internet ids per conversation (copies counted
         once).
 
-        Entry point: validates its own arguments (at most MAX_SIZE_LOOKUPS conversations, duplicates
-        dropped).
+        Entry point: validates scope and its own arguments (at most MAX_SIZE_LOOKUPS conversations,
+        duplicates dropped).
         """
+        validate_scope(scope, sent_items=False, meeting_mail=False)
         ids = list(dict.fromkeys(conversation_ids))
         if len(ids) > MAX_SIZE_LOOKUPS:
             raise InvalidRequest(f"At most {MAX_SIZE_LOOKUPS} conversations per request.")
         if not ids:
             return []
         remote = await self.reader.conversation_folders(ids)
-        skip = await self.exclusions(include_deleted_items=include_deleted_items)
+        skip = await self.exclusions(scope)
         folders, hidden = await self.reach(fid for listed, _ in remote.values() for fid, _ in listed)
         out = []
         for cid in ids:
@@ -569,28 +560,25 @@ class Mailbox:
         folder: str | None = None,
         limit: int = 25,
         cursor: str | None = None,
-        include_sent_items: bool = True,
-        include_deleted_items: bool = False,
-        include_meeting_mail: bool = True,
+        scope: Scope = DEFAULT_SCOPE,
         detail: Detail = "full",
     ) -> SearchResult:
         """Server-side search, hits grouped by conversation (requirements v4 §9).
 
-        Entry point: normalize naive dates as UTC and aware dates to UTC; validate query, limit,
+        Entry point: normalize naive dates as UTC and aware dates to UTC; validate scope, query, limit,
         folder and cursor. The web and MCP search routes pass dates through unchecked.
         """
         if not query.strip():
             raise InvalidRequest("query must not be empty.")
         if not 1 <= limit <= 100:
             raise InvalidRequest("limit must be between 1 and 100.")
+        validate_scope(scope)
         since, until = _search_date(since), _search_date(until)
         state = cursors.decode(cursor, "search") if cursor else None
         if state:
             folder_id, kql = state["folder_id"], state["query"]
             since, until = _dt(state["since"]), _dt(state["until"])
-            include_sent_items = bool(state["include_sent_items"])
-            include_deleted_items = bool(state["include_deleted_items"])
-            include_meeting_mail = bool(state["include_meeting_mail"])
+            scope = Scope.model_validate(state["scope"])
         else:
             folder_id = (await self.resolve_folder(folder)).id if folder else None
             # KQL only takes dates (and their time zone is the server's): ask for a day more on each
@@ -600,19 +588,13 @@ class Mailbox:
                 kql += f" received>={(since - timedelta(days=1)).date().isoformat()}"
             if until:
                 kql += f" received<={(until + timedelta(days=1)).date().isoformat()}"
-        skip = (
-            {}
-            if folder_id
-            else await self.exclusions(
-                include_deleted_items=include_deleted_items, include_sent_items=include_sent_items
-            )
-        )
+        skip = {} if folder_id else await self.exclusions(scope)
         found, link = await self.reader.search(
             query=kql, folder_id=folder_id, page_size=limit, page=state["link"] if state else None
         )
         in_window = [m for m in found if _within(m, since, until)]
         items, excluded = await self.finish(in_window, skip)
-        items = _without_meetings(items, excluded) if not include_meeting_mail else items
+        items = _without_meetings(items, excluded) if not scope.meeting_mail else items
         items, seen = _skip_seen(items, state)
 
         groups: dict[str, ConversationHit] = {}
@@ -635,7 +617,7 @@ class Mailbox:
                 sizes = {
                     s.conversation_id: s
                     for s in await self.conversation_sizes(
-                        with_ids, include_deleted_items=include_deleted_items
+                        with_ids, scope=Scope(deleted_items=scope.deleted_items)
                     )
                 }
             except Exception:  # counts are a courtesy; never fail the search for them
@@ -646,7 +628,7 @@ class Mailbox:
         for hit in groups.values():
             hit.matching_messages = _detail(hit.matching_messages, detail)
         notes = ["Server-side search (Microsoft Graph); hits grouped by conversation, in rank order."]
-        if (skip or not include_meeting_mail) and link:
+        if (skip or not scope.meeting_mail) and link:
             notes.append("Filters apply after paging, so a page can hold fewer than limit hits.")
         return SearchResult(
             query=query,
@@ -659,9 +641,7 @@ class Mailbox:
                 seen=seen,
                 since=_iso(since),
                 until=_iso(until),
-                include_sent_items=include_sent_items,
-                include_deleted_items=include_deleted_items,
-                include_meeting_mail=include_meeting_mail,
+                scope=scope.model_dump(mode="json"),
             )
             if link
             else None,

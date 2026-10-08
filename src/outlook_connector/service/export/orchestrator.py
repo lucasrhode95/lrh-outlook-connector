@@ -39,6 +39,7 @@ from outlook_connector.service.failures import (
     export_error,
 )
 from outlook_connector.service.mailbox import OUTGOING_FOLDERS, merge_copies
+from outlook_connector.service.scope import validate_scope
 
 RANGE_PAGE = 200
 SHOWN_FAILURES = 3
@@ -78,10 +79,16 @@ class Exports:
         checks that something is selected and, through ``_select``, the message limit. The steps after
         ``_select`` trust the selection and do not re-check it.
         """
+        validate_scope(
+            request.scope,
+            sent_items=request.by_range,
+            meeting_mail=request.by_range,
+            deleted_items=request.by_range or bool(request.conversation_ids),
+        )
         if not request.conversation_ids and not request.message_ids and not request.by_range:
             raise InvalidRequest(
                 "Select at least one conversation or message, or a range "
-                "(since/until/folder/include_sent_items=false)."
+                "(since/until/folder/scope.sent_items=false)."
             )
         selection = await self._select(request)
         summaries = selection.summaries
@@ -134,7 +141,7 @@ class Exports:
         excluded: dict[str, int] = defaultdict(int)
         for conversation_id in dict.fromkeys(request.conversation_ids):
             items, left_out, truncated = await self.conversations.messages(
-                conversation_id, include_deleted_items=request.include_deleted_items
+                conversation_id, scope=request.scope
             )
             if truncated:
                 raise InvalidRequest(
@@ -175,9 +182,7 @@ class Exports:
                 until=request.until,
                 limit=RANGE_PAGE,
                 cursor=cursor,
-                include_sent_items=request.include_sent_items,
-                include_deleted_items=request.include_deleted_items,
-                include_meeting_mail=request.include_meeting_mail,
+                scope=request.scope,
                 skip_returned_copies=False,
             )
             _add(excluded, page.coverage.excluded)

@@ -81,33 +81,23 @@ messages return failed with detail `not sent`. Ambiguous writes are read back; f
 remains unknown. Writes are never retried. Delete moves to
 Deleted Items and never deletes permanently.
 
-Every tool follows the same scope rules: Deleted Items and Junk Email are left out unless
-`include_deleted_items=true` (a folder you name is always included; a subfolder counts with its
-parent, so a folder you deleted in Outlook counts as Deleted Items). `include_sent_items=false`
-also leaves out Sent Items, Drafts and Outbox (included by default), and
-`include_meeting_mail=false` leaves out invitations, RSVPs and cancellations in list, search and
-range exports (a conversation with real replies still shows through them). Every flag points the
-same way: true shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off.
-`coverage.excluded` counts what was left out (a mailbox-wide listing read folder by folder counts
-Deleted Items and Junk for the whole window on its first page). Copies of one message (mail sent to
-yourself or to a list you are on) are shown once, with `also_in` naming the other folders. A `since`
-or `until` without a time zone is taken as UTC.
+Tools that accept mailbox scope use one `scope` object with independent keys: `scope.sent_items` (default true) includes Sent Items, Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; and `scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is always included; subfolders count with their parent, so a folder you deleted in Outlook counts as Deleted Items. True shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off. Web GET requests use `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests such as export carry a nested `scope` object. A non-default key is rejected when an operation cannot apply it.
 
 **Out of reach:** hidden folders, and items outside the mail folders (Teams meeting records,
 settings and other non-mail items), are never listed, searched, counted, grouped into conversations
-or picked up by a range or conversation export, and `list_folders` does not show them. Search covers
+or picked up by a folder/date-window or conversation export, and `list_folders` does not show them. Search covers
 mail only. A message id you name is the exception: `get_message` and `export_messages` read it
 wherever it is. List and search results are compact by default (`detail="full"` for every field);
 search hits carry the conversation's message count, and `list_messages(include_total=true)` returns the
 server's count for the window (copies counted separately, and meeting mail included even when
-`include_meeting_mail=false` hides it).
+`scope.meeting_mail=false` hides it).
 
-`export_messages` takes conversations, message ids and/or a range (`since`, `until`, `folder`,
-`include_sent_items=false`), up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one
+`export_messages` takes conversations, message ids and/or a folder/date window (`since`, `until`,
+`folder`), narrowed by `scope`, up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one
 JSON record per message for agents; `txt` is for people. Every exported message carries its message,
 conversation and Internet ids, and a message that exists in several folders is exported once, with
 `also_in` naming the other folders. Messages selected by id are exported whatever their folder (also
-hidden folders and Sync Issues), while conversations and ranges keep the scope rules above; ids that
+hidden folders and Sync Issues), while conversations and folder/date windows keep the scope rules above; ids that
 are copies of a selected message are merged with it. They are read from the server: if any of them
 cannot be read (deleted or moved meanwhile, or still throttled), the export fails, writes nothing and
 says which ones and what to do. Anything else that cannot be exported (a body, an attachment, an
@@ -132,7 +122,7 @@ per mailbox; each item of a `$batch` (at most 20) counts. The connector keeps at
 2 batches in flight, re-sends throttled or temporarily failing batch items (429, 502, 503, 504) in
 new batches of at most 20 after the advised delay, and reports items that still fail instead of
 failing the whole call. Writes are never re-sent. Agents are told to avoid parallel tool calls and to
-prefer one range export over many small calls. Errors name the operation, the Graph error code and
+prefer one folder/date-window export over many small calls. Errors name the operation, the Graph error code and
 message, and the request id; "not found" leaves the cause open (deleted, moved out of reach, or a
 wrong id). A rejected token (401) is renewed
 once before the connector asks you to sign in again; "access denied" (403) never asks for a sign-in.
@@ -150,7 +140,7 @@ top), search the mailbox, filter what is loaded, read messages (the whole body, 
 request) and download their attachments, tick
 conversations or single messages, and export them as one `.txt` or `.zip` (one file per conversation, one for
 everything, or one per message; attachments optional). "export this view" exports the whole current
-folder and date range. Deleted Items and Junk are left out unless you tick "Deleted / Junk"
+folder and date window. Deleted Items and Junk are left out unless you tick "Deleted / Junk"
 (they are always shown inside those folders). Hidden folders and Sync Issues (classic Outlook's
 conflict copies) are not listed at all.
 

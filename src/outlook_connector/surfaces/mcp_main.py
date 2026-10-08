@@ -17,6 +17,7 @@ from pydantic import Field
 
 from outlook_connector.bootstrap import AppContext, Services
 from outlook_connector.domain.models import (
+    DEFAULT_SCOPE,
     EXPORT_MAX_MESSAGES,
     Attachment,
     BodyKind,
@@ -36,6 +37,7 @@ from outlook_connector.domain.models import (
     OutgoingMessage,
     RuleChange,
     RuleWriteResult,
+    Scope,
     SearchResult,
     SendResult,
 )
@@ -50,21 +52,22 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
-- Scope, the same for every tool: Deleted Items and Junk Email are left out unless \
-include_deleted_items=true (a folder you name is always included; subfolders count with their \
-parent). include_sent_items=false also leaves out Sent \
-Items, Drafts and Outbox: use it for "the latest mail I received", which includes mail that rules \
-filed into other folders. Both flags point the same way: true shows more mail, false filters more. \
+- Scope is one object with independent keys: `scope.sent_items` (default true) includes Sent Items, \
+Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; \
+`scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is \
+always included; subfolders count with their parent. True shows more mail, false filters more. Use \
+`scope.sent_items=false` for "the latest mail I received", including mail that rules filed into \
+other folders. A tool rejects a non-default scope key it cannot apply. \
 coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, grouped into conversations \
-or selected by range/conversation export, and \
+or selected by folder/date-window/conversation export, and \
 list_folders does not show them; coverage.excluded.hidden counts any that were dropped. Search \
 covers mail only.
 - Meeting mail (invitations and their updates, cancellations, replies to invitations) carries \
 meeting: kind (invite, update, cancelled, accepted, tentative, declined), start, end, location, \
 out_of_date; ordinary mail has none. A reply written to an invitation stays in its conversation. \
-include_meeting_mail=false (list, search, range export) leaves meeting mail out: a conversation \
+scope.meeting_mail=false (list, search, folder/date-window export) leaves meeting mail out: a conversation \
 that is only invitations, RSVPs and cancellations disappears; one with real replies shows \
 through them (get_conversation still returns the whole conversation).
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
@@ -80,17 +83,18 @@ by folder (full pages, a bit slower) and coverage.notes says so: pass that note 
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
-are included and merged. Range/conversation selection keeps the usual scope filters.
+are included and merged. Folder/date-window and conversation selections keep the usual scope rules.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
-and/or a range (since/until/folder/include_sent_items) in one call; at most 2,000 messages (`limit` \
-lowers that). For a large period, export the range rather than enumerating ids. format="jsonl" \
+and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
+2,000 messages (`limit` lowers that). For a large period, prefer \
+a folder/date-window export over enumerating ids. format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
 be exported are marked [EXPORT ERROR] in TXT and carry an export_error object in JSONL (step, \
 status, likely_cause, retry, fix).
 - Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
-Do not call these tools in parallel, and prefer one large call (a range export, a bigger limit) over \
+Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
 many small ones. On a throttling error, wait at least a minute before retrying.
 - Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
 edit_draft changes only supplied fields. Both return the Microsoft draft id and full server text/HTML,
@@ -140,20 +144,6 @@ MessageIds = Annotated[
 ]
 
 
-IncludeDeleted = Annotated[
-    bool,
-    Field(description="Include Deleted Items and Junk Email (a folder you name is always included)."),
-]
-IncludeMeetings = Annotated[
-    bool,
-    Field(
-        description="Include meeting mail: invitations, RSVPs and cancellations "
-        "(false: leave them out; conversations with real replies still show those)."
-    ),
-]
-IncludeSent = Annotated[
-    bool, Field(description="Include Sent Items, Drafts and Outbox (false: only mail you received).")
-]
 DetailLevel = Annotated[
     Detail, Field(description="compact (default) or full: adds recipients, categories and Internet ids.")
 ]
@@ -203,9 +193,7 @@ def build_server(context: AppContext) -> FastMCP:
         until: Annotated[datetime | None, Field(description="Inclusive upper bound (ISO 8601).")] = None,
         limit: Annotated[int, Field(ge=1, le=200)] = 25,
         cursor: str | None = None,
-        include_sent_items: IncludeSent = True,
-        include_meeting_mail: IncludeMeetings = True,
-        include_deleted_items: IncludeDeleted = False,
+        scope: Scope = DEFAULT_SCOPE,
         include_total: Annotated[
             bool, Field(description="Also count the server's messages in scope (first page only).")
         ] = False,
@@ -220,9 +208,7 @@ def build_server(context: AppContext) -> FastMCP:
             until=_utc(until),
             limit=limit,
             cursor=cursor,
-            include_sent_items=include_sent_items,
-            include_meeting_mail=include_meeting_mail,
-            include_deleted_items=include_deleted_items,
+            scope=scope,
             include_total=include_total,
             detail=detail,
         )
@@ -238,9 +224,7 @@ def build_server(context: AppContext) -> FastMCP:
         folder: Annotated[str | None, Field(description="Folder path, alias or id.")] = None,
         limit: Annotated[int, Field(ge=1, le=100)] = 25,
         cursor: str | None = None,
-        include_sent_items: IncludeSent = True,
-        include_meeting_mail: IncludeMeetings = True,
-        include_deleted_items: IncludeDeleted = False,
+        scope: Scope = DEFAULT_SCOPE,
         detail: DetailLevel = "compact",
     ) -> SearchResult:
         """Server-side search of mail only (hidden folders and non-mail items are left out); hits
@@ -252,9 +236,7 @@ def build_server(context: AppContext) -> FastMCP:
             folder=folder,
             limit=limit,
             cursor=cursor,
-            include_sent_items=include_sent_items,
-            include_meeting_mail=include_meeting_mail,
-            include_deleted_items=include_deleted_items,
+            scope=scope,
             detail=detail,
         )
 
@@ -263,7 +245,7 @@ def build_server(context: AppContext) -> FastMCP:
         conversation_id: str,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "unique",
-        include_deleted_items: IncludeDeleted = False,
+        scope: Scope = DEFAULT_SCOPE,
         max_chars: Annotated[int, Field(ge=1000, le=400_000)] = 40_000,
         cursor: Annotated[
             str | None,
@@ -275,7 +257,7 @@ def build_server(context: AppContext) -> FastMCP:
             conversation_id,
             include_bodies=include_bodies,
             body=body,
-            include_deleted_items=include_deleted_items,
+            scope=scope,
             max_chars=max_chars,
             cursor=cursor,
         )
@@ -320,23 +302,25 @@ def build_server(context: AppContext) -> FastMCP:
             ),
         ] = "per_conversation",
         body: Literal["unique", "full"] = "unique",
-        include_deleted_items: IncludeDeleted = False,
+        scope: Scope = DEFAULT_SCOPE,
         format: Annotated[
             ExportFormat,
             Field(description="txt (for people) or jsonl (one JSON record per message, for analysis)."),
         ] = "txt",
         since: Annotated[
-            datetime | None, Field(description="Range selection: inclusive lower bound (ISO 8601).")
+            datetime | None,
+            Field(description="Folder/date-window selection: inclusive lower bound (ISO 8601)."),
         ] = None,
         until: Annotated[
-            datetime | None, Field(description="Range selection: inclusive upper bound (ISO 8601).")
+            datetime | None,
+            Field(description="Folder/date-window selection: inclusive upper bound (ISO 8601)."),
         ] = None,
         folder: Annotated[
             str | None,
-            Field(description="Range selection: folder path, alias or id (default: whole mailbox)."),
+            Field(
+                description="Folder/date-window selection: folder path, alias or id (default: whole mailbox)."
+            ),
         ] = None,
-        include_sent_items: IncludeSent = True,
-        include_meeting_mail: IncludeMeetings = True,
         limit: Annotated[
             int,
             Field(
@@ -346,7 +330,7 @@ def build_server(context: AppContext) -> FastMCP:
             ),
         ] = EXPORT_MAX_MESSAGES,
     ) -> ExportArtifact:
-        """Export conversations, messages and/or a date range to one local file; returns its path.
+        """Export conversations, messages and/or a folder/date window to one local file; returns its path.
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
         are exported once. The result counts what was left out and lists messages without a body.
@@ -357,14 +341,12 @@ def build_server(context: AppContext) -> FastMCP:
             since=_utc(since),
             until=_utc(until),
             folder=folder,
-            include_sent_items=include_sent_items,
-            include_meeting_mail=include_meeting_mail,
+            scope=scope,
             limit=limit,
             format=format,
             include_attachments=include_attachments,
             combine=combine,
             body=body,
-            include_deleted_items=include_deleted_items,
         )
         return await (await services()).exports.export(request)
 
@@ -457,7 +439,7 @@ def build_server(context: AppContext) -> FastMCP:
         conversation_ids: Annotated[
             list[str] | None, Field(description="Also every message of these conversations, in scope.")
         ] = None,
-        include_deleted_items: IncludeDeleted = False,
+        scope: Scope = DEFAULT_SCOPE,
         continue_on_error: bool = True,
     ) -> MutationResult:
         """Mark messages read or unread (read receipts are never sent). Results and counts; when
@@ -466,7 +448,7 @@ def build_server(context: AppContext) -> FastMCP:
             message_ids or [],
             read,
             conversation_ids=conversation_ids,
-            include_deleted_items=include_deleted_items,
+            scope=scope,
             continue_on_error=continue_on_error,
         )
 

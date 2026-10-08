@@ -31,7 +31,7 @@ from outlook_connector.domain.errors import (
     NotFound,
     Throttled,
 )
-from outlook_connector.domain.models import ExportRequest
+from outlook_connector.domain.models import ExportRequest, Scope
 
 STATIC = resources.files("outlook_connector.surfaces.web") / "static"
 _STATUS = {AuthenticationRequired: 401, InvalidRequest: 400, NotFound: 404, Throttled: 429}
@@ -68,6 +68,15 @@ def _guard(token: str, port: int, activity: Activity) -> type[BaseHTTPMiddleware
 def _flag(request: Request, name: str, default: bool = False) -> bool:
     value = request.query_params.get(name)
     return default if value is None else value.lower() in ("1", "true", "yes")
+
+
+def _scope(request: Request) -> Scope:
+    """Validate the web query's scope once at the route entry point."""
+    return Scope(
+        sent_items=_flag(request, "sent_items", True),
+        meeting_mail=_flag(request, "meeting_mail", True),
+        deleted_items=_flag(request, "deleted_items"),
+    )
 
 
 def _when(request: Request, name: str) -> datetime | None:
@@ -142,8 +151,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             until=_when(request, "until"),
             limit=_int(request, "limit", 100),
             cursor=request.query_params.get("cursor") or None,
-            include_deleted_items=_flag(request, "include_deleted_items"),
-            include_meeting_mail=_flag(request, "include_meeting_mail", True),
+            scope=_scope(request),
         )
         return _json(page)
 
@@ -155,8 +163,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
             folder=request.query_params.get("folder") or None,
             limit=_int(request, "limit", 50),
             cursor=request.query_params.get("cursor") or None,
-            include_deleted_items=_flag(request, "include_deleted_items"),
-            include_meeting_mail=_flag(request, "include_meeting_mail", True),
+            scope=_scope(request),
         )
         return _json(result)
 
@@ -164,7 +171,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         result = await (await context.services()).conversations.get_conversation(
             request.path_params["conversation_id"],
             include_bodies=False,
-            include_deleted_items=_flag(request, "include_deleted_items"),
+            scope=_scope(request),
         )
         return _json(result)
 
@@ -174,7 +181,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
             raise InvalidRequest("conversation_ids must be a list of strings.")
         sizes = await (await context.services()).mailbox.conversation_sizes(
-            ids, include_deleted_items=bool(payload.get("include_deleted_items"))
+            ids, scope=Scope.model_validate(payload.get("scope", {}))
         )
         return _json(sizes)
 
