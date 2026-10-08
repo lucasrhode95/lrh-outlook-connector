@@ -167,10 +167,16 @@ async def test_list_messages_without_sent_items(server: FastMCP) -> None:
     assert "m2" in [m["id"] for m in (await call(server, "list_messages"))["items"]]  # included by default
 
 
-async def test_export_by_range_and_throttling_guidance(server: FastMCP) -> None:
+async def test_export_by_folder_date_window_and_throttling_guidance(server: FastMCP) -> None:
     artifact = await call(server, "export_messages", since="2026-09-30T00:00:00", limit=10)
     assert artifact["message_count"] == 1
     assert "4 concurrent requests and 10,000 requests per 10 minutes" in (server.instructions or "")
+    assert "Scope alone does not select anything." in (server.instructions or "")
+
+
+async def test_export_scope_alone_returns_selection_guidance(server: FastMCP) -> None:
+    with pytest.raises(Exception, match="Select conversations, messages, a folder, or a date window"):
+        await call(server, "export_messages", scope={"sent_items": False})
 
 
 async def test_list_results_are_compact_by_default(server: FastMCP) -> None:
@@ -192,7 +198,7 @@ async def test_attachment_download_and_export_return_local_paths(server: FastMCP
     eml = await call(server, "save_message_mime", message_id="m1")
     assert eml["path"].endswith(".eml")
     artifact = await call(server, "export_messages", conversation_ids=["c-rel"])
-    assert Path(artifact["path"]).exists() and artifact["message_count"] == 3
+    assert Path(artifact["path"]).exists() and artifact["message_count"] == 4
 
 
 async def test_errors_are_reported_as_tool_errors(server: FastMCP) -> None:

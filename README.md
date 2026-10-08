@@ -94,7 +94,7 @@ messages return failed with detail `not sent`. Ambiguous writes are read back; f
 remains unknown. Writes are never retried. Delete moves to
 Deleted Items and never deletes permanently.
 
-Tools that accept mailbox scope use one `scope` object with independent keys: `scope.sent_items` (default true) includes Sent Items, Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; and `scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is always included; subfolders count with their parent, so a folder you deleted in Outlook counts as Deleted Items. True shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off. Web GET requests use `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests such as export carry a nested `scope` object. A non-default key is rejected when an operation cannot apply it.
+Tools that accept mailbox scope use one `scope` object with independent keys: `scope.sent_items` (default true) includes Sent Items, Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; and `scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is always included; subfolders count with their parent, so a folder you deleted in Outlook counts as Deleted Items. True shows more mail, false filters more. The UI's "Invites / RSVPs" switch starts off. Web GET requests use `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests such as export carry a nested `scope` object. Outside export, an operation rejects a non-default key it cannot apply. Export scope only narrows folder/date-window selections; selected conversations and explicit messages stay whole.
 
 **Out of reach:** hidden folders, and items outside the mail folders (Teams meeting records,
 settings and other non-mail items), are never listed, searched, counted, grouped into conversations
@@ -106,11 +106,12 @@ server's count for the window (copies counted separately, and meeting mail inclu
 `scope.meeting_mail=false` hides it).
 
 `export_messages` takes conversations, message ids and/or a folder/date window (`since`, `until`,
-`folder`), narrowed by `scope`, up to 2,000 messages (`limit` lowers that). `format="jsonl"` writes one
-JSON record per message for agents; `txt` is for people. Every exported message carries its message,
+`folder`), up to 2,000 messages (`limit` lowers that). Scope narrows only folder/date-window
+selections. Conversation and explicit message selections stay whole; scope alone is not a selection.
+`format="jsonl"` writes one JSON record per message for agents; `txt` is for people. Every exported message carries its message,
 conversation and Internet ids, and a message that exists in several folders is exported once, with
 `also_in` naming the other folders. Messages selected by id are exported whatever their folder (also
-hidden folders and Sync Issues), while conversations and folder/date windows keep the scope rules above; ids that
+hidden folders and Sync Issues); folder/date windows follow the scope rules above; ids that
 are copies of a selected message are merged with it. They are read from the server: if any of them
 cannot be read (deleted or moved meanwhile, or still throttled), the export fails, writes nothing and
 says which ones and what to do. Anything else that cannot be exported (a body, an attachment, an

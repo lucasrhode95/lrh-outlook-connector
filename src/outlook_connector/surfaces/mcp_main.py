@@ -61,7 +61,8 @@ Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSV
 `scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is \
 always included; subfolders count with their parent. True shows more mail, false filters more. Use \
 `scope.sent_items=false` for "the latest mail I received", including mail that rules filed into \
-other folders. A tool rejects a non-default scope key it cannot apply. \
+other folders. Export scope filters folder/date windows only; selected conversations \
+and message ids stay whole. \
 coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, grouped into conversations \
@@ -87,10 +88,12 @@ by folder (full pages, a bit slower) and coverage.notes says so: pass that note 
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
 path for you to read with your own file tools. save_message_mime saves the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
-are included and merged. Folder/date-window and conversation selections keep the usual scope rules.
+are included and merged. Folder/date-window selections follow scope; conversation selections stay whole. \
+Scope alone does not select anything.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
 and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
-2,000 messages (`limit` lowers that). For a large period, prefer \
+2,000 messages (`limit` lowers that). Scope alone is not a selection; conversation and message \
+selections stay whole. For a large period, prefer \
 a folder/date-window export over enumerating ids. format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
@@ -340,9 +343,7 @@ def build_server(context: AppContext) -> FastMCP:
         ] = None,
         folder: Annotated[
             str | None,
-            Field(
-                description="Folder/date-window selection: folder path, alias or id (default: whole mailbox)."
-            ),
+            Field(description="Folder path, alias or id; omit for a whole-mailbox date-window selection."),
         ] = None,
         limit: Annotated[
             int,
@@ -356,7 +357,8 @@ def build_server(context: AppContext) -> FastMCP:
         """Export conversations, messages and/or a folder/date window to one local file; returns its path.
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
-        are exported once. The result counts what was left out and lists messages without a body.
+        are exported once. Scope narrows only folder/date-window selections; selected conversations and
+        messages stay whole. Scope alone is not a selection. The result counts exclusions and body gaps.
         With attachments, inline images are included when their CID is found in the rendered body;
         if the content id or body cannot be read, the image is included rather than silently dropped.
         """
