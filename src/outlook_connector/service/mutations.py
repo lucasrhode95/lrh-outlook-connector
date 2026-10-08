@@ -29,7 +29,12 @@ from outlook_connector.domain.models import (
     MutationResult,
     Scope,
 )
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, FolderTarget, MailWriter
+from outlook_connector.remote.ports import (
+    MAX_CONCURRENT_REQUESTS,
+    FetchedSummaries,
+    FolderTarget,
+    MailWriter,
+)
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.scope import validate_scope
 
@@ -58,6 +63,7 @@ class Mutations:
         explicit = _message_ids(message_ids, allow_empty=bool(conversation_ids))
         ids = list(explicit)
         notes = []
+        conversation_summaries: dict[str, MessageSummary] = {}
         selected_conversations = list(dict.fromkeys(conversation_ids or []))
         for start in range(0, len(selected_conversations), MAX_CONCURRENT_REQUESTS):
             batch = selected_conversations[start : start + MAX_CONCURRENT_REQUESTS]
@@ -65,7 +71,8 @@ class Mutations:
                 *(self._conversation(conversation_id, scope=scope) for conversation_id in batch)
             )
             for conversation_id, (expanded, truncated) in zip(batch, expanded_conversations, strict=True):
-                ids += expanded
+                ids.extend(summary.id for summary in expanded)
+                conversation_summaries.update({summary.id: summary for summary in expanded})
                 if truncated:
                     notes.append(
                         f"Conversation {conversation_id} was truncated at the 1,000-message listing limit; "
@@ -80,6 +87,7 @@ class Mutations:
             lambda m: m.is_read is is_read,
             lambda chunk: self.writer.set_read(chunk, is_read),
             continue_on_error=continue_on_error,
+            known=conversation_summaries,
         )
         if conversation_ids and len(ids) > MAX_MUTATION_ITEMS:
             result.results = [
@@ -142,7 +150,7 @@ class Mutations:
 
     # ---------------------------------------------------------------- shared flow
 
-    async def _conversation(self, conversation_id: str, *, scope: Scope) -> tuple[list[str], bool]:
+    async def _conversation(self, conversation_id: str, *, scope: Scope) -> tuple[list[MessageSummary], bool]:
         """Every message of the conversation in scope (all copies, not merged).
 
         Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
@@ -152,7 +160,7 @@ class Mutations:
         skip = await self.mailbox.exclusions(scope)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in items)
         return [
-            m.id
+            m
             for m in items
             if m.folder_id in folders and m.folder_id not in hidden and m.folder_id not in skip
         ], truncated
@@ -166,6 +174,7 @@ class Mutations:
         *,
         prepare: Callable[[], Awaitable[None]] | None = None,
         continue_on_error: bool = True,
+        known: dict[str, MessageSummary] | None = None,
     ) -> MutationResult:
         """Read state, send the change once per chunk, report a result per message.
 
@@ -175,14 +184,17 @@ class Mutations:
         """
         ids = message_ids
         self.check_account()
-        before = await self.mailbox.reader.get_summaries(ids)
-        folders, hidden = await self.mailbox.reach(m.folder_id for m in before.summaries.values() if m)
+        known = known or {}
+        unread = [mid for mid in ids if mid not in known]
+        before = await self.mailbox.reader.get_summaries(unread) if unread else FetchedSummaries()
+        summaries = known | before.summaries
+        folders, hidden = await self.mailbox.reach(m.folder_id for m in summaries.values() if m)
         if prepare:
             await prepare()
         results: dict[str, ItemResult] = {}
         pending: list[str] = []
         for mid in ids:
-            summary = before.summaries.get(mid)
+            summary = summaries.get(mid)
             if mid in before.failed:
                 results[mid] = ItemResult(id=mid, status="failed", detail=before.failed[mid])
             elif summary is None:

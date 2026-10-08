@@ -50,7 +50,7 @@ class Conversations:
         self.mailbox = mailbox
 
     async def messages(
-        self, conversation_id: str, *, scope: Scope
+        self, conversation_id: str, *, scope: Scope, merge_result: bool = True
     ) -> tuple[list[MessageSummary], dict[str, int], bool]:
         """All messages of the conversation, oldest first, what was left out by folder, and whether
         the server listing was truncated (more than MAX_CONVERSATION messages).
@@ -62,7 +62,9 @@ class Conversations:
         if not remote:
             raise NotFound(f"No conversation {conversation_id} on the server.")
         skip = await self.mailbox.exclusions(scope)
-        items, excluded = await self.mailbox.finish(sorted(remote, key=oldest_first), skip)
+        items, excluded = await self.mailbox.finish(
+            sorted(remote, key=oldest_first), skip, merge_result=merge_result
+        )
         return items, excluded, truncated
 
     async def get_conversation(

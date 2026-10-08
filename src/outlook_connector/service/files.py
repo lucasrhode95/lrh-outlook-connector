@@ -6,9 +6,14 @@ for a week, like exports.
 
 from __future__ import annotations
 
+import tempfile
+from email.parser import BytesHeaderParser
+from email.policy import default
+from pathlib import Path
+
 from pydantic import BaseModel
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound, Upstream
+from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.service.export.attachments import safe_name
 from outlook_connector.service.localfiles import claim, kept_dir
 from outlook_connector.service.mailbox import Mailbox
@@ -52,32 +57,36 @@ class Files:
         return SavedFile(path=str(target), name=target.name, content_type=content_type, size=size)
 
     async def save_mime(self, message_id: str) -> SavedFile:
-        # The subject names the file: a summary read (no body, no attachment list) is enough.
-        """Save the original message (MIME) as a local .eml named after its subject.
+        """Save message MIME as a local .eml named from its Subject header.
 
         Entry point: the message id is taken as given; a message that is not on the server raises
-        NotFound.
+        NotFound. The MIME download supplies both the file and its subject, so no summary lookup is
+        needed.
         """
-        found = await self.mailbox.reader.get_summaries([message_id])
-        if message_id in found.failed:
-            raise Upstream(found.failed[message_id])
-        summary = found.summaries.get(message_id)
-        if summary is None:
-            raise NotFound(
-                f"Message {message_id} was not found; it may have been deleted, "
-                "moved out of reach, or the id may be wrong."
+        directory = kept_dir("downloads")
+        with tempfile.TemporaryDirectory(prefix=".mime-", dir=directory) as temp:
+            source = Path(temp) / "message.eml"
+            try:
+                size = await self.mailbox.reader.download_mime(message_id, source)
+            except NotFound:
+                raise NotFound(
+                    "The message MIME source was not found; the message may have been deleted, "
+                    "moved out of reach, or the id may be wrong."
+                ) from None
+            header = bytearray()
+            with source.open("rb") as stream:
+                for line in stream:
+                    header.extend(line)
+                    if line in (b"\r\n", b"\n"):
+                        break
+            subject = BytesHeaderParser(policy=default).parsebytes(bytes(header)).get("Subject")
+            target = claim(
+                directory,
+                safe_name(str(subject) if subject else None, fallback="message") + ".eml",
             )
-        subject = summary.subject
-        target = claim(kept_dir("downloads"), safe_name(subject, fallback="message") + ".eml")
-        try:
-            size = await self.mailbox.reader.download_mime(message_id, target)
-        except NotFound:
-            target.unlink(missing_ok=True)
-            raise NotFound(
-                "The message MIME source was not found; the message may have been deleted, "
-                "moved out of reach, or the id may be wrong."
-            ) from None
-        except Exception:
-            target.unlink(missing_ok=True)
-            raise
+            try:
+                source.replace(target)
+            except Exception:
+                target.unlink(missing_ok=True)
+                raise
         return SavedFile(path=str(target), name=target.name, content_type="message/rfc822", size=size)
