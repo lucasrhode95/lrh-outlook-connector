@@ -8,7 +8,21 @@ const vm = require('node:vm');
 const source = readFileSync(join(__dirname, '../../src/outlook_connector/surfaces/web/static/app.js'), 'utf8');
 
 class Element {
-  constructor() { this.textContent = ''; this.children = []; this.checked = false; this.value = ''; }
+  constructor() {
+    this.textContent = ''; this.children = []; this.checked = false; this.value = '';
+    const classes = new Set();
+    this.classList = {
+      add: (...names) => names.forEach(name => classes.add(name)),
+      remove: (...names) => names.forEach(name => classes.delete(name)),
+      contains: name => classes.has(name),
+      toggle: (name, force) => {
+        const shouldAdd = force ?? !classes.has(name);
+        if (shouldAdd) classes.add(name);
+        else classes.delete(name);
+        return shouldAdd;
+      },
+    };
+  }
   addEventListener() {}
   setAttribute() {}
   append(...children) { this.children.push(...children); }
