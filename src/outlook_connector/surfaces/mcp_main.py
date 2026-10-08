@@ -218,7 +218,7 @@ def build_server(context: AppContext) -> FastMCP:
         ] = None,
         since: Annotated[datetime | None, Field(description="Inclusive lower bound (ISO 8601).")] = None,
         until: Annotated[datetime | None, Field(description="Inclusive upper bound (ISO 8601).")] = None,
-        limit: Annotated[int, Field(ge=1, le=200)] = 25,
+        limit: Annotated[int, Field(description="Page size from 1 to 200.")] = 25,
         cursor: str | None = None,
         scope: Scope = DEFAULT_SCOPE,
         include_total: Annotated[
@@ -249,7 +249,7 @@ def build_server(context: AppContext) -> FastMCP:
         since: Annotated[datetime | None, Field(description="Inclusive lower bound (ISO 8601).")] = None,
         until: Annotated[datetime | None, Field(description="Inclusive upper bound (ISO 8601).")] = None,
         folder: Annotated[str | None, Field(description="Folder path, alias or id.")] = None,
-        limit: Annotated[int, Field(ge=1, le=100)] = 25,
+        limit: Annotated[int, Field(description="Requested hit count from 1 to 100.")] = 25,
         cursor: str | None = None,
         scope: Scope = DEFAULT_SCOPE,
         detail: DetailLevel = "compact",
@@ -273,7 +273,9 @@ def build_server(context: AppContext) -> FastMCP:
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "unique",
         scope: Scope = DEFAULT_SCOPE,
-        max_chars: Annotated[int, Field(ge=1000, le=400_000)] = 40_000,
+        max_chars: Annotated[
+            int, Field(description="Maximum body size from 1 to 400000 characters.")
+        ] = 40_000,
         cursor: Annotated[
             str | None,
             Field(description="Continuation; it restores the original options, which are then ignored."),
@@ -293,8 +295,10 @@ def build_server(context: AppContext) -> FastMCP:
     async def get_message(
         message_id: str,
         body: BodyKind = "unique",
-        offset: Annotated[int, Field(ge=0)] = 0,
-        max_chars: Annotated[int, Field(ge=1000, le=200_000)] = 20_000,
+        offset: Annotated[int, Field(description="Body character offset; must be 0 or greater.")] = 0,
+        max_chars: Annotated[
+            int, Field(description="Maximum body size from 1 to 200000 characters.")
+        ] = 20_000,
     ) -> MessageContent:
         """One message's body (unique/full/html) with offset continuation, plus attachment metadata."""
         return await (await services()).mailbox.get_message(
@@ -351,9 +355,9 @@ def build_server(context: AppContext) -> FastMCP:
         limit: Annotated[
             int,
             Field(
-                ge=1,
-                le=EXPORT_MAX_MESSAGES,
-                description="Refuse the export if the selection holds more messages than this.",
+                description=(
+                    f"Selection limit from 1 to {EXPORT_MAX_MESSAGES}; oversized exports are refused."
+                ),
             ),
         ] = EXPORT_MAX_MESSAGES,
     ) -> ExportArtifact:

@@ -8,7 +8,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-from pydantic import ValidationError
 
 from outlook_connector.domain.errors import (
     DownloadLimitExceeded,
@@ -17,7 +16,14 @@ from outlook_connector.domain.errors import (
     NotFound,
     Throttled,
 )
-from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, MessageSummary, Recipient, Scope
+from outlook_connector.domain.models import (
+    EXCLUSION_TEXT,
+    EXPORT_MAX_MESSAGES,
+    ExportRequest,
+    MessageSummary,
+    Recipient,
+    Scope,
+)
 from outlook_connector.remote.graph import MAX_DOWNLOAD_BYTES, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, BodyFormat, FetchedMessages
@@ -472,9 +478,15 @@ async def test_export_limit_is_enforced_with_counts(exports: Exports) -> None:
         await exports.export(ExportRequest(message_ids=["m1", "m5"], limit=1))
 
 
-def test_export_limit_cannot_exceed_the_hard_cap() -> None:
-    with pytest.raises(ValidationError):
-        ExportRequest(message_ids=["m1"], limit=2001)
+@pytest.mark.parametrize("limit", [0, -1, EXPORT_MAX_MESSAGES + 1])
+async def test_export_limit_is_validated_by_the_service(
+    exports: Exports, fake: FakeGraph, limit: int
+) -> None:
+    fake.calls.clear()
+    request = ExportRequest(message_ids=["m1"], limit=limit)
+    with pytest.raises(InvalidRequest, match="limit must be between 1 and 2000"):
+        await exports.export(request)
+    assert fake.calls == []
 
 
 async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Exports, fake: FakeGraph) -> None:
