@@ -10,6 +10,7 @@ const source = readFileSync(join(__dirname, '../../src/outlook_connector/surface
 class Element {
   constructor() {
     this.textContent = ''; this.children = []; this.checked = false; this.value = '';
+    this.attributes = new Map(); this.disabled = false;
     const classes = new Set();
     this.classList = {
       add: (...names) => names.forEach(name => classes.add(name)),
@@ -24,7 +25,10 @@ class Element {
     };
   }
   addEventListener() {}
-  setAttribute() {}
+  setAttribute(name, value) {
+    this.attributes.set(name, value);
+    if (name === 'disabled') this.disabled = true;
+  }
   append(...children) { this.children.push(...children); }
   replaceChildren(...children) { this.children = children; }
 }
@@ -100,4 +104,31 @@ test('switching messages keeps the newest body when an older answer arrives late
   await readingOld;
   assert.equal(ui.nodes.get('reader-body').textContent, 'Newest');
   assert.equal(ui.calls.filter(u => u.pathname.endsWith('/old')).length, 1);
+});
+
+test('future calendar dates are disabled and cannot be selected', () => {
+  const ui = reader(async () => ({}));
+  const today = new Date();
+  const key = date => String(date.getFullYear()).padStart(4, '0') + '-' +
+    String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+  const todayKey = key(today);
+  ui.context.monthYear = today.getFullYear();
+  ui.context.monthIndex = today.getMonth();
+  vm.runInContext('picker.month = new Date(monthYear, monthIndex, 1); renderCalendar();', ui.context);
+  const todayButton = ui.nodes.get('calendar-days').children.find(day => day.attributes.get('data-date') === todayKey);
+  assert.ok(todayButton);
+  assert.equal(todayButton.disabled, false);
+
+  const tomorrow = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
+  const tomorrowKey = key(tomorrow);
+  ui.context.monthYear = tomorrow.getFullYear();
+  ui.context.monthIndex = tomorrow.getMonth();
+  vm.runInContext('picker.month = new Date(monthYear, monthIndex, 1); renderCalendar();', ui.context);
+  const tomorrowButton = ui.nodes.get('calendar-days').children.find(day => day.attributes.get('data-date') === tomorrowKey);
+  assert.ok(tomorrowButton);
+  assert.equal(tomorrowButton.disabled, true);
+  ui.context.selectedDate = tomorrowKey;
+  vm.runInContext('chooseDate(selectedDate);', ui.context);
+  assert.equal(ui.nodes.get('since').value, '');
+  assert.equal(ui.nodes.get('until').value, '');
 });
