@@ -748,7 +748,7 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !$("calendar").hidden) setCalendarOpen(false);
 });
 $("more").addEventListener("click", () => (state.mode === "search" ? runSearch : loadList)(false));
-$("export-view").addEventListener("click", () => runExport($("export-view"), viewRequest(), "export this view"));
+$("export-view").addEventListener("click", () => runExport($("export-view"), viewRequest(), "Export view"));
 $("refresh-folders").addEventListener("click", () => loadFolders(true));
 $("opt-full").addEventListener("change", () => state.activeMessage && openMessage(state.activeMessage));
 $("opt-deleted").addEventListener("change", () => (state.mode === "search" ? runSearch : loadList)(true));
