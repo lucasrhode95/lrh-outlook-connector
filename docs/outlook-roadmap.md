@@ -204,10 +204,10 @@ does not work, keep the existing per-image lookup and apply only the fail-open r
   anything. It narrows what a folder or date window selects; it does not create a selection and does
   not narrow conversations or explicit messages (conversations stay whole).
 
-**Root cause:** `ExportRequest.by_range` decides whether the window selection is active, but it
+**Root cause:** `ExportRequest.by_range` decides whether the folder/date selection is active, but it
 returns true not only for `since`, `until` or `folder`, but also when `include_sent_items=false` or
 `include_meeting_mail=false`. `Exports._select()` adds conversation messages, then calls
-`_select_range()` whenever `by_range` is true, then adds explicit messages. With no real window
+`_select_range()` whenever `by_range` is true, then adds explicit messages. With no real folder or date
 selector, `_select_range()` calls `list_messages(folder=None, since=None, until=None, ...)`, an
 unbounded reachable-mailbox listing.
 
