@@ -52,6 +52,7 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ports import FolderCount, MailReader
 from outlook_connector.service import cursors
+from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.scope import validate_scope
 from outlook_connector.store.db import Store
 
@@ -170,9 +171,16 @@ class Mailbox:
         folders = await self.folder_map()
         unknown = {fid for fid in folder_ids if fid and fid not in folders} - self._outside
         if unknown:
-            await self._refresh_folders()
-            folders = await self.folder_map()
-            self._outside |= {fid for fid in unknown if fid not in folders}
+            async with self._folder_lock:
+                # Another expansion may already have refreshed and classified these ids.
+                assert self._folders is not None
+                folders = self._folders
+                unknown -= folders.keys() | self._outside
+                if unknown:
+                    await self._fetch_folders()
+                    assert self._folders is not None
+                    folders = self._folders
+                    self._outside |= {fid for fid in unknown if fid not in folders}
         hidden = {fid for fid, category in self._categories.items() if category == "hidden"}
         return folders, hidden
 
@@ -393,9 +401,9 @@ class Mailbox:
     ) -> tuple[list[MessageSummary], dict[str, int]]:
         """The newest ``limit`` messages across the folders, merged newest first, and each folder's
         new position (folders with nothing left are dropped). Each folder is read from its position
-        in count-weighted chunks, so busy folders often need just one read. The count batch's newest
-        dates defer folders that cannot contribute; missing dates stay eligible. Reads are parallel
-        within the transport's existing limit of 4.
+        in count-weighted chunks, so busy folders often need just one read. Every eligible folder
+        gets a current head read before choosing messages; eventually consistent count dates are
+        not ordering bounds. Reads are parallel within the transport's existing limit of 4.
 
         Assumes (not re-checked here): ``offsets`` holds only in-scope folders (``list_messages`` drops
         left-out, hidden and deleted ones), and ``limit`` and the window were validated by
@@ -420,12 +428,6 @@ class Mailbox:
             fid: min(limit, max(1, ceil(limit * weight / total_weight) + 1))
             for fid, weight in weights.items()
         }
-        upper_bounds: dict[str, float | None] = {}
-        for fid in offsets:
-            folder_count = folder_counts.get(fid) if folder_counts is not None else None
-            newest = folder_count.newest_received_at if folder_count is not None else None
-            upper_bounds[fid] = newest.timestamp() if newest is not None else None
-
         gone: set[str] = set()
 
         async def fill(fid: str) -> None:
@@ -437,53 +439,18 @@ class Mailbox:
             except NotFound:  # the folder was deleted meanwhile: its mail is gone or in Deleted Items
                 gone.add(fid)
                 more[fid] = False
-                upper_bounds[fid] = float("-inf")
                 return
             buffers[fid] += page
             read[fid] += len(page)
             more[fid] = bool(link and page)
-            upper_bounds[fid] = _stamp(page[-1]) if page else float("-inf")
             chunk[fid] = size * 2
 
         taken: list[MessageSummary] = []
 
-        def cutoff() -> float | None:
-            known = taken + [message for buffer in buffers.values() for message in buffer]
-            if len(known) < limit:
-                return None
-            ordered = sorted(known, key=_stamp, reverse=True)
-            return _stamp(ordered[limit - 1])
-
         while len(taken) < limit:
             empty = [fid for fid in buffers if not buffers[fid] and more[fid]]
             if empty:
-                current_cutoff = cutoff()
-                if current_cutoff is None:
-                    pending = sorted(
-                        empty,
-                        key=lambda fid: (
-                            upper_bounds[fid] is None,
-                            upper_bounds[fid] if upper_bounds[fid] is not None else float("inf"),
-                            weights[fid],
-                        ),
-                        reverse=True,
-                    )
-                    selected: list[str] = []
-                    expected = len(taken) + sum(len(buffer) for buffer in buffers.values())
-                    for fid in pending:
-                        selected.append(fid)
-                        expected += chunk[fid]
-                        if expected >= limit:
-                            break
-                else:
-                    selected = []
-                    for fid in empty:
-                        newest = upper_bounds[fid]
-                        if newest is None or newest >= current_cutoff:
-                            selected.append(fid)
-                if selected:
-                    await asyncio.gather(*(fill(fid) for fid in selected))
-                    continue
+                await gather_cancel_on_error(*(fill(fid) for fid in empty))
             heads = [fid for fid in buffers if buffers[fid]]
             if not heads:
                 break
