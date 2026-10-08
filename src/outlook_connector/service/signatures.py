@@ -285,8 +285,9 @@ class _PassiveSignatureHtml(HTMLParser):
             if attribute.group("name").lower() != "src":
                 continue
             source = attribute.group("value")
+            decoded = unescape(source.strip("\"'"))
             if (
-                unescape(source.strip("\"'")).lower().startswith("data:image/")
+                decoded.strip().lower().startswith("data:image/")
                 and _DATA_IMAGE.fullmatch(f"src={source}") is None
             ):
                 raise InvalidRequest(

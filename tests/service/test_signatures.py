@@ -237,11 +237,20 @@ async def test_write_account_must_match_the_bound_read_account(fake: FakeGraph) 
 
 
 @pytest.mark.parametrize("operation", ["create", "update", "draft"])
-async def test_unquoted_signature_data_image_is_rejected_before_writing(
-    services: tuple[Signatures, Writes], fake: FakeGraph, operation: str
+@pytest.mark.parametrize(
+    "source",
+    [
+        "data:image/png;base64,YWJj",
+        '" data:image/png;base64,YWJj"',
+        '"&#32;data:image/png;base64,YWJj"',
+        '"data:image/png;base64,YWJj "',
+    ],
+)
+async def test_signature_image_source_whitespace_is_rejected_before_writing(
+    services: tuple[Signatures, Writes], fake: FakeGraph, operation: str, source: str
 ) -> None:
     signatures, writes = services
-    html = "<p>Logo</p><img src=data:image/png;base64,YWJj>"
+    html = f"<p>Logo</p><img src={source}>"
     fake.signature_contents["Logo"] = {"htm": html, "txt": "Logo"}
     fake.signature_new_default = "Logo"
     with pytest.raises(InvalidRequest, match="quoted src"):
