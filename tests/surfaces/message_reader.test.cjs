@@ -11,6 +11,7 @@ class Element {
   constructor() {
     this.textContent = ''; this.children = []; this.checked = false; this.value = '';
     this.attributes = new Map(); this.disabled = false;
+    this.listeners = new Map();
     const classes = new Set();
     this.classList = {
       add: (...names) => names.forEach(name => classes.add(name)),
@@ -24,7 +25,14 @@ class Element {
       },
     };
   }
-  addEventListener() {}
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+  dispatch(type, event) {
+    for (const listener of this.listeners.get(type) || []) listener(event);
+  }
   querySelector() { return { focus() {} }; }
   setAttribute(name, value) {
     this.attributes.set(name, value);
@@ -42,6 +50,7 @@ function reader(handler, full = false) {
   };
   node('opt-full').checked = full;
   const calls = [];
+  const timeouts = [];
   const context = vm.createContext({
     document: {
       querySelector: () => ({ content: 'synthetic-token' }),
@@ -51,6 +60,7 @@ function reader(handler, full = false) {
       addEventListener() {},
     },
     Node: Element, URLSearchParams, setInterval() {},
+    setTimeout: callback => { timeouts.push(callback); return timeouts.length; },
     fetch: async (path, options) => {
       if (path === '/api/status') return { ok: true, json: async () => ({ signed_in: { graph: false } }) };
       assert.equal(options.headers['X-Session-Token'], 'synthetic-token');
@@ -63,7 +73,7 @@ function reader(handler, full = false) {
   vm.runInContext(source, context);
   // Isolate reader behavior from list rendering; no production test seams.
   vm.runInContext('render = () => {};', context);
-  return { context, nodes, calls, open: (id) => context.openMessage(id) };
+  return { context, nodes, calls, timeouts, open: (id) => context.openMessage(id) };
 }
 
 function part(text, id = 'mail') {
@@ -150,4 +160,34 @@ test('selecting an end date leaves the date picker open', () => {
   assert.equal(ui.nodes.get('until').value, end);
   assert.equal(ui.nodes.get('calendar').hidden, false);
   assert.match(ui.nodes.get('calendar-hint').textContent, /Range selected/);
+});
+
+test('wheel and horizontal swipes navigate calendar months in the expected direction', () => {
+  const ui = reader(async () => ({}));
+  const today = new Date();
+  const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthName = date => date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  ui.context.monthYear = firstOfMonth.getFullYear();
+  ui.context.monthIndex = firstOfMonth.getMonth();
+  vm.runInContext('picker.month = new Date(monthYear, monthIndex, 1); renderCalendar();', ui.context);
+  const calendar = ui.nodes.get('calendar');
+  calendar.hidden = false;
+  const monthLabel = () => ui.nodes.get('calendar-month').textContent;
+  let prevented = false;
+
+  calendar.dispatch('wheel', { deltaY: -80, preventDefault() { prevented = true; } });
+  const previousMonth = new Date(firstOfMonth.getFullYear(), firstOfMonth.getMonth() - 1, 1);
+  assert.equal(monthLabel(), monthName(previousMonth));
+  assert.equal(prevented, true);
+  ui.timeouts.shift()();
+  calendar.dispatch('wheel', { deltaY: 80, preventDefault() {} });
+  assert.equal(monthLabel(), monthName(firstOfMonth));
+  ui.timeouts.shift()();
+
+  calendar.dispatch('touchstart', { touches: [{ clientX: 100, clientY: 50 }] });
+  calendar.dispatch('touchend', { changedTouches: [{ clientX: 160, clientY: 55 }] });
+  assert.equal(monthLabel(), monthName(previousMonth));
+  calendar.dispatch('touchstart', { touches: [{ clientX: 160, clientY: 55 }] });
+  calendar.dispatch('touchend', { changedTouches: [{ clientX: 100, clientY: 50 }] });
+  assert.equal(monthLabel(), monthName(firstOfMonth));
 });
