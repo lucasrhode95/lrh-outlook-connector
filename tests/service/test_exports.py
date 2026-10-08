@@ -19,6 +19,7 @@ from outlook_connector.domain.errors import (
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
+    ExclusionReason,
     ExportRequest,
     MessageSummary,
     Recipient,
@@ -128,7 +129,7 @@ async def test_many_selected_conversations_expand_concurrently_with_transport_li
 
     async def capture(
         conversation_id: str, *, scope: Scope, merge_result: bool = True
-    ) -> tuple[list[MessageSummary], dict[str, int], bool]:
+    ) -> tuple[list[MessageSummary], dict[ExclusionReason, int], bool]:
         nonlocal active, peak
         active += 1
         peak = max(peak, active)
