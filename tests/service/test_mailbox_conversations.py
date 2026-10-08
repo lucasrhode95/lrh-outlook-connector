@@ -13,6 +13,7 @@ from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import Scope
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
+from outlook_connector.remote.ports import FolderCount
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service import cursors
 from outlook_connector.service.conversations import Conversations, base_subject
@@ -636,6 +637,38 @@ async def test_a_per_folder_cursor_keeps_each_folders_position(mailbox: Mailbox,
     state = cursors.decode(page.cursor, "list_messages")
     assert state["link"] is None
     assert state["offsets"] == {"f-inbox": 1, "f-sent": 1, "f-archive": 0, "f-proj": 1, "f-project": 0}
+
+
+@pytest.mark.parametrize(("missing_folder", "expected_count_calls"), [(None, 1), ("f-inbox", 2)])
+async def test_per_folder_include_total_reuses_complete_counts(
+    mailbox: Mailbox,
+    fake: FakeGraph,
+    monkeypatch: pytest.MonkeyPatch,
+    missing_folder: str | None,
+    expected_count_calls: int,
+) -> None:
+    _junk_heavy(fake)
+    count_calls: list[tuple[str, ...]] = []
+    original = mailbox.reader.count_messages
+
+    async def capture_counts(
+        *,
+        folder_ids: list[str],
+        since: datetime | None,
+        until: datetime | None,
+    ) -> dict[str, FolderCount]:
+        count_calls.append(tuple(folder_ids))
+        counts = await original(folder_ids=folder_ids, since=since, until=until)
+        if len(count_calls) == 1 and missing_folder is not None:
+            counts.pop(missing_folder, None)
+        return counts
+
+    monkeypatch.setattr(mailbox.reader, "count_messages", capture_counts)
+    page = await mailbox.list_messages(limit=10, include_total=True)
+
+    assert len(count_calls) == expected_count_calls
+    assert page.coverage.server_total == 12
+    assert page.coverage.excluded == {"deleted_or_junk": 41}
 
 
 async def test_a_per_folder_listing_reads_only_folders_with_mail_in_the_window(
