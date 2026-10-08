@@ -121,14 +121,14 @@ async def test_many_selected_conversations_expand_concurrently_with_transport_li
     original = exports.conversations.messages
 
     async def capture(
-        conversation_id: str, *, scope: Scope
+        conversation_id: str, *, scope: Scope, merge_result: bool = True
     ) -> tuple[list[MessageSummary], dict[str, int], bool]:
         nonlocal active, peak
         active += 1
         peak = max(peak, active)
         try:
             await asyncio.sleep(0.001)
-            return await original(conversation_id, scope=scope)
+            return await original(conversation_id, scope=scope, merge_result=merge_result)
         finally:
             active -= 1
 
@@ -617,16 +617,14 @@ async def test_downloads_never_share_a_file(exports: Exports) -> None:
     assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()
 
 
-async def test_save_mime_names_the_file_after_the_subject_from_one_light_read(
-    exports: Exports, fake: FakeGraph
-) -> None:
+async def test_save_mime_names_the_file_from_its_subject_header(exports: Exports, fake: FakeGraph) -> None:
     files = Files(exports.mailbox)
     fake.calls.clear()
     saved = await files.save_mime("m3")
     assert saved.name == "RE_ Relatório de exemplo semanal.eml"
     assert Path(saved.path).read_bytes().startswith(b"Subject:")
-    # one summary read (in a $batch) and the download: no body, no attachment listing
-    assert fake.calls == ["POST /v1.0/$batch", "GET /v1.0/me/messages/m3/$value"]
+    # the MIME download supplies its Subject header: no summary or body lookup
+    assert fake.calls == ["GET /v1.0/me/messages/m3/$value"]
     with pytest.raises(NotFound):
         await files.save_mime("gone")
 
@@ -643,6 +641,38 @@ async def test_identical_attachment_files_are_stored_once(exports: Exports, fake
     stem = "2026-10-01 Status"
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/logo.png"] and artifact.attachment_files == 1
     assert zip_text(artifact.path, f"{stem}.txt").count(f"Attachment: {stem}/logo.png") == 2
+
+
+async def test_export_merges_copies_once_after_combining_selection_sources(
+    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake.add(
+        FakeMessage("copy-in", "Synthetic copy", "f-inbox", "2026-10-06T09:00:00Z",
+                    conversation="c-copy", internet_id="<copy@synthetic.invalid>")
+    )  # fmt: skip
+    fake.add(
+        FakeMessage("copy-sent", "Synthetic copy", "f-sent", "2026-10-06T09:00:01Z",
+                    conversation="c-copy", internet_id="<copy@synthetic.invalid>")
+    )  # fmt: skip
+    merges: list[bool] = []
+    original = exports.mailbox.finish
+
+    async def capture(items, skip=None, *, merge_result: bool = True):  # type: ignore[no-untyped-def]
+        merges.append(merge_result)
+        return await original(items, skip, merge_result=merge_result)
+
+    monkeypatch.setattr(exports.mailbox, "finish", capture)
+    artifact = await exports.export(
+        ExportRequest(
+            conversation_ids=["c-copy"],
+            since=datetime(2026, 10, 6, tzinfo=UTC),
+            until=datetime(2026, 10, 6, 23, 59, tzinfo=UTC),
+            format="jsonl",
+        )
+    )
+    records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
+    assert merges and not any(merges)
+    assert artifact.message_count == 1 and len(records) == 1 and len(records[0]["also_in"]) == 1
 
 
 async def test_copies_on_different_pages_are_exported_once_naming_both_folders(
@@ -723,7 +753,7 @@ async def test_folder_date_scope_stays_filtered_but_explicit_hidden_id_is_includ
     assert "requested" in {r["id"] for r in records} and "unrequested" not in {r["id"] for r in records}
 
 
-async def test_mime_disappearing_after_summary_has_neutral_not_found_text(
+async def test_missing_mime_has_neutral_not_found_text(
     exports: Exports, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def missing(*args, **kwargs):  # type: ignore[no-untyped-def]

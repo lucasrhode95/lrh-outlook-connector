@@ -254,6 +254,22 @@ async def test_account_mismatch_blocks_all_writes(fake: FakeGraph, tmp_path: Pat
     assert not fake.ows_calls
 
 
+async def test_reply_history_check_reuses_fetched_text_and_draft_html(
+    writes: Writes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+    original = writes.mailbox.reader.get_messages
+
+    async def capture(*args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(writes.mailbox.reader, "get_messages", capture)
+    result = await writes.create_draft(reply())
+    assert result.history_intact is True and calls == 0
+
+
 async def test_reply_history_findings(
     writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
