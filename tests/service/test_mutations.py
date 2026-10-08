@@ -74,6 +74,21 @@ async def test_conversation_read_state_covers_its_messages_in_scope(
     assert not fake.messages["m4"].is_read
 
 
+async def test_conversation_read_reuses_expansion_summaries(
+    mutations: Mutations, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+    original = mutations.mailbox.reader.get_summaries
+
+    async def capture(message_ids: list[str]):
+        calls.append(message_ids)
+        return await original(message_ids)
+
+    monkeypatch.setattr(mutations.mailbox.reader, "get_summaries", capture)
+    await mutations.set_read(["m5"], True, conversation_ids=["c-rel"])
+    assert calls == [["m5"]]
+
+
 async def test_conversation_read_state_expands_concurrently_with_transport_limit(
     mutations: Mutations, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:

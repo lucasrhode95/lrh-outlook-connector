@@ -16,6 +16,7 @@ from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ports import FolderCount
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service import cursors
+from outlook_connector.service import mailbox as mailbox_service
 from outlook_connector.service.conversations import Conversations, base_subject
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.store.db import Store
@@ -53,6 +54,22 @@ async def test_resolve_folder_path_and_unknown(mailbox: Mailbox) -> None:
     assert (await mailbox.resolve_folder("inbox/projects/project alpha")).id == "f-project"
     with pytest.raises(InvalidRequest, match="Unknown folder"):
         await mailbox.resolve_folder("Nope")
+
+
+async def test_folder_categories_are_derived_once_per_folder_refresh(
+    mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = 0
+    original = mailbox_service.folder_categories
+
+    def count(folders):
+        nonlocal calls
+        calls += 1
+        return original(folders)
+
+    monkeypatch.setattr(mailbox_service, "folder_categories", count)
+    await mailbox.list_messages()
+    assert calls == 1
 
 
 # ---------------------------------------------------------------- listing

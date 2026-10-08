@@ -79,6 +79,7 @@ class Mailbox:
         self.reader = reader
         self.store = store
         self._folders: dict[str, Folder] | None = None
+        self._categories: dict[str, str] = {}
         self._folders_at = 0.0  # time.monotonic() when _folders was last loaded
         self._folder_lock = asyncio.Lock()  # one folder refresh at a time per process
         self._outside: set[str] = set()  # folder ids a refresh confirmed are outside the mail folders
@@ -101,7 +102,7 @@ class Mailbox:
                 cached = await self._fetch_folders()
             else:
                 self._keep(cached)
-        categories = folder_categories(self._folders or {})
+        categories = self._categories
         visible = [f for f in cached if categories.get(f.id) != "hidden"]
         return sorted(visible, key=lambda f: f.path.lower())
 
@@ -117,6 +118,7 @@ class Mailbox:
 
     def _keep(self, folders: list[Folder]) -> None:
         self._folders = {f.id: f for f in folders}
+        self._categories = folder_categories(self._folders)
         self._folders_at = time.monotonic()
 
     async def folder_map(self) -> dict[str, Folder]:
@@ -132,10 +134,10 @@ class Mailbox:
         An unknown name refreshes the folder list once, so folders created meanwhile are found.
         Hidden folders are refused: they and their items are out of reach.
         """
-        found = _resolve(ref, await self.folder_map())
+        found = _resolve(ref, await self.folder_map(), self._categories)
         if found is None:
             await self._refresh_folders()
-            found = _resolve(ref, await self.folder_map())
+            found = _resolve(ref, await self.folder_map(), self._categories)
         if found is None:
             raise InvalidRequest(f"Unknown folder '{ref}'. Use list_folders to see folder paths.")
         return found
@@ -154,7 +156,8 @@ class Mailbox:
         left_out = set() if scope.deleted_items else {"deleted_or_junk"}
         if not scope.sent_items:
             left_out.add("outgoing")
-        categories = folder_categories(await self.folder_map())
+        await self.folder_map()
+        categories = self._categories
         return {folder_id: category for folder_id, category in categories.items() if category in left_out}
 
     async def reach(self, folder_ids: Iterable[str | None]) -> tuple[dict[str, Folder], set[str]]:
@@ -170,18 +173,25 @@ class Mailbox:
             await self._refresh_folders()
             folders = await self.folder_map()
             self._outside |= {fid for fid in unknown if fid not in folders}
-        hidden = {fid for fid, category in folder_categories(folders).items() if category == "hidden"}
+        hidden = {fid for fid, category in self._categories.items() if category == "hidden"}
         return folders, hidden
 
-    async def decorate(self, items: list[MessageSummary]) -> list[MessageSummary]:
-        folders = await self.folder_map()
+    async def decorate(
+        self, items: list[MessageSummary], *, folders: dict[str, Folder] | None = None
+    ) -> list[MessageSummary]:
+        if folders is None:
+            folders = await self.folder_map()
         for item in items:
             folder = folders.get(item.folder_id or "")
             item.folder = folder.path if folder else None
         return items
 
     async def finish(
-        self, items: Iterable[MessageSummary], skip: dict[str, str] | None = None
+        self,
+        items: Iterable[MessageSummary],
+        skip: dict[str, str] | None = None,
+        *,
+        merge_result: bool = True,
     ) -> tuple[list[MessageSummary], dict[str, int]]:
         """Apply folder exclusions, fill folder paths and merge copies. Returns (items, excluded counts).
 
@@ -204,8 +214,9 @@ class Mailbox:
                 excluded[reason] = excluded.get(reason, 0) + 1
             else:
                 kept.append(item)
-        outgoing = {f.id for f in (await self.folder_map()).values() if f.well_known in OUTGOING_FOLDERS}
-        return merge_copies(await self.decorate(kept), outgoing), excluded
+        outgoing = {f.id for f in folders.values() if f.well_known in OUTGOING_FOLDERS}
+        decorated = await self.decorate(kept, folders=folders)
+        return (merge_copies(decorated, outgoing) if merge_result else decorated), excluded
 
     # ---------------------------------------------------------------- listing
 
@@ -221,6 +232,7 @@ class Mailbox:
         include_total: bool = False,
         detail: Detail = "full",
         skip_returned_copies: bool = True,
+        merge_result: bool = True,
     ) -> MessagePage:
         """Newest first. Scope rules in the module docstring; a named folder is listed as a whole.
 
@@ -284,7 +296,7 @@ class Mailbox:
                 if not link or any(kept(m) for m in page):
                     break  # a page that exclusions empty entirely is skipped, within bounds
             complete = link is None
-        items, excluded = await self.finish(fetched, skip)
+        items, excluded = await self.finish(fetched, skip, merge_result=merge_result)
         excluded.update(window_excluded)  # full-window counts only on the first per-folder page
         items = _without_meetings(items, excluded) if not scope.meeting_mail else items
         items, seen = _skip_seen(items, state) if skip_returned_copies else (items, [])
@@ -354,7 +366,7 @@ class Mailbox:
         """
         folders = await self.folder_map()
         in_scope = [fid for fid in folders if fid not in left_out]
-        categories = folder_categories(folders)
+        categories = self._categories
         excluded_folders = [
             fid for fid in folders if fid in left_out and categories.get(fid) == "deleted_or_junk"
         ]
@@ -818,9 +830,8 @@ def _ancestry(folder: Folder, folders: dict[str, Folder]) -> list[Folder]:
     return chain
 
 
-def _resolve(ref: str, folders: dict[str, Folder]) -> Folder | None:
+def _resolve(ref: str, folders: dict[str, Folder], categories: dict[str, str]) -> Folder | None:
     """Match among the visible folders; a reference to a hidden folder is refused."""
-    categories = folder_categories(folders)
     visible = {fid: f for fid, f in folders.items() if categories.get(fid) != "hidden"}
     found = _match_folder(ref, visible)
     if found is None and any(_mentions(ref, f) for fid, f in folders.items() if fid not in visible):

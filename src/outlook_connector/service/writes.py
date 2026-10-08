@@ -51,7 +51,7 @@ class Writes:
 
     async def create_draft(self, message: OutgoingMessage) -> DraftResult:
         """Entry point: validate body, envelope and reply arguments; save once and read back."""
-        resolved = await self._resolve(message)
+        resolved, original = await self._resolve(message)
         self.check_account()
         draft_id = await self.writer.create_draft(resolved)
         if not draft_id:
@@ -61,7 +61,8 @@ class Writes:
         result = await self._read_back(draft_id, expected=resolved.inline_images)
         if resolved.reply_to_message_id and result.verified:
             try:
-                problem = await self._reply_problem(draft_id, resolved.reply_to_message_id)
+                assert original is not None
+                problem = await self._reply_problem(original, result)
             except ConnectorError as exc:
                 problem = f"Reply history verification failed: {exc}"
             result.history_intact, result.history_problem = problem is None, problem
@@ -102,7 +103,7 @@ class Writes:
             raise InvalidRequest("The message is not an existing Outlook draft.")
         return message
 
-    async def _resolve(self, message: OutgoingMessage) -> DraftMessage:
+    async def _resolve(self, message: OutgoingMessage) -> tuple[DraftMessage, Message | None]:
         """Assumes (not re-checked here): called only by create_draft; validates its outgoing input."""
         page = _body(message.text_body, message.html_body)
         to, cc, bcc = (
@@ -111,6 +112,7 @@ class Writes:
             _addresses(message.bcc, "bcc"),
         )
         subject = message.subject
+        original: Message | None = None
         if message.reply_to_message_id:
             original = await self.mailbox.message(message.reply_to_message_id)
             if not (to or cc or bcc):
@@ -132,7 +134,7 @@ class Writes:
                 inline_images = selected.images
                 if len(page) > MAX_BODY_CHARS:
                     raise InvalidRequest(f"Body must be at most {MAX_BODY_CHARS} characters.")
-        return DraftMessage(
+        draft = DraftMessage(
             to=to,
             cc=cc,
             bcc=bcc,
@@ -142,6 +144,7 @@ class Writes:
             reply_all=message.reply_all,
             inline_images=inline_images,
         )
+        return draft, original
 
     async def _read_back(self, draft_id: str, *, expected: list[InlineImage] | None = None) -> DraftResult:
         """Assumes (not re-checked here): reliable id from a single successful write. Retries reads only."""
@@ -203,34 +206,33 @@ class Writes:
                 await asyncio.sleep(0.2 * (attempt + 1))
         raise AssertionError("unreachable")
 
-    async def _reply_problem(self, draft_id: str, original_id: str) -> str | None:
-        """Why the reply draft does not carry the original as received, or None when it does.
+    async def _reply_problem(self, original: Message, result: DraftResult) -> str | None:
+        """Check quoted history using the original and read-back draft already fetched this call.
 
-        Assumes (not re-checked here): ``draft_id`` is a reply draft this call just saved and
-        ``original_id`` the message it replies to.
+        Assumes (not re-checked here): original was read while resolving the reply and result is the
+        verified read-back of the draft this call just saved.
         """
-        reader = self.mailbox.reader
-        texts = await reader.get_messages([original_id, draft_id])
-        pages = await reader.get_messages([original_id, draft_id], body_format="html")
-        original, draft = texts.messages.get(original_id), texts.messages.get(draft_id)
-        original_page, page = pages.messages.get(original_id), pages.messages.get(draft_id)
-        if original is None or draft is None or original_page is None or page is None:
+        if result.message is None:
             return "the draft or the original could not be read back"
-        if _flat(original.body_text) not in _flat(draft.body_text):
+        original_page = await self.mailbox.reader.get_message(original.id, body_format="html")
+        if _flat(original.body_text) not in _flat(result.text_body):
             return "the quoted original is not the original's full text"
         # Exchange re-wraps the original's HTML when it quotes it, so the HTML is not compared as
         # text; its structure is: every list, table, emphasis, link and image reference must survive.
-        lost = _structure(original_page.body_html) - _structure(page.body_html)
+        lost = _structure(original_page.body_html) - _structure(result.html_body)
         if lost:
             return "the quoted original lost formatting (" + ", ".join(sorted(lost.elements())) + ")"
-        found, failed = await reader.list_attachments_many([original_id, draft_id])
+        found, failed = await self.mailbox.reader.list_attachments_many([original.id, result.id])
         if failed:
             return "its attachments could not be listed"
-        hashes = {mid: await self._inline_hashes(mid, found.get(mid, [])) for mid in (original_id, draft_id)}
-        missing = Counter(hashes[original_id]) - Counter(hashes[draft_id])
+        hashes = {
+            original.id: await self._inline_hashes(original.id, found.get(original.id, [])),
+            result.id: await self._inline_hashes(result.id, found.get(result.id, [])),
+        }
+        missing = Counter(hashes[original.id]) - Counter(hashes[result.id])
         if missing:
             return f"{missing.total()} inline image(s) of the original are missing or changed"
-        if "[cid:" in _flat(re.sub(r"<[^>]+>", " ", page.body_html or "")):
+        if "[cid:" in _flat(re.sub(r"<[^>]+>", " ", result.html_body or "")):
             return 'an inline image became "[cid:...]" text'
         return None
 

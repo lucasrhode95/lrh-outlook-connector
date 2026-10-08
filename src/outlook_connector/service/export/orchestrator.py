@@ -141,6 +141,7 @@ class Exports:
                     self.conversations.messages(
                         conversation_id,
                         scope=Scope(sent_items=True, meeting_mail=True, deleted_items=True),
+                        merge_result=False,
                     )
                     for conversation_id in batch
                 )
@@ -163,7 +164,8 @@ class Exports:
         # Conversations/ranges already applied scope. Explicit ids are authoritative, like get_message.
         folders, _ = await self.mailbox.reach(m.folder_id for m in selected.values())
         outgoing = {f.id for f in folders.values() if f.well_known in OUTGOING_FOLDERS}
-        merged = merge_copies(await self.mailbox.decorate(list(selected.values())), outgoing)
+        decorated = await self.mailbox.decorate(list(selected.values()), folders=folders)
+        merged = merge_copies(decorated, outgoing)
         _check_limit({m.id: m for m in merged}, request.limit)
         return Selection(sorted(merged, key=oldest_first), dict(excluded), known)
 
@@ -187,6 +189,7 @@ class Exports:
                 cursor=cursor,
                 scope=request.scope,
                 skip_returned_copies=False,
+                merge_result=False,
             )
             _add(excluded, page.coverage.excluded)
             for item in page.items:
