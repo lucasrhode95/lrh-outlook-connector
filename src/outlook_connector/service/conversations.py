@@ -13,6 +13,7 @@ from typing import Literal
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import (
+    DEFAULT_SCOPE,
     EXCLUSION_TEXT,
     Conversation,
     ConversationMessage,
@@ -21,11 +22,13 @@ from outlook_connector.domain.models import (
     ExportStep,
     Message,
     MessageSummary,
+    Scope,
 )
 from outlook_connector.remote.ports import FetchedMessages
 from outlook_connector.service import cursors
 from outlook_connector.service.failures import error_block, export_error, gone
 from outlook_connector.service.mailbox import Mailbox
+from outlook_connector.service.scope import validate_scope
 
 BODY_BATCH = 10
 BODY_STEP: ExportStep = "fetching message bodies"
@@ -47,18 +50,18 @@ class Conversations:
         self.mailbox = mailbox
 
     async def messages(
-        self, conversation_id: str, *, include_deleted_items: bool = False
+        self, conversation_id: str, *, scope: Scope
     ) -> tuple[list[MessageSummary], dict[str, int], bool]:
         """All messages of the conversation, oldest first, what was left out by folder, and whether
         the server listing was truncated (more than MAX_CONVERSATION messages).
 
         Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
-        results); an unknown one raises NotFound.
+        results) and ``scope`` was validated at the public entry point; an unknown id raises NotFound.
         """
         remote, truncated = await self.mailbox.reader.conversation(conversation_id)
         if not remote:
             raise NotFound(f"No conversation {conversation_id} on the server.")
-        skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
+        skip = await self.mailbox.exclusions(scope)
         items, excluded = await self.mailbox.finish(sorted(remote, key=oldest_first), skip)
         return items, excluded, truncated
 
@@ -68,7 +71,7 @@ class Conversations:
         *,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "unique",
-        include_deleted_items: bool = False,
+        scope: Scope = DEFAULT_SCOPE,
         max_chars: int = 40000,
         cursor: str | None = None,
     ) -> Conversation:
@@ -85,13 +88,12 @@ class Conversations:
             start = int(state["start"])
             include_bodies = bool(state["include_bodies"])
             body = state["body"]
-            include_deleted_items = bool(state["include_deleted_items"])
+            scope = Scope.model_validate(state["scope"])
             max_chars = int(state["max_chars"])
+        validate_scope(scope, sent_items=False, meeting_mail=False)
         if not 1 <= max_chars <= 400_000:
             raise InvalidRequest("max_chars must be between 1 and 400000.")
-        items, excluded, listing_truncated = await self.messages(
-            conversation_id, include_deleted_items=include_deleted_items
-        )
+        items, excluded, listing_truncated = await self.messages(conversation_id, scope=scope)
         notes = ["Messages are sorted oldest first (sorted locally)."]
         if listing_truncated:
             notes.append(
@@ -148,7 +150,7 @@ class Conversations:
                 conversation_id=conversation_id,
                 include_bodies=include_bodies,
                 body=body,
-                include_deleted_items=include_deleted_items,
+                scope=scope.model_dump(mode="json"),
                 max_chars=max_chars,
             )
             if next_start is not None

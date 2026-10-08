@@ -152,7 +152,7 @@ function folderItem(id, name, depth, unread) {
 
 // Deleted Items and Junk are left out unless the toggle is on, or the user is inside one
 // of them (the server always lists a folder asked for by name; conversations, counts and exports follow this).
-function includeDeleted() {
+function showDeletedItems() {
   return $("opt-deleted").checked || (state.mode === "list" && insideLeftOutFolder(state.folder));
 }
 
@@ -223,8 +223,8 @@ async function loadPage(reset, path, apply, loadingText) {
 
 function loadList(reset) {
   const { since, until } = dateBounds();
-  const scope = { folder: state.folder, since, until, limit: 100, include_deleted_items: includeDeleted(),
-    include_meeting_mail: $("opt-meetings").checked };
+  const scope = { folder: state.folder, since, until, limit: 100, deleted_items: showDeletedItems(),
+    meeting_mail: $("opt-meetings").checked };
   const path = `/api/messages?${query({ ...scope, cursor: reset ? null : state.cursor })}`;
   return loadPage(reset, path, (page) => {
     for (const item of page.items) addMessage(item);
@@ -234,7 +234,7 @@ function loadList(reset) {
 function runSearch(reset) {
   const { since, until } = dateBounds();
   const path = `/api/search?${query({ q: state.query, since, until, folder: state.folder, limit: 50,
-    include_deleted_items: includeDeleted(), include_meeting_mail: $("opt-meetings").checked,
+    deleted_items: showDeletedItems(), meeting_mail: $("opt-meetings").checked,
     cursor: reset ? null : state.cursor })}`;
   return loadPage(reset, path, (result) => {
     for (const hit of result.conversations) for (const message of hit.matching_messages) addMessage(message, { matched: true });
@@ -249,7 +249,7 @@ async function loadSizes(request) {
     let sizes;
     try {
       sizes = await json("/api/conversation-sizes", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), include_deleted_items: includeDeleted() }) });
+        body: JSON.stringify({ conversation_ids: pending.slice(start, start + 200), scope: { deleted_items: showDeletedItems() } }) });
     } catch {
       return; // counts are a refinement; the rows keep working without them
     }
@@ -503,7 +503,7 @@ async function expand(conversation) {
     conversation.loading = true;
     render();
     try {
-      const full = await json(`/api/conversations/${encodeURIComponent(conversation.conversationId)}?${query({ include_deleted_items: includeDeleted() })}`);
+      const full = await json(`/api/conversations/${encodeURIComponent(conversation.conversationId)}?${query({ deleted_items: showDeletedItems() })}`);
       for (const entry of full.messages) conversation.messages.set(entry.message.id, { ...entry.message, matched: conversation.messages.get(entry.message.id)?.matched });
       // incomplete coverage: the conversation is larger than the server lists (a "1000+" conversation)
       conversation.complete = full.coverage.complete;
@@ -589,7 +589,7 @@ function exportOptions() {
     include_attachments: $("opt-attachments").checked,
     combine: document.querySelector('input[name="files"]:checked').value,
     body: $("opt-full").checked ? "full" : "unique",
-    include_deleted_items: includeDeleted(),
+    scope: { deleted_items: showDeletedItems() },
   };
 }
 
@@ -604,7 +604,9 @@ function exportRequest() {
 // The whole current view: this folder (or the mailbox) within the chosen dates, up to 2,000 messages.
 function viewRequest() {
   const { since, until } = dateBounds();
-  return { folder: state.folder, since, until, include_meeting_mail: $("opt-meetings").checked, ...exportOptions() };
+  const options = exportOptions();
+  return { ...options, folder: state.folder, since, until,
+    scope: { ...options.scope, meeting_mail: $("opt-meetings").checked } };
 }
 
 function renderExportView() {
