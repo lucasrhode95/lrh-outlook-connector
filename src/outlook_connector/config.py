@@ -1,7 +1,7 @@
 """Static configuration: first-party client profiles, denied pairs and local paths.
 
 The profiles encode the tenant-specific capability split established in
-docs/outlook-api-research.md §2 (Graph for reads, OWS for writes). To adapt to a
+docs/outlook-api-research.md §2 (Graph and Outlook API profiles). To adapt to a
 tenant with different Graph availability, change the profiles here; see
 docs/architecture.md §6.
 """
@@ -32,17 +32,17 @@ class TokenProfile:
 
 
 PROFILES: dict[str, TokenProfile] = {
-    "read": TokenProfile(
-        name="read",
+    "graph": TokenProfile(
+        name="graph",
         client_id=OUTLOOK_MOBILE_CLIENT_ID,
         scopes=("https://graph.microsoft.com/Mail.Read",),
-        purpose="Microsoft Graph mail reads (Outlook Mobile client)",
+        purpose="Microsoft Graph APIs (Outlook Mobile client)",
     ),
-    "write": TokenProfile(
-        name="write",
+    "outlook": TokenProfile(
+        name="outlook",
         client_id=ONE_OUTLOOK_WEB_CLIENT_ID,
         scopes=("https://outlook.office.com/.default",),
-        purpose="Outlook Web (OWS) send and mailbox changes (One Outlook Web client)",
+        purpose="Outlook APIs: OWS and Cloud Settings (One Outlook Web client)",
     ),
 }
 

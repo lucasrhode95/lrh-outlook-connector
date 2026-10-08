@@ -1,8 +1,8 @@
 """OWS write contracts (read state, flag, categories, conversation read state, move, soft delete).
 
 The recorded environment lacked Graph mail writes (research §2). These probes
-exercise the alternative contracts through OWS with the 'write' profile and verified read-only
-through Graph with the 'read' profile.
+exercise the alternative contracts through OWS with the 'outlook' profile and verified read-only
+through Graph with the 'graph' profile.
 
     python research/probes/ows_mutations.py \\
         --case read,flag,categories,conversation-read "A TEST EMAIL HALPRIO190" \\
@@ -150,7 +150,7 @@ def main() -> int:
             ap.error("choose either delete or move-to-deleted for one message")
         cases.append((op_list, subject))
 
-    read = need("read")
+    read = need("graph")
     aliases = well_known_ids(read)
     inbox_id = next((k for k, v in aliases.items() if v == "inbox"), None)
     located: list[dict[str, Any]] = []
@@ -170,7 +170,7 @@ def main() -> int:
         emit({"abort": "every case needs exactly one Inbox match", "cases": plan})
         return 1
 
-    write = need("write")
+    write = need("outlook")
     results = {c["case"]: run_case(read, write, c["ops"], c["_target"], aliases) for c in located}
     emit({"probe": "OWS write contracts", "mode": "executed", "cases": plan, "results": results})
     return 0

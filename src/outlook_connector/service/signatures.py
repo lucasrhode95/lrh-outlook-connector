@@ -158,7 +158,7 @@ class Signatures:
         claims = self._store.account()
         if (claims.get("tid"), claims.get("oid")) != (self._account.tenant_id, self._account.object_id):
             raise AccountMismatch(
-                "The write sign-in belongs to a different Microsoft account than its read account."
+                "The Outlook sign-in belongs to a different Microsoft account than its Graph account."
             )
 
     async def _unchanged(

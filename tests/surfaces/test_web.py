@@ -36,6 +36,12 @@ def test_index_embeds_the_session_token(client: TestClient) -> None:
     assert client.get("/static/app.js").status_code == 200
 
 
+def test_status_reports_service_profile_names(client: TestClient) -> None:
+    status = client.get("/api/status").json()
+    assert status["signed_in"] == {"graph": True, "outlook": False}
+    assert status["sign_in_command"] == "outlook-connector auth graph"
+
+
 def test_profile_name_and_photo(client: TestClient, fake: FakeGraph) -> None:
     assert client.get("/api/me").json() == {"display_name": "Doe, Jane", "email": "me@example.com"}
     assert client.get("/api/me/photo").status_code == 404  # no photo set

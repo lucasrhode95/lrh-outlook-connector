@@ -6,11 +6,11 @@
   "graph_url": "https://graph.microsoft.com/v1.0",
   "ows_url": "https://outlook.cloud.microsoft/owa/service.svc",
   "profiles": {
-    "read": [
+    "graph": [
       "27922004-5251-4030-b22d-91ecd9a37ea4",
       "https://graph.microsoft.com/Mail.Read"
     ],
-    "write": [
+    "outlook": [
       "9199bf20-a13f-4107-85dc-02114787ef48",
       "https://outlook.office.com/.default"
     ],

@@ -14,7 +14,7 @@ from outlook_connector.remote.ports import SignatureContents, SignatureSettings
 from outlook_connector.remote.transport import Transport, operation
 
 BASE_URL = "https://outlook.cloud.microsoft/ows/v1/OutlookCloudSettings/settings/"
-PROFILE = "write"
+PROFILE = "outlook"
 LIST_SETTING = "roaming_signature_list"
 NEW_SETTING = "roaming_new_signature"
 REPLY_SETTING = "roaming_reply_signature"
@@ -28,7 +28,7 @@ class CloudSettings:
         self._tokens = tokens
 
     def account(self) -> dict[str, Any]:
-        """Identity of the write profile used for Cloud Settings."""
+        """Identity of the Outlook profile used for Cloud Settings."""
         return self._tokens.get_token(PROFILE).claims()
 
     async def settings(self) -> SignatureSettings:

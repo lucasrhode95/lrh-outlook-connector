@@ -1,6 +1,6 @@
 """R1: how big is the mailbox, and what would an eager metadata catalog cost?
 
-Read-only (profile 'read'). Reports:
+Read-only (profile 'graph'). Reports:
 - recursive folder tree (hidden included): folder count, item totals, top folders by
   size (labelled by well-known alias or 'custom#n', never by name)
 - the unexplained hierarchy(23) vs folder-delta(22) difference: which folder is missing
@@ -79,7 +79,7 @@ def main() -> int:
     ap.add_argument("--max-pages", type=int, default=5, help="page cap for each timed walk")
     ap.add_argument("--page-size", type=int, default=500)
     args = ap.parse_args()
-    token = need("read")
+    token = need("graph")
     aliases = well_known_ids(token)
 
     folders, folder_calls = walk_folders(token)

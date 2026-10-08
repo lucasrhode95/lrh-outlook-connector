@@ -16,7 +16,7 @@ class OwsMailWriter(MailWriter):
 
     Assumes (not re-checked here): draft messages come from ``Writes._resolve`` (addresses, subject and body
     validated), message ids are Graph immutable ids from this connector, folder targets were resolved by
-    the service, and the write account was checked (``Writes.check_account``). Nothing is re-validated
+    the service, and the Outlook account was checked (``Writes.check_account``). Nothing is re-validated
     here; every call is sent once.
     """
 

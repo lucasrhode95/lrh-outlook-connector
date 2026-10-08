@@ -25,7 +25,7 @@ from outlook_connector.remote.urls import graph_url
 
 PREFER_IMMUTABLE = 'IdType="ImmutableId"'
 PREFER_TEXT_BODY = 'outlook.body-content-type="text"'
-PROFILE = "read"  # Graph calls use the read sign-in
+PROFILE = "graph"  # Graph calls use the Graph sign-in
 BATCH_LIMIT = 20  # Graph JSON batching maximum per request
 BATCH_CONCURRENCY = 2  # batches in flight; each sub-request counts against the mailbox's 4 concurrent
 BATCH_RETRIES = 4  # rounds of re-sending transient sub-requests

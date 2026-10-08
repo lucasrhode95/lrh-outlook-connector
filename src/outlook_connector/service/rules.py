@@ -21,7 +21,7 @@ class Rules:
         self.mailbox, self.writer, self.account, self.check_account = mailbox, writer, account, check_account
 
     async def list_rules(self) -> list[InboxRule]:
-        """Entry point: read current rules through the bound write account; no cached rules."""
+        """Entry point: read current rules through the bound Outlook account; no cached rules."""
         self.check_account()
         return await self.writer.list_rules()
 
