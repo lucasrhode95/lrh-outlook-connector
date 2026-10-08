@@ -96,6 +96,9 @@ writes one JSON record per message (ids, dates, folder, people, body): use it to
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
 be exported are marked [EXPORT ERROR] in TXT and carry an export_error object in JSONL (step, \
 status, likely_cause, retry, fix).
+- Inline export images: known CID references in the rendered body are included.
+  If the content id or rendered body cannot be read, include the image so a read gap
+  does not silently drop it.
 - Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
@@ -296,7 +299,7 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_attachments(message_id: str) -> list[Attachment]:
-        """Attachment metadata. kind=item is a forwarded email; kind=reference is a cloud link."""
+        """List attachment metadata, including inline content ids when available."""
         return await (await services()).mailbox.attachments(message_id)
 
     @mcp.tool(annotations=LOCAL_FILE)
@@ -354,6 +357,8 @@ def build_server(context: AppContext) -> FastMCP:
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
         are exported once. The result counts what was left out and lists messages without a body.
+        With attachments, inline images are included when their CID is found in the rendered body;
+        if the content id or body cannot be read, the image is included rather than silently dropped.
         """
         request = ExportRequest(
             conversation_ids=conversation_ids or [],

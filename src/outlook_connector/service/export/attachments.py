@@ -3,7 +3,7 @@
 - Non-inline file attachments are exported.
 - Item attachments (forwarded mail) are exported as .eml.
 - Inline images only when the rendered body (unique or full) references their cid:.
-  Most inline images are signatures and quoted history and are skipped.
+  If the content id or rendered body is unavailable, include the image rather than drop it.
 - Reference (cloud) attachments are listed, never downloaded.
 """
 
@@ -26,11 +26,11 @@ _RESERVED = {
 MAX_NAME = 120
 
 
-def wanted(attachment: Attachment, *, content_id: str | None, body_html: str | None) -> bool:
+def wanted(attachment: Attachment, *, body_html: str | None) -> bool:
     """Whether the export includes this attachment.
 
-    Assumes (not re-checked here): ``content_id`` and ``body_html`` belong to the attachment's message
-    (the orchestrator looks them up).
+    Assumes (not re-checked here): body_html belongs to the attachment's message. If either it or
+    the attachment content id is unavailable, inline inclusion fails open.
     """
     if attachment.kind == "item":
         return True
@@ -38,7 +38,9 @@ def wanted(attachment: Attachment, *, content_id: str | None, body_html: str | N
         return False
     if not attachment.is_inline:
         return True
-    return bool(content_id and body_html and f"cid:{content_id}" in body_html)
+    if not attachment.content_id or body_html is None:
+        return True
+    return f"cid:{attachment.content_id}" in body_html
 
 
 def listed(attachment: Attachment) -> bool:

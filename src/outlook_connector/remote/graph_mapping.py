@@ -34,7 +34,7 @@ MEETING_KINDS: dict[str, MeetingKind] = {
 NEW_REQUEST = (None, "none", "newMeetingRequest")
 MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody,changeKey"
 FOLDER_FIELDS = "id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount,isHidden"
-ATTACHMENT_FIELDS = "id,name,contentType,size,isInline"
+ATTACHMENT_FIELDS = "id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId"
 
 
 def parse_dt(value: Any) -> datetime | None:
@@ -148,6 +148,7 @@ def attachment(data: dict[str, Any], message_id: str) -> Attachment:
         content_type=data.get("contentType"),
         size=data.get("size"),
         is_inline=bool(data.get("isInline")),
+        content_id=data.get("contentId") if isinstance(data.get("contentId"), str) else None,
         kind=cast(
             Literal["file", "item", "reference", "unknown"],
             {"fileAttachment": "file", "itemAttachment": "item", "referenceAttachment": "reference"}.get(

@@ -10,10 +10,11 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled
+from outlook_connector.domain.errors import Failure, InvalidRequest, NotFound, Throttled
 from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient, Scope
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
+from outlook_connector.remote.ports import BodyFormat, FetchedMessages
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.attachments import dedupe, safe_name
@@ -190,7 +191,57 @@ async def test_inline_only_attachments_are_found_when_exporting_files(
     assert "2026-09-30 Chart/chart.png" in zip_names(artifact.path)
 
 
-async def test_inline_image_ids_of_many_messages_are_read_in_shared_batches(
+async def test_inline_image_with_unknown_content_id_is_exported(exports: Exports, fake: FakeGraph) -> None:
+    fake.add(
+        FakeMessage(
+            "unknown-cid",
+            "Unknown content id",
+            "f-inbox",
+            "2026-09-30T08:00:00Z",
+            conversation="c-unknown-cid",
+            attachments=[FakeAttachment("unknown-cid-image", "image.png", b"png", "image/png", inline=True)],
+            html="<p>No image reference is available.</p>",
+        )
+    )
+    artifact = await exports.export(ExportRequest(message_ids=["unknown-cid"], include_attachments=True))
+    assert any(name.endswith("image.png") for name in zip_names(artifact.path))
+
+
+async def test_inline_image_is_exported_when_html_cannot_be_read(
+    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake.add(
+        FakeMessage(
+            "unknown-body",
+            "Unknown HTML body",
+            "f-inbox",
+            "2026-09-30T08:00:00Z",
+            conversation="c-unknown-body",
+            attachments=[
+                FakeAttachment(
+                    "unknown-body-image", "image.png", b"png", "image/png", inline=True, content_id="c1"
+                )
+            ],
+            html="<p>No image reference is available.</p>",
+        )
+    )
+    original = exports.reader.get_messages
+
+    async def fail_html(ids: list[str], *, body_format: BodyFormat = "text") -> FetchedMessages:
+        if body_format == "html":
+            return FetchedMessages(
+                failed={
+                    mid: Failure(status=500, code="Injected", message="Synthetic failure.") for mid in ids
+                }
+            )
+        return await original(ids, body_format=body_format)
+
+    monkeypatch.setattr(exports.reader, "get_messages", fail_html)
+    artifact = await exports.export(ExportRequest(message_ids=["unknown-body"], include_attachments=True))
+    assert any(name.endswith("image.png") for name in zip_names(artifact.path))
+
+
+async def test_inline_content_ids_come_from_batched_attachment_lists(
     exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for n in range(12):  # a signature image on every message, as in real mail
@@ -208,19 +259,22 @@ async def test_inline_image_ids_of_many_messages_are_read_in_shared_batches(
                 html='<img src="cid:P">',
             )
         )
-    lookups: list[int] = []
+    attachment_listing_batches: list[int] = []
     original = fake.batch
 
     def recording(body):
-        urls = [r["url"] for r in body["requests"]]
-        if any("contentId" in u for u in urls):
-            lookups.append(len(urls))
+        urls = [request["url"] for request in body["requests"]]
+        content_id_urls = [url for url in urls if "contentId" in url]
+        if content_id_urls:
+            assert all("/attachments?" in url for url in content_id_urls)
+            assert all("fileAttachment" in url for url in content_id_urls)
+            attachment_listing_batches.append(len(content_id_urls))
         return original(body)
 
     monkeypatch.setattr(fake, "batch", recording)
     ids = [f"sig{n}" for n in range(12)]
     artifact = await exports.export(ExportRequest(message_ids=ids, include_attachments=True, combine="all"))
-    assert sorted(lookups) == [4, 20]  # 24 attachments of 12 messages: two batches, not twelve
+    assert attachment_listing_batches == [12]
     assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
 
 

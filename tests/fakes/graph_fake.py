@@ -556,7 +556,7 @@ class FakeGraph:
                 if att.broken:
                     return 503, {"error": {"code": "ServiceUnavailable"}}, None
                 return 200, None, att.data
-            return 200, {"contentId": att.content_id, "id": att.id}, None
+            return 400, {"error": {"code": "UnexpectedPerAttachmentLookup"}}, None
         if m := re.fullmatch(r"/me/messages/([^/]+)/\$value", path):
             msg = self.messages.get(m[1])
             if not msg:
@@ -569,7 +569,7 @@ class FakeGraph:
         return {**f, "totalItemCount": sum(1 for m in self.messages.values() if m.folder == f["id"])}
 
     def attachment_json(self, a: FakeAttachment) -> dict[str, Any]:
-        return {
+        item: dict[str, Any] = {
             "@odata.type": f"#microsoft.graph.{a.kind}",
             "id": a.id,
             "name": a.name,
@@ -577,6 +577,9 @@ class FakeGraph:
             "size": len(a.data),
             "isInline": a.inline,
         }
+        if a.kind == "fileAttachment":
+            item["contentId"] = a.content_id
+        return item
 
     def list_messages(
         self, folder: str | None, params: dict[str, str], path: str, text_body: bool
