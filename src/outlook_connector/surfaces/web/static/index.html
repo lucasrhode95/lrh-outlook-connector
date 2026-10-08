@@ -26,17 +26,20 @@
         <span id="range-label">Any date</span>
         <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>
       </button>
+      <button id="date-filter-clear" class="search-clear date-range-clear" type="button" aria-label="Clear date filter" title="Clear date filter" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>
+      </button>
       <div id="calendar" class="calendar" role="dialog" aria-label="Choose an inclusive message date range" hidden>
         <div class="calendar-header">
           <button id="previous-month" class="calendar-nav" type="button" aria-label="Previous month">‹</button>
           <strong id="calendar-month"></strong>
           <button id="next-month" class="calendar-nav" type="button" aria-label="Next month">›</button>
         </div>
-        <div class="weekdays" aria-hidden="true"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+        <div class="weekdays" aria-hidden="true"><span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span></div>
         <div id="calendar-days" class="calendar-days"></div>
         <div class="calendar-footer">
           <button id="clear-dates" type="button" aria-label="Clear date range (any date)">Clear</button>
-          <span id="calendar-hint" class="calendar-hint">Click once for one day; click again to set the end date.</span>
+          <button id="today-date" type="button">Today</button>
           <button id="calendar-done" type="button">Done</button>
         </div>
       </div>

@@ -812,6 +812,7 @@ function setDateRange(start, end) {
   $("until").value = end || "";
   $("range-label").textContent = !start ? "Any date"
     : start === end ? formatKey(start) : `${formatKey(start)} – ${formatKey(end)}`;
+  $("date-filter-clear").hidden = !start && !end;
   renderCalendar();
 }
 
@@ -845,17 +846,14 @@ function setCalendarOpen(open, { restoreFocus = false } = {}) {
 
 function renderCalendar() {
   $("calendar-month").textContent = picker.month.toLocaleDateString(undefined, { month: "long", year: "numeric" });
-  $("calendar-hint").textContent = picker.choosingEnd
-    ? "Choose an end date, or press Done to keep one day."
-    : "Click once for one day; click again to set the end date.";
   const first = new Date(picker.month.getFullYear(), picker.month.getMonth(), 1);
-  const mondayOffset = (first.getDay() + 6) % 7;
+  const sundayOffset = first.getDay();
   const start = $("since").value;
   const end = $("until").value;
   const today = dateKey(new Date());
   const days = [];
   for (let index = 0; index < 42; index += 1) {
-    const day = new Date(first.getFullYear(), first.getMonth(), 1 - mondayOffset + index);
+    const day = new Date(first.getFullYear(), first.getMonth(), 1 - sundayOffset + index);
     const key = dateKey(day);
     const future = key > today;
     const classes = ["calendar-day"];
@@ -874,22 +872,30 @@ function renderCalendar() {
 
 function chooseDate(key) {
   if (key > dateKey(new Date())) return;
-  if (!picker.choosingEnd || key < picker.draftStart) {
+  if (!picker.choosingEnd) {
     picker.draftStart = key;
     picker.choosingEnd = true;
     setDateRange(key, key);
     focusCalendarDate(key);
     return;
   }
-  setDateRange(picker.draftStart, key);
+  const start = key < picker.draftStart ? key : picker.draftStart;
+  const end = key < picker.draftStart ? picker.draftStart : key;
+  setDateRange(start, end);
   picker.choosingEnd = false;
-  $("calendar-hint").textContent = "Range selected. Click a date to start another, or press Done.";
   focusCalendarDate(key);
 }
 
 function changeCalendarMonth(offset) {
   picker.month.setMonth(picker.month.getMonth() + offset);
   renderCalendar();
+}
+
+function clearDateRange() {
+  picker.choosingEnd = false;
+  picker.draftStart = null;
+  setDateRange("", "");
+  setCalendarOpen(false, { restoreFocus: true });
 }
 
 $("range-toggle").addEventListener("click", () => setCalendarOpen($("calendar").hidden));
@@ -925,7 +931,14 @@ $("calendar").addEventListener("touchend", (event) => {
   changeCalendarMonth(deltaX > 0 ? -1 : 1);
 }, { passive: true });
 $("calendar").addEventListener("touchcancel", () => { swipeStart = null; }, { passive: true });
-$("clear-dates").addEventListener("click", () => { picker.choosingEnd = false; setDateRange("", ""); setCalendarOpen(false, { restoreFocus: true }); });
+$("clear-dates").addEventListener("click", clearDateRange);
+$("date-filter-clear").addEventListener("click", clearDateRange);
+$("today-date").addEventListener("click", () => {
+  const today = new Date();
+  picker.month = new Date(today.getFullYear(), today.getMonth(), 1);
+  renderCalendar();
+  focusCalendarDate(dateKey(today));
+});
 $("calendar-done").addEventListener("click", () => setCalendarOpen(false, { restoreFocus: true }));
 document.addEventListener("pointerdown", (event) => {
   if (!$("calendar").hidden && !$("range-picker").contains(event.target)) setCalendarOpen(false);
