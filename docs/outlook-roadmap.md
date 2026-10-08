@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H36–H38.
+1. **Performance and cleanup:** H37–H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -26,14 +26,6 @@ Status wording:
 # Performance
 
 # Service and code cleanup
-
-## H36 — Derived counts are stored beside the data they count
-
-**Status:** Pending.
-
-**Problem:** several response models store both a list and a count that is always derivable from that list, creating two values that must stay synchronized.
-
-**Next:** remove redundant derived counts where callers can count the data directly. Keep `MutationResult.counts`, because tallying a large per-message mutation result is useful to an agent.
 
 ## H37 — Repeated logic still has multiple sources of truth
 

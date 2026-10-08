@@ -438,9 +438,9 @@ async def test_conversation_marks_missing_bodies_with_the_export_error_block(
     assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
     assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
     assert not conversation.coverage.complete  # throttling is retryable
-    assert conversation.body_errors == 3 and all(
-        t.export_error and t.export_error.retry for t in conversation.messages
-    )
+    assert sum(t.export_error is not None for t in conversation.messages) == 3
+    assert all(t.export_error and t.export_error.retry for t in conversation.messages)
+    assert "body_errors" not in conversation.model_dump()
 
 
 async def test_conversation_body_denied_does_not_make_coverage_incomplete(
@@ -451,10 +451,10 @@ async def test_conversation_body_denied_does_not_make_coverage_incomplete(
     texts = {t.message.id: t.text or "" for t in conversation.messages}
     assert "  Likely: access denied for this item" in texts["m2"] and texts["m1"] == "First report"
     assert conversation.coverage.complete  # retrying will not help
-    # ...but the caller still learns about it without reading the text
-    assert conversation.body_errors == 1 and any(
-        "1 message body(ies) could not be fetched" in n for n in conversation.coverage.notes
-    )
+    # The caller can count the per-message markers without reading their text.
+    assert sum(t.export_error is not None for t in conversation.messages) == 1
+    assert any("1 message body(ies) could not be fetched" in n for n in conversation.coverage.notes)
+    assert "body_errors" not in conversation.model_dump()
     errors = {t.message.id: t.export_error for t in conversation.messages}
     assert errors["m1"] is None and errors["m2"] is not None and errors["m2"].status == 403
 
