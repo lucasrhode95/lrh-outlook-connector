@@ -9,6 +9,20 @@ Snapshot **2026-10-08**.
 - Build/module map: [architecture §4 Repository layout](architecture.md#4-repository-layout)
 - API evidence: [API research](outlook-api-research.md)
 
+# Human checks
+
+## W8 — Recipient-side signature rendering
+
+**Status:** Open; visual verification needs a human (2026-10-08).
+
+**Evidence:** Public-tool validation sent one synthetic signed message. Read-back retained the
+signature text and inline image reference, but the strict `data-signature-name` check did not pass.
+The Outlook recipient-side rendering was not visually inspected.
+
+**Next:** Have a human inspect the synthetic signed self-send in Outlook (the copy is in Deleted
+Items after cleanup) and confirm that its signature text and inline image render as expected. Do not
+inspect unrelated mailbox content.
+
 # Later
 
 ## X11 — SharePoint file search and download
