@@ -827,3 +827,26 @@ async def test_conversation_export_limit_counts_logical_messages_and_preserves_c
 async def test_explicit_deleted_id_remains_authoritative_with_default_scope(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], message_ids=["m4"]))
     assert artifact.message_count == 4
+
+
+async def test_failed_conversation_export_cancels_and_awaits_sibling_reads(
+    exports: Exports, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started, cleaned_up = asyncio.Event(), asyncio.Event()
+    failure = NotFound("Synthetic missing conversation")
+
+    async def expand(conversation_id: str, **_kwargs):  # type: ignore[no-untyped-def]
+        if conversation_id == "missing":
+            await started.wait()
+            raise failure
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            cleaned_up.set()
+
+    monkeypatch.setattr(exports.conversations, "messages", expand)
+    with pytest.raises(NotFound) as caught:
+        await exports.export(ExportRequest(conversation_ids=["missing", "slow"]))
+    assert caught.value is failure and cleaned_up.is_set()

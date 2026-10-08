@@ -30,6 +30,7 @@ from outlook_connector.domain.models import (
     Scope,
 )
 from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first
 from outlook_connector.service.export import attachments as policy
 from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
@@ -140,7 +141,7 @@ class Exports:
         conversation_ids = list(dict.fromkeys(request.conversation_ids))
         for start in range(0, len(conversation_ids), MAX_CONCURRENT_REQUESTS):
             batch = conversation_ids[start : start + MAX_CONCURRENT_REQUESTS]
-            expanded = await asyncio.gather(
+            expanded = await gather_cancel_on_error(
                 *(
                     self.conversations.messages(
                         conversation_id,

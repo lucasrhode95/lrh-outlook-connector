@@ -39,7 +39,7 @@ uv run outlook-connector ui
 
 - `auth_status` — Check the local sign-in state and sign-in commands.
 - `list_folders` — List reachable mail folders and their counts.
-- `list_messages` — Read a page of recent messages; filter by folder, dates, and scope.
+- `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
 - `get_conversation` — Read a whole conversation across folders.
 - `get_message` — Read one message body and its attachment metadata.
