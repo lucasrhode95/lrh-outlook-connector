@@ -852,10 +852,12 @@ function renderCalendar() {
   const mondayOffset = (first.getDay() + 6) % 7;
   const start = $("since").value;
   const end = $("until").value;
+  const today = dateKey(new Date());
   const days = [];
   for (let index = 0; index < 42; index += 1) {
     const day = new Date(first.getFullYear(), first.getMonth(), 1 - mondayOffset + index);
     const key = dateKey(day);
+    const future = key > today;
     const classes = ["calendar-day"];
     if (day.getMonth() !== picker.month.getMonth()) classes.push("outside-month");
     if (start && end && key >= start && key <= end) classes.push("in-range");
@@ -864,12 +866,14 @@ function renderCalendar() {
     days.push(el("button", { type: "button", class: classes.join(" "), "data-date": key,
       "aria-label": day.toLocaleDateString(undefined, { dateStyle: "full" }),
       "aria-pressed": String(Boolean(start && end && key >= start && key <= end)),
+      disabled: future,
       onclick: () => chooseDate(key) }, day.getDate()));
   }
   $("calendar-days").replaceChildren(...days);
 }
 
 function chooseDate(key) {
+  if (key > dateKey(new Date())) return;
   if (!picker.choosingEnd || key < picker.draftStart) {
     picker.draftStart = key;
     picker.choosingEnd = true;
