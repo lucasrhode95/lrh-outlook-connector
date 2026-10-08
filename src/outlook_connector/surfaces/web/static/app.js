@@ -67,6 +67,49 @@ function fold(text) {
   return (text || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 }
 
+function bindClearableSearch(input, clearButton, { onInput = () => {}, onClear = onInput, showClearWhenEmpty = false } = {}) {
+  const updateClearButton = () => { clearButton.hidden = !showClearWhenEmpty && !input.value; };
+  input.addEventListener("input", () => {
+    updateClearButton();
+    onInput();
+  });
+  clearButton.addEventListener("click", () => {
+    input.value = "";
+    updateClearButton();
+    onClear();
+  });
+  updateClearButton();
+}
+
+function bindExpandableSearch({ host, toggle, input, clearButton, onInput, hideTitle = false }) {
+  function close() {
+    const wasOpen = host.classList.contains("search-open");
+    input.value = "";
+    host.classList.remove("search-open");
+    toggle.setAttribute("aria-expanded", "false");
+    clearButton.hidden = true;
+    if (wasOpen) onInput();
+    toggle.focus();
+  }
+
+  function open() {
+    host.classList.add("search-open");
+    toggle.setAttribute("aria-expanded", "true");
+    clearButton.hidden = false;
+    requestAnimationFrame(() => input.focus());
+  }
+
+  toggle.addEventListener("click", () => {
+    if (host.classList.contains("search-open")) close();
+    else open();
+  });
+  bindClearableSearch(input, clearButton, { onInput, onClear: close, showClearWhenEmpty: true });
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") close();
+  });
+  if (hideTitle) host.classList.add("hide-search-title");
+}
+
 // Like Outlook: today "9:31 AM", this week "Fri 9:31 AM", this year "Sep 28", older "Sep 28, 2025".
 function formatDate(iso) {
   if (!iso) return "";
@@ -130,10 +173,25 @@ async function loadFolders(refresh = false) {
     const depth = (folder.path.match(/\//g) || []).length;
     list.append(folderItem(folder.id, folder.name, depth, folder.unread));
   }
+  list.append(el("li", { id: "folder-search-empty", class: "folder-empty", hidden: true }, "No folders match that search."));
+  renderFolderFilter();
+}
+
+function renderFolderFilter() {
+  const needle = fold($("folder-filter").value.trim());
+  const items = [...$("folders").querySelectorAll("[data-folder-name]")];
+  let visible = 0;
+  for (const item of items) {
+    const matches = fold(item.dataset.folderName).includes(needle);
+    item.hidden = !matches;
+    if (matches) visible += 1;
+  }
+  const empty = $("folder-search-empty");
+  if (empty) empty.hidden = !needle || visible > 0;
 }
 
 function folderItem(id, name, depth, unread) {
-  const item = el("li", { class: state.folder === id && state.mode === "list" ? "active" : "", title: name },
+  const item = el("li", { class: state.folder === id && state.mode === "list" ? "active" : "", title: name, "data-folder-name": name },
     el("span", { style: `padding-left:${depth * 14}px` }, name),
     unread ? el("span", { class: "count" }, unread) : null);
   item.addEventListener("click", () => {
@@ -642,6 +700,33 @@ async function runExport(button, request, label) {
 
 // ------------------------------------------------------------------ wiring
 
+function clearMailSearch() {
+  const wasSearching = state.mode === "search";
+  state.query = "";
+  if (!wasSearching) return;
+  state.mode = "list";
+  $("list-title").textContent = state.folderName;
+  renderExportView();
+  loadList(true);
+}
+
+bindClearableSearch($("search"), $("search-clear"), { onClear: clearMailSearch });
+bindExpandableSearch({
+  host: $("sidebar-head"),
+  toggle: $("folder-search-toggle"),
+  input: $("folder-filter"),
+  clearButton: $("folder-filter-clear"),
+  onInput: renderFolderFilter,
+  hideTitle: true,
+});
+bindExpandableSearch({
+  host: $("conversation-search-head"),
+  toggle: $("conversation-search-toggle"),
+  input: $("filter"),
+  clearButton: $("filter-clear"),
+  onInput: render,
+});
+
 $("search-form").addEventListener("submit", (event) => {
   event.preventDefault();
   state.query = $("search").value.trim();
@@ -650,7 +735,6 @@ $("search-form").addEventListener("submit", (event) => {
   renderExportView();
   (state.query ? runSearch : loadList)(true);
 });
-$("filter").addEventListener("input", render);
 
 // ------------------------------------------------------------------ date range picker (same behaviour as lrh-teams)
 
