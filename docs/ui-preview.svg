@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1000" height="590" viewBox="0 0 1000 590" role="img" aria-labelledby="title description">
   <title id="title">Illustrative Outlook connector UI preview</title>
-  <desc id="description">A browser window mockup with a fictional inbox, sample sender labels, synthetic message subjects, and a sample conversation reader. No real mailbox content appears.</desc>
+  <desc id="description">A light-theme browser window mockup with a fictional inbox, sample sender labels, synthetic message subjects, and a sample conversation reader. No real mailbox content appears.</desc>
   <defs>
     <linearGradient id="backdrop" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#f5f8fb"/><stop offset="1" stop-color="#e6edf3"/></linearGradient>
     <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="10" stdDeviation="12" flood-color="#183153" flood-opacity=".14"/></filter>
