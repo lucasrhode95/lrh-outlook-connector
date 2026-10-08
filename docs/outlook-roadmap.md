@@ -17,6 +17,7 @@ Snapshot **2026-10-07**.
    default selection, and the default inserted into new drafts unless told otherwise.
 3. **Correctness:** H19, H22 and H26.
 4. **Performance and cleanup:** H30–H32 and H34–H38.
+5. **W12:** README rewrite and architecture doc cleanup, last, once everything above is merged.
 
 Status wording:
 
@@ -326,6 +327,45 @@ Recent constructor/protocol cleanup reduced unrelated duplication, but these rev
 **Current state:** the recent constructor cleanup removed some unused test seams, but the review still has a handful of small leftovers to remove or retype after H37 so the same code is not churned twice. Known candidates include unused attachment/content-id representation, an exclusion-reason type that is not actually used as a type, never-used optional parameters on Graph helpers, an impossible HTML fallback in export code, and stale comments.
 
 **Next:** do one dead-code pass after the structural cleanup and delete only what the current test suite proves unused. Keep the account-ownership checks intentionally.
+
+# Documentation
+
+## W12 — Landing README rewrite and architecture doc cleanup
+
+**Status:** Decided, not built (2026-10-08). Last: do it after every item above is finished, so it
+describes the final tool set.
+
+**README, in this order:**
+
+1. **What it is, in a nutshell.** One short sentence ("a connector that lets you connect to your
+   Outlook account and…") and a short, direct bullet list that makes the reader want to know more, e.g.:
+   search messages by subject and contents; export individual messages or entire conversations or
+   folders, *attachments included*; draft, send or reply to emails; move messages between folders;
+   manage the rules that file or delete mail automatically; … (match the final tool set).
+2. **A diagram (SVG), marketing in spirit,** like `docs/architecture.svg` but for readers, not
+   developers: MCP clients on the left (Claude, Codex/ChatGPT, "any other MCP client") and the local
+   web UI (a small screenshot, captioned e.g. "custom UI for browsing and downloading conversations"),
+   all with arrows into the connector, which connects to Outlook. Product names; use logos only where
+   their usage is permitted. Note: ChatGPT (web/desktop) only connects to remote MCP servers over
+   HTTP, so it cannot use this local stdio server today; show what actually works (Claude Code,
+   Claude Desktop, Codex, other local MCP clients) or mark ChatGPT accordingly.
+3. **Setup:** `uv sync`, then the sign-in commands. A `>` note: credentials are entered only on
+   Microsoft's sign-in page, never seen by the application; tokens are kept in the encrypted local
+   cache. Then the UI command, with a larger version of the UI screenshot.
+4. **MCP tools:** every tool by name with a one-line description; no arguments. A short hint where it
+   helps (e.g. "filters such as folder, dates and scope"), nothing longer.
+5. **Development:** how to run the checks and tests (as today), plus the links to roadmap,
+   requirements, architecture and API research, moved here from the top.
+
+Keep the command cheatsheet style that already works; cut the verbose "Use it" prose. Details that
+leave the README belong in the requirements/architecture docs if they are not already there.
+
+**docs/architecture.md:**
+
+- Under "4. Repository layout", embed `docs/code-map.svg`.
+- Describe the current state only: drop history such as "removed 2026-10-04", "decided 2026-10-04"
+  and "(the summary cache was removed…)". Decisions and dates stay in the research record.
+- Every file or module mentioned (e.g. "5.1 `auth/tokens.py`") links to that file with a relative link.
 
 # Later
 
