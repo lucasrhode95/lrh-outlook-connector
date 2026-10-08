@@ -155,18 +155,18 @@ class Writes:
                 cids = re.findall(r"cid:([^\"' >]+)", page.body_html or "", re.IGNORECASE)
                 if cids or expected:
                     attachments = await self.mailbox.reader.list_attachments(draft_id)
-                    found = await self.mailbox.reader.attachment_content_ids(
-                        {draft_id: [a.id for a in attachments if a.is_inline]}
-                    )
-                    content_ids = found.get(draft_id, {})
-                    present = {cid for cid in content_ids.values() if cid}
+                    present = {
+                        attachment.content_id
+                        for attachment in attachments
+                        if attachment.is_inline and attachment.content_id
+                    }
                     if any(cid not in present for cid in cids):
                         findings.append("The server draft references missing inline images.")
                     if expected:
                         by_cid = {
-                            content_ids.get(attachment.id): attachment
+                            attachment.content_id: attachment
                             for attachment in attachments
-                            if attachment.is_inline
+                            if attachment.is_inline and attachment.content_id
                         }
                         with tempfile.TemporaryDirectory(prefix="outlook-signature-check-") as folder:
                             for index, image in enumerate(expected):

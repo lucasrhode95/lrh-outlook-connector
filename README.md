@@ -115,7 +115,11 @@ are copies of a selected message are merged with it. They are read from the serv
 cannot be read (deleted or moved meanwhile, or still throttled), the export fails, writes nothing and
 says which ones and what to do. Anything else that cannot be exported (a body, an attachment, an
 attachment listing) is marked in place, and the result's `error_summary` (the file header's "Export
-errors" line) says how many and why. In TXT the mark is a block:
+errors" line) says how many and why. For exports with attachments, inline images are included
+when their content id is found in the rendered body. If the content id or rendered body cannot be read,
+the image is included rather than silently dropped.
+
+In TXT the mark is a block:
 
 ```text
 [EXPORT ERROR] The body of this message could not be fetched.

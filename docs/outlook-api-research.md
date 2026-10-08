@@ -161,13 +161,19 @@ Sample: 25 recent conversations, 192 messages.
 | Inline | 125 of 168 file attachments. All are referenced as `cid:` in the full body; only 47 in `uniqueBody`. |
 | Sizes | median 11 KB, max 27.5 MB |
 
-**Conclusion:** export non-inline attachments by default. Include inline images only when the rendered body references them.
+**Conclusion:** export non-inline attachments by default. Include inline images only when a readable
+body is known to reference their CID. If either the attachment content id or rendered body is
+unavailable, include the image rather than silently dropping it.
 
-**Listing integration check (2026-10-04):** the documented file-attachment cast returned the
-inline attachment's `contentId` in the normal listing (1/1). This settles the reason for a separate
-per-attachment lookup: it is unnecessary for that case (H37, H19). See the public
-[fileAttachment schema](https://learn.microsoft.com/en-us/graph/api/resources/fileattachment?view=graph-rest-1.0)
-for field selection; broader attachment-type samples remain in the table above.
+**Listing integration check (2026-10-04; initial).** A one-message probe confirmed that the typed
+file-attachment cast returned its inline content id in the normal listing (1/1), but it did not check
+the batch listing path.
+
+**Follow-up (2026-10-08; H19).** A read-only Graph probe of two synthetic messages with inline files
+confirmed that the normal attachment listing and the same listing inside a batch both returned HTTP
+200. Every inline file had a non-empty content id, and the normal and batched values and counts
+matched. The selected field can replace per-image lookups. Broader attachment-type coverage remains
+as shown in the table above. See the public [fileAttachment schema](https://learn.microsoft.com/en-us/graph/api/resources/fileattachment?view=graph-rest-1.0) for the typed field selection.
 
 ### 3.6 Delta around moves and deletes (`delta_moves.py`)
 
@@ -814,6 +820,17 @@ pointing to listed signatures. The sent item and synthetic drafts were moved to 
 read-only Drafts scan found no matching test draft. No item was permanently deleted, and the one
 self-send was not retried.
 
+### 4.12 Graph inline attachment content IDs (2026-10-08)
+
+A read-only Graph probe used two synthetic messages in Deleted Items with inline file attachments.
+The attachment-list request selected
+`id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId`. The ordinary
+request and the same attachment-list request sent as a `$batch` subrequest both returned HTTP 200.
+Every inline file attachment in both responses had a non-empty `contentId`; normal and batched
+values and attachment counts matched. This confirms the field can be returned in the normal listing
+and removes the need for per-image lookups. The probe exposed no mailbox content, names, ids or CIDs
+in its output and made no writes.
+
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
 - **Works STANDALONE** at `https://outlook.office.com/searchservice/api/v2/query` with the `search` token (§2) and `X-AnchorMailbox: Oid:<oid>@<tid>`.
@@ -855,4 +872,5 @@ self-send was not retried.
 - 2026-10-08 (W10 public-tool validation): four synthetic drafts were moved to Deleted Items; none were sent.
 - 2026-10-08 (W8 research): six synthetic native signature fixtures were removed; the current list returned to its pre-test count of two and a read-only check found no test names/content. Original defaults were restored and verified. Two synthetic image drafts were moved to Deleted Items (`done: 2`, `unknown: 0`); none were sent.
 - 2026-10-08 (W8 public tools): temporary signatures were deleted and defaults restored; one synthetic self-send and synthetic drafts were moved to Deleted Items; no matching test draft or signature remains. The send was not retried.
+- 2026-10-08 (H19 Graph check): read-only normal and batched attachment listings confirmed non-empty content IDs for inline files on two synthetic messages; no writes occurred.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.

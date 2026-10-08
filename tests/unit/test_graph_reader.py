@@ -161,7 +161,7 @@ async def test_batch_concurrency_is_shared_across_calls(
 
     monkeypatch.setattr(graph, "_batch_once", counting)
     # many small batch() calls at once
-    await asyncio.gather(*(reader.attachment_content_ids({"m3": ["a2", "a3"]}) for _ in range(8)))
+    await asyncio.gather(*(reader.list_attachments_many(["m3"]) for _ in range(8)))
     assert peak == BATCH_CONCURRENCY
 
 
@@ -190,10 +190,33 @@ async def test_search(fake: FakeGraph) -> None:
     assert {m.id for m in hits} == {"m1", "m2", "m3"} and link is None
 
 
-async def test_attachment_content_ids_and_downloads(fake: FakeGraph, tmp_path: Path) -> None:
+async def test_attachment_listings_include_content_ids_without_per_item_reads(
+    fake: FakeGraph, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     reader = reader_for(fake)
-    found = await reader.attachment_content_ids({"m3": ["a2", "a3"], "m1": []})
-    assert found == {"m3": {"a2": "img1", "a3": "sig"}, "m1": {}}
+    selectors: list[str] = []
+    per_item_reads: list[str] = []
+    original_route = fake.route
+
+    def record_route(method, path, params, prefer, request):
+        if path.endswith("/attachments"):
+            selectors.append(params.get("$select", ""))
+        elif "/attachments/" in path and not path.endswith("/$value"):
+            per_item_reads.append(path)
+        return original_route(method, path, params, prefer, request)
+
+    monkeypatch.setattr(fake, "route", record_route)
+    single = await reader.list_attachments("m3")
+    many, failed = await reader.list_attachments_many(["m3", "m1"])
+
+    assert not failed
+    assert {item.id: item.content_id for item in single} == {"a1": None, "a2": "img1", "a3": "sig"}
+    assert {item.id: item.content_id for item in many["m3"]} == {"a1": None, "a2": "img1", "a3": "sig"}
+    assert len(selectors) == 3 and all(
+        "microsoft.graph.fileAttachment/contentId" in value for value in selectors
+    )
+    assert not per_item_reads
+
     size = await reader.download_attachment("m3", "a1", tmp_path / "numbers.xlsx")
     assert size == len(b"xlsx-bytes") and (tmp_path / "numbers.xlsx").read_bytes() == b"xlsx-bytes"
     assert await reader.download_mime("m1", tmp_path / "m1.eml") > 0

@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Correctness:** H19, H22 and H26.
+1. **Correctness:** H22 and H26.
 2. **Performance and cleanup:** H30–H32 and H34–H38.
 3. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
@@ -22,25 +22,7 @@ Status wording:
 - **Decision needed** — an owner choice remains.
 - **Later** — useful work outside the current build sequence.
 
-# Send and mailbox features
-
 # Correctness and reliability
-
-## H19 — Inline images can disappear from exports without an error
-
-**Status:** Pending.
-
-**Problem:** inline images are exported only when the HTML body references their `cid:`. If the body or content-id lookup fails, an image can currently be treated as unreferenced and silently skipped.
-
-**Current evidence:** Graph can return each file attachment's `contentId` directly in the attachment-list request, so the separate per-inline-image content-id lookup is unnecessary.
-
-**Check first (live):** the evidence above is not yet confirmed live in the research record. Before
-changing the code, verify that the normal attachment listing returns each file attachment's
-`contentId` (for example via `$select` with the `microsoft.graph.fileAttachment/contentId` cast) for
-messages with inline images, including in a `$batch`. Record the result in the research doc. If it
-does not work, keep the existing per-image lookup and apply only the fail-open rule.
-
-**Next:** return `contentId` from the normal attachment listing, remove the extra lookup, and use a fail-open rule: if the connector cannot determine whether an inline image is referenced, include it rather than silently dropping it.
 
 ## H22 — A scope setting alone can turn an export into a whole-mailbox export
 
@@ -166,7 +148,6 @@ merges it in; on a large mailbox it can hit the 2,000-message cap before anythin
 - remove duplicate recipient de-duplication;
 - one definition of the UI's default port/idle timeout;
 - use the production id helpers in the fake mailbox;
-- return attachment `contentId` from the normal listing instead of a separate lookup (also simplifies H19).
 
 Recent constructor/protocol cleanup reduced unrelated duplication, but these review targets remain.
 

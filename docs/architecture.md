@@ -179,7 +179,7 @@ lrh-outlook-connector/
 - `conversation_folders(conversation_ids)`: batched (folder, Internet message id) per message of each conversation, for counts.
 - `count_messages(folder_ids, window)`: the server's count per folder for a window (`$count`, `ConsistencyLevel: eventual`), in `$batch`. A folder whose sub-request fails is left out of the answer, so one failure (e.g. a folder deleted since the folder list was read) never hides the other counts. The server total needs every in-scope folder counted; the per-folder listing chooses an uncounted folder by its cached total and claims the excluded count only when every excluded folder was counted.
 - `search(query)`: `$search`, field-scoped queries passed through. `$search` returns regular ids, so each page's ids are converted with one `POST /me/translateExchangeIds` call into the immutable ids every other call uses (if that call fails, the page keeps its search ids rather than failing).
-- `list_attachments(id)`, `list_attachments_many(ids)` (batched) and `attachment_content_ids` (`contentId` via typed `$select`, for the inline images of every message of an export at once: one `$batch` item per image, 20 per batch across messages).
+- `list_attachments(id)` and `list_attachments_many(ids)` (batched) select and map the typed fileAttachment contentId directly; there is no per-image lookup.
 - `download_attachment(id, att_id)` and `download_mime(id)` stream to a file. They are retried like other GETs (429/503 after `Retry-After`, gateway errors, a connection that fails or drops mid-download), each time from scratch; what still fails is a domain error (`Upstream` with no status for a lost connection), so an export marks that one attachment instead of failing.
 - Every operation is named for error messages ("While listing attachments: …").
 
@@ -315,7 +315,7 @@ lrh-outlook-connector/
 - `formatter.py` renders **TXT** (for people): a header (counts, date span, what was left out, and the "Export errors" summary), then per-message headers with the message, conversation and internet ids, `Also in:` for merged copies, `uniqueBody` by default and `full` optional, plus attachment lines and `[EXPORT ERROR]` blocks for what failed; people are separated by `; ` (display names are often "Last, First"). Or **JSONL** (`format=jsonl`, for agents): one record per message with ids, dates, folder, `also_in`, people, the body (or `body: null` and an `export_error` object), attachment records (with the file path inside the ZIP when attachments are included, or their own `export_error`), and `attachments_export_error` when the attachments could not be listed.
 - `attachments.py` applies the attachment policy:
   - non-inline attachments by default;
-  - inline images only when the rendered body references their `cid:`;
+  - inline images when the rendered body references their `cid:`; if content id or rendered body is unavailable, include rather than silently drop;
   - `itemAttachment` → `.eml`;
   - sanitized, deduplicated names; identical files (same bytes, e.g. a signature logo on every message) are stored once per output file, and every message points to that file;
   - a failed download becomes an `[EXPORT ERROR]` block ("The attachment <name> could not be downloaded.") and an `export_error` on its JSONL record.

@@ -261,11 +261,6 @@ class Exports:
         }
         needs_html = [m.id for m in summaries if inline_ids.get(m.id)]
         html = (await self.reader.get_messages(needs_html, body_format="html")).messages if needs_html else {}
-        content_ids = (
-            await self.reader.attachment_content_ids({mid: inline_ids[mid] for mid in needs_html})
-            if needs_html
-            else {}
-        )
 
         jobs: list[tuple[str, Attachment, Path]] = []
         for index, summary in enumerate(summaries):
@@ -274,8 +269,7 @@ class Exports:
             if page is not None:
                 page_html = page.unique_body_html if request.body == "unique" else page.body_html
             for position, attachment in enumerate(found.get(summary.id, [])):
-                cid = content_ids.get(summary.id, {}).get(attachment.id)
-                if policy.wanted(attachment, content_id=cid, body_html=page_html):
+                if policy.wanted(attachment, body_html=page_html):
                     jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
 
         async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | ExportError:
