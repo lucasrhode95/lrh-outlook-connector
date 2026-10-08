@@ -369,6 +369,16 @@ leave the README belong in the requirements/architecture docs if they are not al
 - Remove "11. Build order" (renumber the following section) and repoint the roadmap's
   "Build/module map" link, which targets it, to "4. Repository layout".
 
+**docs/outlook-roadmap.md (final review, as the very last step):**
+
+- Keep only what is still open: pending implementation or decisions, live tests not yet run, and
+  checks that need a human (e.g. recipient-side rendering). Remove everything finished, including
+  W12 itself, the "Current priority" entries that no longer apply and status-wording entries no
+  longer used.
+- If nothing open remains, delete the file and remove every link to it (README, `CLAUDE.md` and
+  `AGENTS.md`, which must stay identical, and the other docs). "Later" items such as X10 and X11 count
+  as open: keep them unless the owner drops them.
+
 # Later
 
 ## X11 — SharePoint file search and download
