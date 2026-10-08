@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Correctness:** H22 and H26.
+1. **Correctness:** H26.
 2. **Performance and cleanup:** H30–H32 and H34–H38.
 3. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
@@ -23,47 +23,6 @@ Status wording:
 - **Later** — useful work outside the current build sequence.
 
 # Correctness and reliability
-
-## H22 — A scope setting alone can turn an export into a whole-mailbox export
-
-**Status:** Pending.
-
-**Terminology (decided 2026-10-08).** "Range" mixed different things; no umbrella term is used.
-
-- **Selections**, which choose messages and add up: **conversations** (`conversation_ids`),
-  **messages** (`message_ids`), a **folder** (`folder`) and a **date window** (`since`/`until`). A
-  folder and a date window combine: the messages `list_messages` would return for them.
-- **Scope** (W11: `scope.sent_items`, `scope.meeting_mail`, `scope.deleted_items`), which never selects
-  anything. It narrows what a folder or date window selects; it does not create a selection and does
-  not narrow conversations or explicit messages (conversations stay whole).
-
-**Root cause:** `ExportRequest.by_range` decides whether the folder/date selection is active, but it
-returns true not only for `since`, `until` or `folder`, but also when `scope.sent_items=false` or
-`scope.meeting_mail=false`. `Exports._select()` adds conversation messages, then calls
-`_select_range()` whenever `by_range` is true, then adds explicit messages. With no real folder or date
-selector, `_select_range()` calls `list_messages(folder=None, since=None, until=None, ...)`, an
-unbounded reachable-mailbox listing.
-
-**Example:** `export_messages(conversation_ids=["budget-thread"], scope={"meeting_mail": false})` should
-export that conversation. Today it also lists the whole reachable mailbox without meeting mail and
-merges it in; on a large mailbox it can hit the 2,000-message cap before anything is exported.
-
-**Next:**
-
-- Only `folder`, `since` and `until` select. A request with only scope settings selects nothing and is
-  refused: an export with only `scope.sent_items=false`, which today exports the newest received mail
-  of the whole mailbox, is no longer a selection.
-- Rename with the fix (no aliases, per the compatibility policy):
-
-  | Today | New |
-  |---|---|
-  | `ExportRequest.by_range` | `ExportRequest.selects_folder_or_dates` |
-  | `Exports._select_range()` | `Exports._select_folder_or_dates()` |
-  | "range export" (MCP instructions, README, requirements, architecture) | "folder or date-window export" |
-  | Error "…or a range (since/until/folder/scope.sent_items=false)" | "Select conversations, messages, a folder, or a date window (since/until)." |
-  | Requirements §10.1 selection | a **folder** and/or a **date window** (`since`/`until`), narrowed by the scope |
-
-- The web UI is unaffected: "export this view" already requires a folder or a date window.
 
 ## H26 — Oversized attachments are classified as unexpected failures
 

@@ -58,16 +58,16 @@ def zip_text(path: str, name: str) -> str:
 
 async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
-    assert artifact.filename.endswith(".zip") and artifact.message_count == 3
+    assert artifact.filename.endswith(".zip") and artifact.message_count == 4
     stem = "2026-09-28 Relatório de exemplo semanal"
     # numbers.xlsx (regular) and image001.png (inline, referenced by the unique body) are in;
-    # logo.png (inline signature, not referenced) is out; junk m4 is excluded by default.
+    # logo.png (inline signature, not referenced) is out; whole-conversation selection includes junk m4.
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/image001.png", f"{stem}/numbers.xlsx"]
     text = zip_text(artifact.path, f"{stem}.txt")
     assert "Attachment: 2026-09-28 Relatório de exemplo semanal/numbers.xlsx" in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
     assert "> First report" not in text  # unique body by default
-    assert "buy now" not in text
+    assert "buy now" in text
 
 
 async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: Exports) -> None:
@@ -168,7 +168,7 @@ async def test_server_deleted_message_is_gone_from_the_export(exports: Exports, 
     del fake.messages["m2"]
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert artifact.message_count == 2 and "Thanks!" not in text and "DELETED" not in text
+    assert artifact.message_count == 3 and "Thanks!" not in text and "DELETED" not in text
 
 
 async def test_inline_only_attachments_are_found_when_exporting_files(
@@ -330,7 +330,7 @@ async def test_each_message_carries_its_source_ids(exports: Exports) -> None:
     assert "Internet id:     <m1@example.com>" in text
 
 
-async def test_range_export_selects_the_window_and_counts_what_it_leaves_out(exports: Exports) -> None:
+async def test_folder_date_window_export_counts_what_it_leaves_out(exports: Exports) -> None:
     artifact = await exports.export(
         ExportRequest(
             since=datetime(2026, 9, 28, tzinfo=UTC), until=datetime(2026, 9, 29, 23, 59, tzinfo=UTC)
@@ -342,24 +342,64 @@ async def test_range_export_selects_the_window_and_counts_what_it_leaves_out(exp
     assert f"Left out: 1 message(s) {EXCLUSION_TEXT['deleted_or_junk']}." in text and "buy now" not in text
 
 
-async def test_range_export_without_sent_items_but_with_deleted_items(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(scope=Scope(sent_items=False, deleted_items=True)))
-    assert artifact.message_count == 4 and artifact.messages_excluded == {"outgoing": 1}  # m2 is sent
+async def test_folder_date_window_export_applies_scope(exports: Exports) -> None:
+    artifact = await exports.export(
+        ExportRequest(
+            since=datetime(2026, 9, 28, tzinfo=UTC),
+            until=datetime(2026, 9, 29, 23, 59, tzinfo=UTC),
+            scope=Scope(sent_items=False, deleted_items=True),
+        )
+    )
+    assert artifact.message_count == 3 and artifact.messages_excluded == {"outgoing": 1}  # m2 is sent
 
 
-async def test_export_rejects_scope_key_that_cannot_apply_to_explicit_ids(exports: Exports) -> None:
-    with pytest.raises(InvalidRequest, match="scope.deleted_items"):
-        await exports.export(ExportRequest(message_ids=["m1"], scope=Scope(deleted_items=True)))
+async def test_scope_alone_is_not_an_export_selection(exports: Exports) -> None:
+    with pytest.raises(InvalidRequest) as caught:
+        await exports.export(ExportRequest(scope=Scope(sent_items=False)))
+    assert str(caught.value) == "Select conversations, messages, a folder, or a date window (since/until)."
 
 
-async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None:
+async def test_scope_does_not_narrow_conversation_or_explicit_message_selections(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add(
+        FakeMessage(
+            "meeting-export",
+            "Invitation",
+            "f-inbox",
+            "2026-10-01T08:00:00Z",
+            conversation="c-rel",
+            meeting={"meetingMessageType": "meetingRequest"},
+        )
+    )
+    conversation = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], scope=Scope(meeting_mail=False), format="jsonl")
+    )
+    records = [json.loads(line) for line in Path(conversation.path).read_text(encoding="utf-8").splitlines()]
+    assert {record["id"] for record in records} == {"m1", "m2", "m3", "m4", "meeting-export"}
+
+    explicit = await exports.export(
+        ExportRequest(message_ids=["m4"], scope=Scope(deleted_items=True), format="jsonl")
+    )
+    record = json.loads(Path(explicit.path).read_text(encoding="utf-8"))
+    assert explicit.message_count == 1 and record["id"] == "m4"
+
+
+async def test_folder_date_window_selection_combines_with_explicit_ids(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(folder="inbox/projects/project alpha", message_ids=["m5"]))
     assert artifact.message_count == 2
 
 
 async def test_export_limit_is_enforced_with_counts(exports: Exports) -> None:
     with pytest.raises(InvalidRequest, match="holds 3 messages, above the limit of 2"):
-        await exports.export(ExportRequest(scope=Scope(sent_items=False), limit=2))
+        await exports.export(
+            ExportRequest(
+                since=datetime(2026, 9, 28, tzinfo=UTC),
+                until=datetime(2026, 10, 1, tzinfo=UTC),
+                scope=Scope(sent_items=False),
+                limit=2,
+            )
+        )
     with pytest.raises(InvalidRequest, match="above the limit of 1"):
         await exports.export(ExportRequest(message_ids=["m1", "m5"], limit=1))
 
@@ -373,8 +413,8 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
     await exports.mailbox.folders()
     fake.throttle_items = 10_000  # every body sub-request stays throttled
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], combine="all"))
-    assert len(artifact.unavailable_message_ids) == 3
-    assert artifact.export_errors == {"fetching message bodies": 3}
+    assert len(artifact.unavailable_message_ids) == 4
+    assert artifact.export_errors == {"fetching message bodies": 4}
     text = Path(artifact.path).read_text(encoding="utf-8")
     block = (
         "[EXPORT ERROR] The body of this message could not be fetched.\n"
@@ -384,9 +424,9 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
         "the message itself is fine\n"
         "  Fix:    export it again in a few minutes"
     )
-    assert text.count(block) == 3
+    assert text.count(block) == 4
     summary = (
-        "Export errors: 3 message bodies (3 throttled) could not be exported; "
+        "Export errors: 4 message bodies (4 throttled) could not be exported; "
         "they are marked [EXPORT ERROR] below."
     )
     assert summary in text and artifact.error_summary == summary
@@ -485,7 +525,7 @@ async def test_jsonl_export_has_one_record_per_message(exports: Exports) -> None
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], format="jsonl"))
     assert artifact.filename.endswith(".jsonl") and artifact.content_type.startswith("application/x-ndjson")
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
-    assert [r["id"] for r in records] == ["m1", "m2", "m3"]
+    assert [r["id"] for r in records] == ["m1", "m2", "m3", "m4"]
     assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report"
     assert records[2]["attachments"][0]["name"] == "numbers.xlsx" and records[0]["from"]["address"]
 
@@ -545,13 +585,15 @@ async def test_copies_on_different_pages_are_exported_once_naming_both_folders(
         ("r9", "f-inbox", "2026-10-01T09:00:01Z"),
     ):
         fake.add(FakeMessage(mid, "Note to self", folder, at, conversation="c-s9", internet_id="<s9@x>"))
-    monkeypatch.setattr("outlook_connector.service.export.orchestrator.RANGE_PAGE", 1)  # one message a page
+    monkeypatch.setattr(
+        "outlook_connector.service.export.orchestrator.FOLDER_DATE_PAGE", 1
+    )  # one message a page
     artifact = await exports.export(ExportRequest(since=datetime(2026, 10, 1, tzinfo=UTC), format="jsonl"))
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
     assert [(r["id"], r["also_in"]) for r in records] == [("r9", ["Sent Items"])]
 
 
-async def test_a_range_export_of_a_junk_heavy_mailbox_never_reads_junk(
+async def test_a_folder_date_window_export_of_a_junk_heavy_mailbox_never_reads_junk(
     exports: Exports, fake: FakeGraph
 ) -> None:
     from tests.service.test_mailbox_conversations import _junk_heavy
@@ -576,7 +618,7 @@ async def test_explicit_export_ids_are_authoritative(exports: Exports, fake: Fak
     assert artifact.messages_excluded == {}
 
 
-async def test_explicit_hidden_copy_merges_with_scoped_conversation(
+async def test_explicit_hidden_copy_merges_with_whole_conversation_selection(
     exports: Exports, fake: FakeGraph
 ) -> None:
     fake.add_folder("f-hidden", "Hidden", hidden=True)
@@ -596,11 +638,11 @@ async def test_explicit_hidden_copy_merges_with_scoped_conversation(
         ExportRequest(conversation_ids=["c-rel"], message_ids=["copy-hidden"], combine="all")
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert artifact.message_count == 3 and "Also in: Hidden" in text
+    assert artifact.message_count == 4 and "Also in: Hidden" in text
     assert artifact.messages_excluded["hidden"] == 1
 
 
-async def test_range_scope_stays_filtered_but_explicit_hidden_id_is_included(
+async def test_folder_date_scope_stays_filtered_but_explicit_hidden_id_is_included(
     exports: Exports, fake: FakeGraph
 ) -> None:
     fake.add_folder("f-hidden", "Hidden", hidden=True)
