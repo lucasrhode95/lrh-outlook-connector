@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -8,11 +9,13 @@ import pytest
 
 from outlook_connector.auth.tokens import Account
 from outlook_connector.domain.errors import AccountMismatch, InvalidRequest
+from outlook_connector.domain.models import MessageSummary
 from outlook_connector.remote.cloud_settings import CloudSettings
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ows_mail import OwsMailWriter
+from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.mutations import Mutations
@@ -69,6 +72,48 @@ async def test_conversation_read_state_covers_its_messages_in_scope(
     result = await mutations.set_read([], True, conversation_ids=["c-rel"])
     assert set(statuses(result)) == {"m1", "m2", "m3"}  # m4 is in Junk: out of scope by default
     assert not fake.messages["m4"].is_read
+
+
+async def test_conversation_read_state_expands_concurrently_with_transport_limit(
+    mutations: Mutations, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conversation_ids = [f"bulk-read-{index}" for index in range(9)]
+    message_ids = []
+    for index, conversation_id in enumerate(conversation_ids):
+        message_id = f"bulk-read-message-{index}"
+        message_ids.append(message_id)
+        fake.add(
+            FakeMessage(
+                message_id,
+                "Synthetic bulk read",
+                "f-inbox",
+                f"2026-09-{index + 1:02d}T09:00:00Z",
+                conversation=conversation_id,
+                is_read=False,
+            )
+        )
+    await mutations.mailbox.folders()
+
+    active = 0
+    peak = 0
+    original = mutations.mailbox.reader.conversation
+
+    async def capture(conversation_id: str) -> tuple[list[MessageSummary], bool]:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.001)
+            return await original(conversation_id)
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(mutations.mailbox.reader, "conversation", capture)
+    result = await mutations.set_read([], True, conversation_ids=conversation_ids)
+
+    assert peak == MAX_CONCURRENT_REQUESTS
+    assert result.counts == {"done": len(message_ids)}
+    assert all(fake.messages[message_id].is_read for message_id in message_ids)
 
 
 async def test_flag(mutations: Mutations, fake: FakeGraph) -> None:

@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H32 and H34–H38.
+1. **Performance and cleanup:** H34–H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -24,14 +24,6 @@ Status wording:
 # Correctness and reliability
 
 # Performance
-
-## H32 — Conversation selections are expanded sequentially
-
-**Status:** Pending.
-
-**Problem:** exports that select many conversations, and conversation-based read-state changes, list each conversation one after another.
-
-**Next:** expand conversations concurrently under the transport's existing four-request mailbox limit, or use a Graph batch where the response shape remains simple.
 
 # Service and code cleanup
 
