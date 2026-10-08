@@ -97,16 +97,16 @@ Lazy population:
 
 ## 8. Listing, conversations and search
 
-**Scope, shared by list, search, conversation and export:** Deleted Items and Junk Email are left out unless `include_deleted_items` (O4); a folder named in the request is always included, and a subfolder counts with its parent. Sent Items, Drafts and Outbox are included unless `include_sent_items` is false; list, search and range exports leave out meeting mail (invitations, RSVPs, cancellations) when `include_meeting_mail` is false (a conversation with real replies still shows through them; conversations stay whole); both flags point the same way (true shows more mail, false filters more). Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by range/conversation export); search covers mail only. A message id named explicitly is authoritative: `get_message` and export read it wherever Graph can, hidden folders and Sync Issues included, and copies still merge. `since`/`until` without a time zone are UTC; the service normalizes both naive and aware dates once, for every caller. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+**Scope, shared by list, search, conversation and export:** one `scope` object has independent keys: `scope.deleted_items` (default false) includes Deleted Items and Junk Email (O4); a folder named in the request is always included, and a subfolder counts with its parent. `scope.sent_items` (default true) includes Sent Items, Drafts and Outbox; `scope.meeting_mail` (default true) includes meeting mail (invitations, RSVPs, cancellations) where scope applies. A conversation stays whole. True shows more mail and false filters more; the service rejects a non-default key that an operation cannot apply. Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by folder/date-window/conversation export); search covers mail only. A message id named explicitly is authoritative: `get_message` and export read it wherever Graph can, hidden folders and Sync Issues included, and copies still merge. Web GET requests express these keys as `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests use a nested `scope` object. `since`/`until` without a time zone are UTC; the service normalizes both naive and aware dates once, for every caller. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
-**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads; it counts copies separately and includes meeting mail even when `include_meeting_mail=false` hides it. A mailbox-wide listing read folder by folder reports the window's Deleted Items and Junk counts (subfolders included) on its first page, from the same count batch that chooses the folders; a count that fails is never replaced by a cached total in what is reported, and one failed folder never hides the others' counts.
+**List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads; it counts copies separately and includes meeting mail even when `scope.meeting_mail=false` hides it. A mailbox-wide listing read folder by folder reports the window's Deleted Items and Junk counts (subfolders included) on its first page, from the same count batch that chooses the folders; a count that fails is never replaced by a cached total in what is reported, and one failed folder never hides the others' counts.
 
 - Always from the server; there is no local-only listing (`refresh=false` was removed with the summary cache on 2026-10-04).
 
 **Conversation** (`get_conversation`): every message with one `conversationId` **across all folders**, deduplicated (copies shown once) and chronological.
 
 - Messages you forgot to move into the right folder still belong to the conversation.
-- Default scope: all folders except Deleted Items and Junk, with an `include_deleted_items` flag (O4).
+- Default scope: all folders except Deleted Items and Junk; pass `scope.deleted_items=true` to include them (O4).
 - The result is bounded, with continuation for long conversations.
 - Graph rejects `$orderby` combined with the `conversationId` filter, so **sort client-side** (research §3.4).
 - In this phase, a "conversation" is exactly Exchange's conversation. Branches are not distinguished yet (§10.3).
@@ -133,14 +133,14 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 ### 10.1 Selection and options (UI and MCP)
 
-The selection is any mix of **whole conversations**, **individual messages** and a **range** (`since`/`until`, optional `folder`, `include_sent_items`), deduplicated by message and by copy. Individual messages are exported wherever they are (§8); conversations and ranges follow the scope rules. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
+The selection is any mix of **whole conversations**, **individual messages** and a **folder** and/or **date window** (`since`/`until`), deduplicated by message and by copy. Scope narrows folder/date-window selections; it never selects anything and does not narrow conversations or explicit messages. Individual messages are exported wherever they are (§8); conversations and folder/date-window selections follow the scope rules. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
 
 | Option | Default | Effect |
 |---|---|---|
 | `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures, quoted history: 74% of file attachments) are included only when the rendered body references their `cid:`. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
 | `combine` | `per_conversation` | `per_conversation`: one TXT per conversation, chronological; a selected individual message goes into its conversation's TXT. `all`: one TXT for the whole selection, chronological, with per-conversation section headers. `none`: one TXT per message. |
 | `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, dates, folder, people, body, attachments), always one file. |
-| `include_deleted_items` | off | Include Deleted Items and Junk Email (see §8). |
+| `scope` | `{"deleted_items": false, "sent_items": true, "meeting_mail": true}` | Independently narrow folder/date-window selection (see §8). |
 | `body` | `unique` | `unique` strips quoted reply history (Graph `uniqueBody`). `full` keeps it. |
 
 TXT content:
@@ -149,7 +149,7 @@ TXT content:
 - The file header says what was left out by folder, and one "Export errors: …" line counts what could not be exported, by kind and likely cause; a merged copy is named on its message (`Also in:`).
 - Then the body.
 
-**Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Conversations and ranges are listed from the server at export time.
+**Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Conversations and folder/date-window selections are listed from the server at export time.
 
 Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes. Callers never have to scan messages to learn about errors: the export result counts them (`export_errors`, `error_summary`), and `get_conversation` sets `export_error` on each affected message and counts them in `body_errors`. Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_conversation`):
 

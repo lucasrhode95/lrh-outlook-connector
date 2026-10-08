@@ -112,10 +112,17 @@ async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
     assert message["text"] == "Thanks!"
 
 
+async def test_scope_is_one_tool_argument(server: FastMCP) -> None:
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    for name in ("list_messages", "search_messages", "get_conversation", "export_messages", "set_read_state"):
+        properties = tools[name].inputSchema["properties"]
+        assert "scope" in properties
+
+
 async def test_list_messages_without_sent_items(server: FastMCP) -> None:
-    page = await call(server, "list_messages", include_sent_items=False)
+    page = await call(server, "list_messages", scope={"sent_items": False})
     assert [m["id"] for m in page["items"]] == ["m5", "m3", "m1"]
-    assert "include_sent_items=false" in (server.instructions or "")
+    assert "scope.sent_items=false" in (server.instructions or "")
     assert "m2" in [m["id"] for m in (await call(server, "list_messages"))["items"]]  # included by default
 
 

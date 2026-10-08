@@ -68,7 +68,7 @@ def test_meeting_mail_switch_reaches_the_list(client: TestClient, fake: FakeGrap
                          meeting={"meetingMessageType": "meetingRequest"}))  # fmt: skip
     shown = client.get("/api/messages", params={"folder": "inbox"}).json()
     assert "inv" in [m["id"] for m in shown["items"]]
-    hidden = client.get("/api/messages", params={"folder": "inbox", "include_meeting_mail": "false"}).json()
+    hidden = client.get("/api/messages", params={"folder": "inbox", "meeting_mail": "false"}).json()
     assert "inv" not in [m["id"] for m in hidden["items"]] and hidden["coverage"]["excluded"] == {
         "meeting_mail": 1
     }
@@ -100,13 +100,18 @@ def test_conversation_sizes(client: TestClient) -> None:
     sizes = client.post("/api/conversation-sizes", json={"conversation_ids": ["c-rel", "c-lunch"]}).json()
     assert [(s["conversation_id"], s["messages"]) for s in sizes] == [("c-rel", 3), ("c-lunch", 1)]
     assert client.post("/api/conversation-sizes", json={"conversation_ids": "c-rel"}).status_code == 400
+    with_junk = client.post(
+        "/api/conversation-sizes",
+        json={"conversation_ids": ["c-rel"], "scope": {"deleted_items": True}},
+    ).json()
+    assert with_junk[0]["messages"] == 4
 
 
 def test_attachment_download_and_junk_scope(client: TestClient) -> None:
     response = client.get("/api/messages/m3/attachments/a1")
     assert response.status_code == 200 and response.content == b"xlsx-bytes"
     ids = [m["id"] for m in client.get("/api/messages").json()["items"]]
-    with_junk = client.get("/api/messages", params={"include_deleted_items": "true"}).json()["items"]
+    with_junk = client.get("/api/messages", params={"deleted_items": "true"}).json()["items"]
     assert "m4" not in ids and "m4" in [m["id"] for m in with_junk]
 
 
