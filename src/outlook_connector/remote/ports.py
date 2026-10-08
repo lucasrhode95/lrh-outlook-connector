@@ -138,10 +138,6 @@ class MailWriter(Protocol):
         """Save into Drafts without sending; the draft's id when the backend reports it."""
         ...
 
-    async def edit_draft(self, draft_id: str, changes: dict[str, Any]) -> None:
-        """Save only validated partial changes, once."""
-        ...
-
     async def send_draft(self, draft_id: str, revision: str) -> None:
         """Send an existing draft without changing its content, once. ``revision`` is the version
         it was read at: if the draft changed since, nothing is sent."""

@@ -24,7 +24,6 @@ from outlook_connector.domain.models import (
     CombineMode,
     Conversation,
     Detail,
-    DraftEdit,
     DraftResult,
     ExportArtifact,
     ExportFormat,
@@ -97,8 +96,11 @@ per 10 minutes (a $batch counts each of its up to 20 items). This connector pace
 Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
 many small ones. On a throttling error, wait at least a minute before retrying.
 - Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
-edit_draft changes only supplied fields. Both return the Microsoft draft id and full server text/HTML,
-with verification findings. Show/use that server read-back before sending.
+Drafts are composed once, never edited. To change one, create a replacement with the full intended
+content (use the same reply_to_message_id for a reply), check its server read-back, then delete the
+old draft with delete_messages and use the new id. Never delete first. The old version remains in
+Deleted Items; tell the user. Outlook edits and attachments are not carried over. There is no version
+check against the old draft; read it first if needed.
 - Sending: only after the user explicitly asks, call send_draft with the existing Microsoft draft id.
 Never confirm on the user's behalf. It sends the stored draft without changing it, once.
 On status "unknown", ask the user to check Sent Items and Outbox before any further send.
@@ -388,7 +390,14 @@ def build_server(context: AppContext) -> FastMCP:
         reply_to_message_id: str | None = None,
         reply_all: bool = False,
     ) -> DraftResult:
-        """Save a new message or reply with exactly one body representation; return server read-back."""
+        """Save a new message or reply and return server read-back.
+
+        Drafts are composed once. To change one, create a full replacement (using the same
+        ``reply_to_message_id`` for a reply), verify its read-back, then delete the old draft with
+        ``delete_messages`` and use the new id. Never delete first. Outlook edits and attachments
+        are not carried over; the old version remains in Deleted Items. There is no version check
+        against the old draft, so read it first if needed.
+        """
         return await (await services()).writes.create_draft(
             OutgoingMessage(
                 to=to or [],
@@ -401,31 +410,6 @@ def build_server(context: AppContext) -> FastMCP:
                 reply_all=reply_all,
             )
         )
-
-    @mcp.tool(annotations=DRAFT)
-    async def edit_draft(
-        draft_id: str,
-        to: list[str] | None = None,
-        cc: list[str] | None = None,
-        bcc: list[str] | None = None,
-        subject: str | None = None,
-        text_body: str | None = None,
-        html_body: str | None = None,
-    ) -> DraftResult:
-        """Edit only supplied draft fields; an empty recipient list clears that field. Return read-back."""
-        fields = {
-            k: v
-            for k, v in {
-                "to": to,
-                "cc": cc,
-                "bcc": bcc,
-                "subject": subject,
-                "text_body": text_body,
-                "html_body": html_body,
-            }.items()
-            if v is not None
-        }
-        return await (await services()).writes.edit_draft(draft_id, DraftEdit.model_validate(fields))
 
     @mcp.tool(annotations=SEND)
     async def send_draft(draft_id: str) -> SendResult:
@@ -475,7 +459,8 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=RELOCATE)
     async def delete_messages(message_ids: MessageIds, continue_on_error: bool = True) -> MutationResult:
         """Move messages to Deleted Items. Messages already there are left alone; nothing is ever
-        deleted permanently. A result per message."""
+        deleted permanently. Also remove an old draft after creating and verifying its replacement.
+        A result per message."""
         return await (await services()).mutations.delete(message_ids, continue_on_error=continue_on_error)
 
     return mcp

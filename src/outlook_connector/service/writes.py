@@ -24,7 +24,6 @@ from outlook_connector.domain.models import (
     MAX_BODY_CHARS,
     MAX_RECIPIENTS,
     Attachment,
-    DraftEdit,
     DraftMessage,
     DraftResult,
     Message,
@@ -62,39 +61,6 @@ class Writes:
                 problem = f"Reply history verification failed: {exc}"
             result.history_intact, result.history_problem = problem is None, problem
         return result
-
-    async def edit_draft(self, draft_id: str, changes: DraftEdit) -> DraftResult:
-        """Entry point: validate supplied partial fields against an existing draft, then save once."""
-        original = await self._draft(draft_id)
-        supplied = changes.model_dump(exclude_unset=True)
-        body_changed = "text_body" in supplied or "html_body" in supplied
-        page = _body(changes.text_body, changes.html_body) if body_changed else None
-        fields = {k: v for k, v in supplied.items() if k not in ("text_body", "html_body")}
-        if any(value is None for value in fields.values()):
-            raise InvalidRequest(
-                "Draft fields cannot be null; use an empty recipient list to clear recipients."
-            )
-        to = _addresses(
-            changes.to if changes.to is not None else [r.address or "" for r in original.to], "to"
-        )
-        cc = _addresses(
-            changes.cc if changes.cc is not None else [r.address or "" for r in original.cc], "cc"
-        )
-        bcc = _addresses(
-            changes.bcc if changes.bcc is not None else [r.address or "" for r in original.bcc], "bcc"
-        )
-        _validate_envelope(to, cc, bcc, changes.subject if "subject" in fields else original.subject)
-        for key, values in (("to", to), ("cc", cc), ("bcc", bcc)):
-            if key in fields:
-                fields[key] = values
-        if page is not None:
-            fields["html_body"] = page
-        if not fields:
-            raise InvalidRequest("Supply at least one draft field to edit.")
-        expected = await self.mailbox.reader.list_attachments(draft_id)
-        self.check_account()
-        await self.writer.edit_draft(draft_id, fields)
-        return await self._read_back(draft_id, expected=expected)
 
     async def send_draft(self, draft_id: str) -> SendResult:
         """Entry point: require a server draft and the bound account. Only an id, no content.

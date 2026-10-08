@@ -321,7 +321,7 @@ and verification booleans only. Private recovery ids were kept in an encrypted, 
   production new-message mapping plus an `Attachments` array containing a synthetic PNG
   `FileAttachment:#Exchange` (`Content`, `ContentType`, `ContentId`, `IsInline`). Graph confirmed one
   inline attachment and the expected body CID. This was fixture setup, not a newly implemented
-  attachment-upload tool. Recipient-only editing through `edit_draft` retained it without findings.
+  attachment-upload tool. Recipient-only changes retained the inline attachment without findings.
 - Text reply and HTML reply-all drafts through `create_draft` both returned `verified: true` and
   `history_intact: true`. The connector's existing checks confirmed quoted structure and inline-image
   bytes. Default reply recipients selected the original's personal To recipient; reply-all also kept
@@ -560,14 +560,12 @@ string constants and behavior below are what matter.
 - **Other markers seen:** `<div id=appendonsend></div>` is a separate placeholder for content the
   client appends on send (organization disclaimers/add-ins), not the signature.
 
-**Implications for W8 (connector-inserted signatures).** Use the same convention so Outlook (Web,
-and the user's later edits) recognizes the block: one `<div id="Signature"
-data-signature-name="{name}">…</div>` in the new part of the body, above any `divRplyFwdMsg`
-header. For `edit_draft`, a body change must keep or deliberately re-insert that block; changing or
-removing the signature means replacing or dropping only the first `#Signature` element outside the
-quoted part, never one inside it. A later change of the default signature in settings does not
-touch existing drafts (it is a compose-time choice); `data-signature-name` tells which signature a
-draft carries if a refresh is ever wanted.
+**Implications for W8 (connector-inserted signatures).** Use the same convention so Outlook Web
+recognizes the block: one `<div id="Signature" data-signature-name="{name}">…</div>` in the new
+part of the body, above any `divRplyFwdMsg` header. Signature selection and placement happen when a
+draft is created; a changed draft is a full replacement, so the desired signature is composed into
+that replacement. A later change of the default signature in settings does not touch existing drafts;
+`data-signature-name` tells which signature a draft carries if a replacement is ever wanted.
 
 ### 4.7 Native roaming-signature discovery and standalone reads (2026-10-07)
 
@@ -756,6 +754,16 @@ Outlook Web and Gmail in Edge, and owner-confirmed Outlook desktop rendering. No
 cross-client behavior or coverage of every client version/HTML feature is claimed. No further W7
 implementation or validation task is identified, so W7 is removed from the current-work roadmap.
 
+### 4.10 Public-tool validation of compose-once drafts (2026-10-08)
+
+Through the MCP tools and the connector's encrypted token cache, two synthetic drafts were created;
+both returned verified Graph read-backs, and the replacement had a distinct id and matching subject.
+A follow-up synthetic draft confirmed that Outlook's returned text has a trailing CRLF terminator;
+trimming that terminator matched the submitted text. `delete_messages` moved all four throwaway
+drafts used by these checks to Deleted Items (`done: 4`, `unknown: 0`). No message was sent, and no
+test draft remains in Drafts. Nothing was permanently deleted. No mailbox content, addresses or
+identifiers were retained here.
+
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
 - **Works STANDALONE** at `https://outlook.office.com/searchservice/api/v2/query` with the `search` token (§2) and `X-AnchorMailbox: Oid:<oid>@<tid>`.
@@ -794,4 +802,5 @@ implementation or validation task is identified, so W7 is removed from the curre
   a selected fixture left a dangling pointer that was repaired. Final list/default values matched
   the original baseline, both original signature records were unchanged, and all temporary contents
   were absent. No message writes or sends occurred in these signature tests.
+- 2026-10-08 (W10 public-tool validation): four synthetic drafts were moved to Deleted Items; none were sent.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.

@@ -11,8 +11,8 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **W10 → W8:** remove `edit_draft` (drafts are composed once), then native signatures: CRUD,
-   default selection, and the default inserted into new drafts unless told otherwise.
+1. **W8:** native signatures: CRUD, default selection, and the default inserted into new drafts
+   unless told otherwise.
 2. **Correctness:** H19, H22 and H26.
 3. **Performance and cleanup:** H30–H32 and H34–H38.
 4. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
@@ -26,47 +26,10 @@ Status wording:
 
 # Send and mailbox features
 
-## W10 — Drafts are composed once: remove `edit_draft` (enabler of W8)
-
-**Status:** Decided, not built.
-
-**Decision (2026-10-07):** remove the `edit_draft` tool. A draft is composed once by `create_draft`
-and never patched. When the user wants to change a draft (text, recipients, subject or, with W8,
-the signature), the agent creates a new draft with the full intended content and then deletes the
-old one with `delete_messages` (moved to Deleted Items, so it stays recoverable).
-
-**Why:** `edit_draft` replaces the whole body. With W8 placing a signature block (`id="Signature"`,
-research §4.6) and replies carrying Exchange's quoted history, an in-place body edit must either
-make the agent resubmit signature and quote HTML, or make the connector parse the body into message,
-signature and quote regions on every draft read-back, with text/HTML ambiguity and refusals for
-drafts edited in Outlook. Today a body edit on a reply already drops the quote silently. Composing
-from parts avoids all of it: the connector writes `message + signature` and, for replies, Exchange
-appends the quote (`NewBodyContent`), so no draft body is ever parsed or rewritten.
-
-**Implementation:**
-
-- Remove `edit_draft` end to end: MCP tool, service method, `MailWriter.edit_draft`, the OWS
-  `UpdateItem`/`SaveOnly` field updates, `DraftEdit`, fakes, tests and docs. No compatibility shim.
-- Orient the agent where it looks when a change is requested (descriptions and instructions are
-  loaded once per session at the MCP handshake; no per-result note field):
-  - `create_draft` description: drafts are never edited; to change one, create the replacement
-    with the full content (for a reply, the same `reply_to_message_id`), check its read-back, then
-    delete the old draft with `delete_messages`, and use the new id from then on (e.g. `send_draft`).
-  - Drafts bullet of the MCP server instructions: the same rule, replacing the `edit_draft`
-    sentence. Never delete first. Tell the user the previous version is in Deleted Items.
-  - `delete_messages` description: also used to remove a draft after creating its replacement.
-- Update requirements §11.1, architecture (`writes.py`, `ows_mail.py`, tool table) and README.
-
-**Accepted costs:** the draft id changes on every change; body edits the user made to the draft in
-Outlook, and attachments added there, are not carried into the replacement (the old draft remains
-in Deleted Items). No version check guards the replacement: a user who edits a draft by hand knows
-what they are doing, and an agent may check the draft with the read tools first if it chooses.
-Every change, including recipient- or subject-only ones, is delete-and-recreate: one simple,
-predictable rule.
-
 ## W8 — Native signatures
 
-**Status:** Decided, not built (scope confirmed 2026-10-07). Depends on W10.
+**Status:** Decided, not built (scope confirmed 2026-10-07). Drafts are composed once; changes use
+verified replacement drafts.
 
 **Scope: native Outlook signatures only.** The connector reads and writes the signatures stored in
 the user's Outlook settings (roaming signatures, Cloud Settings adapter; contracts and live evidence
@@ -96,13 +59,14 @@ wants agent drafts to carry the corporate signature makes a native signature equ
   need new reporting machinery, ignore it silently).
 - A named signature, or a configured default, that does not exist or has no readable contents
   raises. No fallback to another signature.
-- Placement once, at creation (W10): the message body, then one `<div id="Signature"
+- Placement once, at creation: the message body, then one `<div id="Signature"
   data-signature-name="{name}">` block (the Outlook Web convention, research §4.6); for replies,
   Exchange appends the quoted history after it.
 - Native signature HTML carries images as `data:` URIs: convert them into inline attachments with
   matching `cid:` references. Text-only contents are escaped like `text_body` (drafts are HTML).
-- "Editing" a draft is delete-and-recreate (W10); the replacement resolves the default again, so a
-  default changed in between applies, and a specifically named signature must be passed again.
+- Changing a draft means delete-and-recreate after the replacement read-back. The replacement resolves
+  the default again, so a default changed in between applies, and a specifically named signature must
+  be passed again.
 
 **Intended workflow — copying a signature from a draft into a native signature:** the user creates
 a draft in Outlook (the corporate add-in inserts its signature there), then asks the agent to read

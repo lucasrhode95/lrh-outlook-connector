@@ -190,18 +190,23 @@ Build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` h
 ### 11.1 Send (first write phase)
 
 Agent-authored outgoing mail always enters Outlook Drafts first. `create_draft` accepts exactly
-one of `text_body` and `html_body`; `edit_draft` uses the same explicit fields when changing the body
-and preserves fields not supplied. Replies use `reply_to_message_id` / `reply_all` and retain Outlook's
-quoted history checks. No attachments authoring or Send As is supported.
+one of `text_body` and `html_body`. Drafts are composed once and are never patched. To change a draft,
+create a replacement with the full intended content and verify its Graph read-back before moving the
+old draft to Deleted Items with `delete_messages`; use the replacement id from then on. Never delete
+the old draft first, and tell the user the previous version remains in Deleted Items. For a reply,
+use the same `reply_to_message_id` and `reply_all` choice. The replacement has a new id; Outlook body
+edits and attachments are not carried over. There is no version check against the old draft; read
+it first if needed. Recipient- or subject-only changes recreate the whole draft. No attachments
+authoring or Send As is supported.
 
 Text is escaped into minimal HTML, preserving line breaks, indentation, repeated spaces/tabs and
 non-breaking spaces. HTML is intentional pass-through except scripts, embedded active content,
 forms, JavaScript URLs and event handlers. Both routes share one private HTML write engine.
 
-A successful create/edit requires Graph read-back and returns the draft id, server text and HTML,
-and simple findings (empty body, missing known attachments/inline images, reply history).
-Read-back retries are bounded; failure returns a failed result with the reliable saved id, never
-creates another draft, and stores no recovery registry.
+A successful create requires Graph read-back and returns the draft id, server text and HTML, and
+simple findings (empty body, missing known attachments/inline images, reply history). Read-back
+retries are bounded; failure returns a failed result with the reliable saved id, never creates
+another draft, and stores no recovery registry.
 
 The agent shows/uses the server read-back and obtains explicit human approval before calling
 `send_draft(draft_id)`. The connector requires an existing Microsoft draft and checks the bound
