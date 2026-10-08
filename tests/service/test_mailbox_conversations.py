@@ -651,6 +651,59 @@ async def test_a_per_folder_listing_reads_only_folders_with_mail_in_the_window(
     assert read == {"f-inbox", "f-proj"}  # n8 in Inbox, n7 in Projects; the others have none since then
 
 
+async def test_per_folder_reads_use_counts_and_defer_older_folders(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for index in range(160):
+        fake.add(
+            FakeMessage(
+                f"junk-extra-{index}",
+                "Synthetic junk",
+                "f-junk",
+                f"2026-09-01T10:00:{index % 60:02d}Z",
+            )
+        )
+    for index in range(60):
+        fake.add(
+            FakeMessage(
+                f"busy-{index:02d}",
+                "Synthetic busy folder",
+                "f-inbox",
+                f"2026-10-08T10:00:{index:02d}Z",
+            )
+        )
+
+    reads: list[tuple[str | None, int, int]] = []
+    original = mailbox.reader.list_messages
+
+    async def capture(
+        *,
+        folder_id: str | None,
+        since: datetime | None,
+        until: datetime | None,
+        page_size: int,
+        page: str | None,
+        skip: int = 0,
+    ):
+        reads.append((folder_id, page_size, skip))
+        return await original(
+            folder_id=folder_id,
+            since=since,
+            until=until,
+            page_size=page_size,
+            page=page,
+            skip=skip,
+        )
+
+    monkeypatch.setattr(mailbox.reader, "list_messages", capture)
+    page = await mailbox.list_messages(limit=10)
+
+    assert [item.id for item in page.items] == [f"busy-{index:02d}" for index in range(59, 49, -1)]
+    assert reads == [("f-inbox", 10, 0)]
+    state = cursors.decode(page.cursor, "list_messages")
+    assert state["offsets"]["f-sent"] == 0
+
+
 async def test_a_mostly_clean_mailbox_keeps_the_whole_mailbox_listing(
     mailbox: Mailbox, fake: FakeGraph
 ) -> None:

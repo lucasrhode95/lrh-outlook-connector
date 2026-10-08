@@ -20,7 +20,13 @@ from outlook_connector.remote.graph import (
     relative,
     sub_failure,
 )
-from outlook_connector.remote.ports import BodyFormat, FetchedMessages, FetchedSummaries, MailReader
+from outlook_connector.remote.ports import (
+    BodyFormat,
+    FetchedMessages,
+    FetchedSummaries,
+    FolderCount,
+    MailReader,
+)
 from outlook_connector.remote.transport import operation
 
 WELL_KNOWN = (
@@ -213,20 +219,31 @@ class GraphMailReader(MailReader):
     @_named("counting messages")
     async def count_messages(
         self, *, folder_ids: list[str], since: datetime | None, until: datetime | None
-    ) -> dict[str, int]:
-        """Messages in the window per folder (that folder only, not its subfolders), in $batch. A
-        folder whose sub-request fails (e.g. deleted since the folder list was read) is left out."""
-        params = {"$count": "true", "$top": 1, "$select": "id", "$filter": _window(since, until)}
+    ) -> dict[str, FolderCount]:
+        """Count messages and find the newest received date in each folder in one $batch request."""
+        params = {
+            "$count": "true",
+            "$top": 1,
+            "$select": "receivedDateTime",
+            "$orderby": "receivedDateTime desc",
+            "$filter": _window(since, until),
+        }
         requests = {
             str(index): relative(f"/me/mailFolders/{fid}/messages", params)
             for index, fid in enumerate(folder_ids)
         }
         responses = await self._graph.batch(requests, headers={"ConsistencyLevel": "eventual"})
-        counts: dict[str, int] = {}
+        counts: dict[str, FolderCount] = {}
         for key, response in responses.items():
             count = response.body.get("@odata.count")
             if response.ok and isinstance(count, int):
-                counts[folder_ids[int(key)]] = count
+                values = response.body.get("value")
+                newest = (
+                    mapping.parse_dt(values[0].get("receivedDateTime"))
+                    if isinstance(values, list) and values and isinstance(values[0], dict)
+                    else None
+                )
+                counts[folder_ids[int(key)]] = FolderCount(count, newest)
         return counts
 
     @_named("reading a message")
