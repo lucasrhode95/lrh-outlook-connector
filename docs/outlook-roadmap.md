@@ -11,10 +11,12 @@ Snapshot **2026-10-07**.
 
 ## Current priority
 
-1. **W10 → W8:** remove `edit_draft` (drafts are composed once), then native signatures: CRUD,
+1. **W11:** group the three scope flags into one `scope` object across every tool (takes
+   precedence: later items are written against the new parameter shape).
+2. **W10 → W8:** remove `edit_draft` (drafts are composed once), then native signatures: CRUD,
    default selection, and the default inserted into new drafts unless told otherwise.
-2. **Correctness:** H19, H22 and H26.
-3. **Performance and cleanup:** H30–H32 and H34–H38.
+3. **Correctness:** H19, H22 and H26.
+4. **Performance and cleanup:** H30–H32 and H34–H38.
 
 Status wording:
 
@@ -24,6 +26,33 @@ Status wording:
 - **Later** — useful work outside the current build sequence.
 
 # Send and mailbox features
+
+## W11 — One `scope` object instead of three scope flags
+
+**Status:** Decided, not built (2026-10-08). First in priority.
+
+**Why:** every read/export tool takes three loose booleans (`include_sent_items`,
+`include_meeting_mail`, `include_deleted_items`). They are one concept, the scope, and should read as
+one. Clarity change only: behavior must not change.
+
+**Design:**
+
+- One model, `Scope(extra="forbid")`: `sent_items: bool = True` (Sent Items, Drafts, Outbox),
+  `meeting_mail: bool = True` (invitations, RSVPs, cancellations), `deleted_items: bool = False`
+  (Deleted Items and Junk; a folder you name is always included). True always shows more mail.
+  Keys are independent: an omitted key keeps its default (no restating, unlike a list of enums).
+- MCP tools that take any of the flags take `scope: Scope = Scope()` instead: list_messages,
+  search_messages, get_conversation, export_messages, set_read_state and any other found.
+- One model everywhere. If a caller explicitly sets a key that has no effect for that tool (e.g.
+  `meeting_mail` on get_conversation, whose conversations stay whole), the service entry point raises
+  InvalidRequest naming the key; defaults merely present are fine.
+- Service methods take one `scope: Scope` instead of three keyword arguments; `ExportRequest` gets a
+  `scope` field. Cursor state uses the new keys (fresh format, no old-cursor reader).
+- Web: GET endpoints take `sent_items`, `meeting_mail`, `deleted_items` query params; JSON bodies
+  (export) take a `scope` object; the UI's request builders change with them, UI behavior identical.
+- Exclusion texts and error messages name the new keys (e.g. `scope.deleted_items=false`).
+- Docs: MCP server instructions and tool descriptions, README, architecture, requirements, and H22's
+  text in this roadmap. No compatibility aliases.
 
 ## W10 — Drafts are composed once: remove `edit_draft` (enabler of W8)
 
@@ -162,19 +191,18 @@ does not work, keep the existing per-image lookup and apply only the fail-open r
 
 **Next:** return `contentId` from the normal attachment listing, remove the extra lookup, and use a fail-open rule: if the connector cannot determine whether an inline image is referenced, include it rather than silently dropping it.
 
-## H22 — A scope filter alone can turn an export into a whole-mailbox window
+## H22 — A scope setting alone can turn an export into a whole-mailbox export
 
 **Status:** Pending.
 
-**Terminology (decided 2026-10-07).** "Range" mixed two different things. Export now distinguishes:
+**Terminology (decided 2026-10-08).** "Range" mixed different things; no umbrella term is used.
 
 - **Selections**, which choose messages and add up: **conversations** (`conversation_ids`),
-  **messages** (`message_ids`) and a **window** (`folder` and/or `since`/`until`: the messages
-  `list_messages` would return for that folder and those dates). "Window" matches the existing
-  `list_messages` wording ("a date window").
-- **Scope filters**, which never select anything: `include_sent_items`, `include_meeting_mail`,
-  `include_deleted_items`. They narrow a window; they do not create one and do not narrow
-  conversations or explicit messages (conversations stay whole).
+  **messages** (`message_ids`), a **folder** (`folder`) and a **date window** (`since`/`until`). A
+  folder and a date window combine: the messages `list_messages` would return for them.
+- **Scope** (W11: `scope.sent_items`, `scope.meeting_mail`, `scope.deleted_items`), which never selects
+  anything. It narrows what a folder or date window selects; it does not create a selection and does
+  not narrow conversations or explicit messages (conversations stay whole).
 
 **Root cause:** `ExportRequest.by_range` decides whether the window selection is active, but it
 returns true not only for `since`, `until` or `folder`, but also when `include_sent_items=false` or
@@ -189,18 +217,18 @@ merges it in; on a large mailbox it can hit the 2,000-message cap before anythin
 
 **Next:**
 
-- Only `folder`, `since` and `until` activate the window. A request with only scope filters selects
-  nothing and is refused: `export_messages(include_sent_items=false)` alone, which today exports the
-  newest received mail of the whole mailbox, is no longer a selection.
+- Only `folder`, `since` and `until` select. A request with only scope settings selects nothing and is
+  refused: an export with only `scope.sent_items=false`, which today exports the newest received mail
+  of the whole mailbox, is no longer a selection.
 - Rename with the fix (no aliases, per the compatibility policy):
 
   | Today | New |
   |---|---|
-  | `ExportRequest.by_range` | `ExportRequest.has_window` |
-  | `Exports._select_range()` | `Exports._select_window()` |
-  | "range export" (MCP instructions, README, requirements, architecture) | "window export" |
-  | Error "…or a range (since/until/folder/include_sent_items=false)" | "Select conversations, messages, or a window (folder and/or since/until)." |
-  | Requirements §10.1 "a **range** (`since`/`until`, optional `folder`, `include_sent_items`)" | "a **window** (`folder` and/or `since`/`until`), narrowed by the scope filters" |
+  | `ExportRequest.by_range` | `ExportRequest.selects_folder_or_dates` |
+  | `Exports._select_range()` | `Exports._select_folder_or_dates()` |
+  | "range export" (MCP instructions, README, requirements, architecture) | "folder or date-window export" |
+  | Error "…or a range (since/until/folder/include_sent_items=false)" | "Select conversations, messages, a folder, or a date window (since/until)." |
+  | Requirements §10.1 "a **range** (`since`/`until`, optional `folder`, `include_sent_items`)" | "a **folder** and/or a **date window** (`since`/`until`), narrowed by the scope" |
 
 - The web UI is unaffected: "export this view" already requires a folder or a date range.
 
