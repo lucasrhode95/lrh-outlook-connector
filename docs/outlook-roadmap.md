@@ -154,19 +154,55 @@ draft image attachments, new-message/reply placement and recipient rendering.
 
 **Current evidence:** Graph can return each file attachment's `contentId` directly in the attachment-list request, so the separate per-inline-image content-id lookup is unnecessary.
 
+**Check first (live):** the evidence above is not yet confirmed live in the research record. Before
+changing the code, verify that the normal attachment listing returns each file attachment's
+`contentId` (for example via `$select` with the `microsoft.graph.fileAttachment/contentId` cast) for
+messages with inline images, including in a `$batch`. Record the result in the research doc. If it
+does not work, keep the existing per-image lookup and apply only the fail-open rule.
+
 **Next:** return `contentId` from the normal attachment listing, remove the extra lookup, and use a fail-open rule: if the connector cannot determine whether an inline image is referenced, include it rather than silently dropping it.
 
-## H22 — A filter flag alone can turn an export into a whole-mailbox range
+## H22 — A scope filter alone can turn an export into a whole-mailbox window
 
 **Status:** Pending.
 
-**Root cause:** export has three additive selection sources: conversation ids, an optional mailbox range, and explicit message ids. `ExportRequest.by_range` is supposed to say whether the mailbox-range source is active, but it currently returns true not only for `since`, `until` or `folder`, but also when `include_sent_items=false` or `include_meeting_mail=false`.
+**Terminology (decided 2026-10-07).** "Range" mixed two different things. Export now distinguishes:
 
-`Exports._select()` first adds messages selected by conversation id, then calls `_select_range()` whenever `by_range` is true, then adds explicit message ids. These sources are merged; the explicit selection is not being ignored. The bug is that a filter flag accidentally activates an additional range selection. If no real range selector was supplied, `_select_range()` calls `list_messages(folder=None, since=None, until=None, ...)`, which is effectively an unbounded reachable-mailbox listing subject to the include filters.
+- **Selections**, which choose messages and add up: **conversations** (`conversation_ids`),
+  **messages** (`message_ids`) and a **window** (`folder` and/or `since`/`until`: the messages
+  `list_messages` would return for that folder and those dates). "Window" matches the existing
+  `list_messages` wording ("a date window").
+- **Scope filters**, which never select anything: `include_sent_items`, `include_meeting_mail`,
+  `include_deleted_items`. They narrow a window; they do not create one and do not narrow
+  conversations or explicit messages (conversations stay whole).
 
-**Example:** `export_messages(conversation_ids=["budget-thread"], include_meeting_mail=false)` should export that conversation. Today, `include_meeting_mail=false` also makes `by_range=true`, so the exporter additionally lists the whole reachable mailbox with meeting mail excluded and merges those messages with the requested conversation. On a large mailbox this can even hit the 2,000-message export cap before anything is exported.
+**Root cause:** `ExportRequest.by_range` decides whether the window selection is active, but it
+returns true not only for `since`, `until` or `folder`, but also when `include_sent_items=false` or
+`include_meeting_mail=false`. `Exports._select()` adds conversation messages, then calls
+`_select_range()` whenever `by_range` is true, then adds explicit messages. With no real window
+selector, `_select_range()` calls `list_messages(folder=None, since=None, until=None, ...)`, an
+unbounded reachable-mailbox listing.
 
-**Next:** only `since`, `until` and `folder` activate the mailbox-range selection source. `include_meeting_mail` and `include_sent_items` remain filters for a range when one is actually requested; they must never create a range on their own or broaden an explicit conversation/message selection.
+**Example:** `export_messages(conversation_ids=["budget-thread"], include_meeting_mail=false)` should
+export that conversation. Today it also lists the whole reachable mailbox without meeting mail and
+merges it in; on a large mailbox it can hit the 2,000-message cap before anything is exported.
+
+**Next:**
+
+- Only `folder`, `since` and `until` activate the window. A request with only scope filters selects
+  nothing and is refused: `export_messages(include_sent_items=false)` alone, which today exports the
+  newest received mail of the whole mailbox, is no longer a selection.
+- Rename with the fix (no aliases, per the compatibility policy):
+
+  | Today | New |
+  |---|---|
+  | `ExportRequest.by_range` | `ExportRequest.has_window` |
+  | `Exports._select_range()` | `Exports._select_window()` |
+  | "range export" (MCP instructions, README, requirements, architecture) | "window export" |
+  | Error "…or a range (since/until/folder/include_sent_items=false)" | "Select conversations, messages, or a window (folder and/or since/until)." |
+  | Requirements §10.1 "a **range** (`since`/`until`, optional `folder`, `include_sent_items`)" | "a **window** (`folder` and/or `since`/`until`), narrowed by the scope filters" |
+
+- The web UI is unaffected: "export this view" already requires a folder or a date range.
 
 ## H26 — Oversized attachments are classified as unexpected failures
 
