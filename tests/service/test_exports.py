@@ -11,7 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound, Throttled
-from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient
+from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient, Scope
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
@@ -289,8 +289,13 @@ async def test_range_export_selects_the_window_and_counts_what_it_leaves_out(exp
 
 
 async def test_range_export_without_sent_items_but_with_deleted_items(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(include_sent_items=False, include_deleted_items=True))
+    artifact = await exports.export(ExportRequest(scope=Scope(sent_items=False, deleted_items=True)))
     assert artifact.message_count == 4 and artifact.messages_excluded == {"outgoing": 1}  # m2 is sent
+
+
+async def test_export_rejects_scope_key_that_cannot_apply_to_explicit_ids(exports: Exports) -> None:
+    with pytest.raises(InvalidRequest, match="scope.deleted_items"):
+        await exports.export(ExportRequest(message_ids=["m1"], scope=Scope(deleted_items=True)))
 
 
 async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None:
@@ -300,7 +305,7 @@ async def test_range_export_combines_with_explicit_ids(exports: Exports) -> None
 
 async def test_export_limit_is_enforced_with_counts(exports: Exports) -> None:
     with pytest.raises(InvalidRequest, match="holds 3 messages, above the limit of 2"):
-        await exports.export(ExportRequest(include_sent_items=False, limit=2))
+        await exports.export(ExportRequest(scope=Scope(sent_items=False), limit=2))
     with pytest.raises(InvalidRequest, match="above the limit of 1"):
         await exports.export(ExportRequest(message_ids=["m1", "m5"], limit=1))
 

@@ -21,13 +21,16 @@ from collections.abc import Awaitable, Callable
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, WriteOutcomeUnknown
 from outlook_connector.domain.models import (
+    DEFAULT_SCOPE,
     MAX_MUTATION_ITEMS,
     ItemResult,
     MessageSummary,
     MutationResult,
+    Scope,
 )
 from outlook_connector.remote.ports import FolderTarget, MailWriter
 from outlook_connector.service.mailbox import Mailbox
+from outlook_connector.service.scope import validate_scope
 
 CHUNK = 20  # messages per OWS request
 Wanted = Callable[[MessageSummary], bool]  # is the message already as wanted?
@@ -46,17 +49,16 @@ class Mutations:
         is_read: bool,
         *,
         conversation_ids: list[str] | None = None,
-        include_deleted_items: bool = False,
+        scope: Scope = DEFAULT_SCOPE,
         continue_on_error: bool = True,
     ) -> MutationResult:
         """Entry point: bound explicit ids to 100; expand each conversation under its server limit."""
+        validate_scope(scope, sent_items=False, meeting_mail=False, deleted_items=bool(conversation_ids))
         explicit = _message_ids(message_ids, allow_empty=bool(conversation_ids))
         ids = list(explicit)
         notes = []
         for conversation_id in dict.fromkeys(conversation_ids or []):
-            expanded, truncated = await self._conversation(
-                conversation_id, include_deleted_items=include_deleted_items
-            )
+            expanded, truncated = await self._conversation(conversation_id, scope=scope)
             ids += expanded
             if truncated:
                 notes.append(
@@ -134,16 +136,14 @@ class Mutations:
 
     # ---------------------------------------------------------------- shared flow
 
-    async def _conversation(
-        self, conversation_id: str, *, include_deleted_items: bool
-    ) -> tuple[list[str], bool]:
+    async def _conversation(self, conversation_id: str, *, scope: Scope) -> tuple[list[str], bool]:
         """Every message of the conversation in scope (all copies, not merged).
 
         Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
-        results).
+        results) and ``scope`` was validated by ``set_read``.
         """
         items, truncated = await self.mailbox.reader.conversation(conversation_id)
-        skip = await self.mailbox.exclusions(include_deleted_items=include_deleted_items)
+        skip = await self.mailbox.exclusions(scope)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in items)
         return [
             m.id

@@ -7,8 +7,10 @@ from pathlib import Path
 
 import httpx
 import pytest
+from pydantic import ValidationError
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound
+from outlook_connector.domain.models import Scope
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
@@ -56,11 +58,13 @@ async def test_resolve_folder_path_and_unknown(mailbox: Mailbox) -> None:
 
 
 async def test_list_messages_pages_with_self_contained_cursor(mailbox: Mailbox) -> None:
-    first = await mailbox.list_messages(limit=2)
+    first = await mailbox.list_messages(limit=2, scope=Scope(meeting_mail=False))
     assert [m.id for m in first.items] == ["m5"]  # m4 is in Junk Email, left out by default
     assert first.coverage.excluded == {"deleted_or_junk": 1}
     assert first.cursor and not first.coverage.complete
     assert first.items[0].folder == "Inbox"
+    state = cursors.decode(first.cursor, "list_messages")
+    assert state["scope"] == {"sent_items": True, "meeting_mail": False, "deleted_items": False}
     second = await mailbox.list_messages(limit=2, cursor=first.cursor)
     assert [m.id for m in second.items] == ["m3", "m2"]
 
@@ -102,7 +106,7 @@ async def test_meeting_mail_can_be_left_out(mailbox: Mailbox, fake: FakeGraph) -
     add_meeting_conversations(fake)
     everything = await mailbox.list_messages(folder="inbox")
     assert {"inv1", "rsvp1", "cxl1", "inv2", "reply2"} <= {m.id for m in everything.items}  # default: shown
-    page = await mailbox.list_messages(folder="inbox", include_meeting_mail=False)
+    page = await mailbox.list_messages(folder="inbox", scope=Scope(meeting_mail=False))
     ids = {m.id for m in page.items}
     assert "reply2" in ids  # the conversation with a real reply still shows, through the reply
     assert not ids & {"inv1", "rsvp1", "cxl1", "inv2"}  # the meeting-only conversation is gone
@@ -113,14 +117,14 @@ async def test_meeting_mail_can_be_left_out(mailbox: Mailbox, fake: FakeGraph) -
 
 async def test_meeting_filter_survives_paging_and_search(mailbox: Mailbox, fake: FakeGraph) -> None:
     add_meeting_conversations(fake)
-    first = await mailbox.list_messages(include_meeting_mail=False, limit=2)
+    first = await mailbox.list_messages(scope=Scope(meeting_mail=False), limit=2)
     rest, cursor = list(first.items), first.cursor
     while cursor:
         page = await mailbox.list_messages(limit=2, cursor=cursor)
         rest += page.items
         cursor = page.cursor
     assert not any(m.meeting for m in rest) and "reply2" in {m.id for m in rest}
-    result = await mailbox.search("Sync", include_meeting_mail=False)
+    result = await mailbox.search("Sync", scope=Scope(meeting_mail=False))
     assert [m.id for h in result.conversations for m in h.matching_messages] == ["reply2"]
 
 
@@ -138,15 +142,15 @@ async def test_messages_deleted_on_the_server_are_gone_from_the_next_listing(
     assert "m1" not in [m.id for m in page.items]
 
 
-async def test_without_sent_items_leaves_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
-    page = await mailbox.list_messages(include_sent_items=False)
+async def test_scope_can_leave_out_sent_deleted_and_junk(mailbox: Mailbox) -> None:
+    page = await mailbox.list_messages(scope=Scope(sent_items=False))
     assert [m.id for m in page.items] == ["m5", "m3", "m1"]
     assert page.coverage.excluded == {"deleted_or_junk": 1, "outgoing": 1}
 
 
 async def test_deleted_items_and_junk_are_left_out_unless_asked_or_named(mailbox: Mailbox) -> None:
     assert "m4" not in [m.id for m in (await mailbox.list_messages()).items]
-    assert "m4" in [m.id for m in (await mailbox.list_messages(include_deleted_items=True)).items]
+    assert "m4" in [m.id for m in (await mailbox.list_messages(scope=Scope(deleted_items=True))).items]
     named = await mailbox.list_messages(folder="junkemail")  # a folder asked for by name is listed
     assert [m.id for m in named.items] == ["m4"] and not named.coverage.excluded
 
@@ -171,12 +175,10 @@ async def test_copies_of_one_message_are_shown_once(mailbox: Mailbox, fake: Fake
     assert (await mailbox.conversation_sizes(["c-self"]))[0].messages == 1
 
 
-async def test_without_sent_items_scans_past_filtered_pages_and_keeps_it_in_the_cursor(
-    mailbox: Mailbox, fake: FakeGraph
-) -> None:
+async def test_scope_survives_filtered_list_cursor(mailbox: Mailbox, fake: FakeGraph) -> None:
     for i in range(3):
         fake.add(FakeMessage(f"j{i}", "spam", "f-junk", f"2026-10-01T0{i}:00:00Z", conversation=f"cj{i}"))
-    first = await mailbox.list_messages(include_sent_items=False, limit=2)
+    first = await mailbox.list_messages(scope=Scope(sent_items=False), limit=2)
     assert [m.id for m in first.items] == ["m5"] and first.cursor  # pages of junk skipped
     second = await mailbox.list_messages(limit=2, cursor=first.cursor)
     assert [m.id for m in second.items] == ["m3"]  # m4 (junk) and m2 (sent) left out
@@ -245,11 +247,31 @@ async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(ma
     assert conversation.coverage.excluded == {"deleted_or_junk": 1}
 
 
-async def test_conversation_can_include_deleted_items_and_junk(mailbox: Mailbox) -> None:
+async def test_conversation_scope_includes_deleted_items_and_junk(mailbox: Mailbox) -> None:
     conversation = await Conversations(mailbox).get_conversation(
-        "c-rel", include_deleted_items=True, include_bodies=False
+        "c-rel", scope=Scope(deleted_items=True), include_bodies=False
     )
     assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3", "m4"]
+
+
+@pytest.mark.parametrize(
+    ("scope", "key"),
+    [(Scope(sent_items=False), "scope.sent_items"), (Scope(meeting_mail=False), "scope.meeting_mail")],
+)
+async def test_conversation_rejects_scope_keys_that_do_not_apply(
+    mailbox: Mailbox, scope: Scope, key: str
+) -> None:
+    with pytest.raises(InvalidRequest, match=key):
+        await Conversations(mailbox).get_conversation("c-rel", scope=scope, include_bodies=False)
+    whole = await Conversations(mailbox).get_conversation(
+        "c-rel", scope=Scope(sent_items=True, meeting_mail=True), include_bodies=False
+    )
+    assert [entry.message.id for entry in whole.messages] == ["m1", "m2", "m3"]
+
+
+def test_scope_rejects_unknown_keys() -> None:
+    with pytest.raises(ValidationError):
+        Scope.model_validate({"unexpected": True})
 
 
 async def test_conversation_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> None:
@@ -265,12 +287,12 @@ async def test_conversation_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> 
     assert [t.message.id for t in third.messages] == ["m3"] and third.cursor is None
 
 
-async def test_conversation_cursor_keeps_include_deleted_items(mailbox: Mailbox) -> None:
+async def test_conversation_cursor_keeps_deleted_items_scope(mailbox: Mailbox) -> None:
     conversations = Conversations(mailbox)
-    first = await conversations.get_conversation("c-rel", include_deleted_items=True, max_chars=15)
+    first = await conversations.get_conversation("c-rel", scope=Scope(deleted_items=True), max_chars=15)
     rest = []
     cursor = first.cursor
-    while cursor:  # continue without repeating include_deleted_items
+    while cursor:  # continue without repeating scope.deleted_items
         page = await conversations.get_conversation("c-rel", cursor=cursor)
         rest += [t.message.id for t in page.messages]
         cursor = page.cursor
@@ -298,7 +320,7 @@ async def test_conversation_sizes_count_like_get_conversation(mailbox: Mailbox, 
     conversations = Conversations(mailbox)
     sizes = {s.conversation_id: s.messages for s in await mailbox.conversation_sizes(["c-rel", "c-lunch"])}
     assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_conversation
-    with_junk = await mailbox.conversation_sizes(["c-rel"], include_deleted_items=True)
+    with_junk = await mailbox.conversation_sizes(["c-rel"], scope=Scope(deleted_items=True))
     assert with_junk[0].messages == 4 and not with_junk[0].at_least
     del fake.messages["m2"]
     assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 2
@@ -496,11 +518,11 @@ async def test_hidden_folders_and_items_outside_the_mail_folders_are_out_of_reac
     mailbox: Mailbox, fake: FakeGraph
 ) -> None:
     add_out_of_reach_mail(fake)
-    for include in (False, True):  # include_deleted_items never brings them back
-        page = await mailbox.list_messages(include_deleted_items=include)
+    for include in (False, True):  # scope.deleted_items never brings them back
+        page = await mailbox.list_messages(scope=Scope(deleted_items=include))
         assert not {"h1", "o1"} & {m.id for m in page.items}
         assert page.coverage.excluded["hidden"] == 3  # h1, o1 and c1 (Sync Issues)
-        found = await mailbox.search("budget", include_deleted_items=include)
+        found = await mailbox.search("budget", scope=Scope(deleted_items=include))
         assert not {"h1", "o1"} & {m.id for hit in found.conversations for m in hit.matching_messages}
     assert "f-hidden" not in {f.id for f in await mailbox.folders()}
     with pytest.raises(InvalidRequest, match="hidden folder"):
@@ -513,10 +535,10 @@ async def test_sync_issues_are_out_of_reach(mailbox: Mailbox, fake: FakeGraph) -
     fake.add_folder("f-sync2", "Sync Issues 2", alias="syncissues")  # Graph does not mark it hidden
     fake.add_folder("f-local", "Local Failures", parent="f-sync2", alias="localfailures")
     fake.add(FakeMessage("l1", "budget l1", "f-local", "2026-10-01T09:00:00Z", conversation="c-l1"))
-    for include in (False, True):  # include_deleted_items never brings them back
-        page = await mailbox.list_messages(include_deleted_items=include)
+    for include in (False, True):  # scope.deleted_items never brings them back
+        page = await mailbox.list_messages(scope=Scope(deleted_items=include))
         assert not {"c1", "l1"} & {m.id for m in page.items}
-        found = await mailbox.search("budget", include_deleted_items=include)
+        found = await mailbox.search("budget", scope=Scope(deleted_items=include))
         assert not {"c1", "l1"} & {m.id for hit in found.conversations for m in hit.matching_messages}
     assert not {"f-sync", "f-conflicts", "f-sync2", "f-local"} & {f.id for f in await mailbox.folders()}
     with pytest.raises(InvalidRequest, match="hidden folder"):
@@ -527,14 +549,14 @@ async def test_a_folder_deleted_in_outlook_counts_as_deleted_items(mailbox: Mail
     add_out_of_reach_mail(fake)
     page = await mailbox.list_messages()
     assert "d1" not in {m.id for m in page.items}
-    assert "d1" in {m.id for m in (await mailbox.list_messages(include_deleted_items=True)).items}
+    assert "d1" in {m.id for m in (await mailbox.list_messages(scope=Scope(deleted_items=True))).items}
 
 
 async def test_total_counts_only_reachable_folders_in_scope(mailbox: Mailbox, fake: FakeGraph) -> None:
     add_out_of_reach_mail(fake)
     page = await mailbox.list_messages(include_total=True)
     assert page.coverage.server_total == 4  # m1, m2, m3, m5: not Junk, Sync Issues, hidden or deleted
-    with_deleted = await mailbox.list_messages(include_total=True, include_deleted_items=True)
+    with_deleted = await mailbox.list_messages(include_total=True, scope=Scope(deleted_items=True))
     assert with_deleted.coverage.server_total == 6  # + m4 (Junk), d1 (deleted folder); never Sync Issues
 
 
@@ -754,7 +776,7 @@ async def test_total_explicitly_includes_hidden_meeting_mail(mailbox: Mailbox, f
         )
     )
     page = await mailbox.list_messages(
-        folder="inbox", include_meeting_mail=False, include_total=True, limit=20
+        folder="inbox", scope=Scope(meeting_mail=False), include_total=True, limit=20
     )
     assert page.coverage.server_total == 3 and len(page.items) == 2
     assert any("includes meeting mail" in n for n in page.coverage.notes)
