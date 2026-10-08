@@ -14,7 +14,7 @@ from outlook_connector.domain.errors import (
     Throttled,
     Upstream,
 )
-from outlook_connector.domain.models import DraftEdit, OutgoingMessage
+from outlook_connector.domain.models import OutgoingMessage
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
@@ -163,37 +163,6 @@ async def test_active_html_rejected(writes: Writes, fake: FakeGraph, page: str) 
     assert not fake.ows_calls
 
 
-async def test_partial_edit_preserves_body_and_attachments(writes: Writes, fake: FakeGraph) -> None:
-    draft = await writes.create_draft(reply())
-    saved = fake.messages[draft.id]
-    before = saved.html
-    edited = await writes.edit_draft(draft.id, DraftEdit(subject="Changed", cc=["c@example.com"]))
-    assert edited.verified and saved.html == before and len(saved.attachments) == 2
-    assert saved.subject == "Changed" and saved.cc == ("c@example.com",)
-    edited = await writes.edit_draft(draft.id, DraftEdit(text_body="New", cc=[]))
-    assert edited.text_body == "New" and not saved.cc and len(saved.attachments) == 2
-    edited = await writes.edit_draft(draft.id, DraftEdit(html_body="<b>HTML</b>"))
-    assert edited.html_body == "<b>HTML</b>"
-
-
-@pytest.mark.parametrize(
-    "changes",
-    [
-        DraftEdit(),
-        DraftEdit(text_body="x", html_body="x"),
-        DraftEdit(text_body=""),
-        DraftEdit(subject=""),
-        DraftEdit(to=[]),
-        DraftEdit(cc=["bob@example.com"]),
-    ],
-)
-async def test_invalid_edits_never_write(writes: Writes, fake: FakeGraph, changes: DraftEdit) -> None:
-    draft = await writes.create_draft(message())
-    with pytest.raises(InvalidRequest):
-        await writes.edit_draft(draft.id, changes)
-    assert len(fake.ows_calls) == 1
-
-
 async def test_send_uses_only_the_stored_draft(writes: Writes, fake: FakeGraph) -> None:
     draft = await writes.create_draft(reply())
     saved = fake.messages[draft.id]
@@ -225,11 +194,9 @@ async def test_a_draft_edited_after_the_send_read_it_is_not_sent(
     assert fake.sent_drafts == [] and fake.messages[draft.id].subject == "Edited in Outlook meanwhile"
 
 
-async def test_non_drafts_cannot_edit_or_send(writes: Writes, fake: FakeGraph) -> None:
+async def test_non_drafts_cannot_send(writes: Writes, fake: FakeGraph) -> None:
     with pytest.raises(InvalidRequest):
         await writes.send_draft("m1")
-    with pytest.raises(InvalidRequest):
-        await writes.edit_draft("m1", DraftEdit(subject="x"))
     assert not fake.ows_calls
 
 
@@ -279,8 +246,6 @@ async def test_account_mismatch_blocks_all_writes(fake: FakeGraph, tmp_path: Pat
     with pytest.raises(AccountMismatch):
         await writes.create_draft(message())
     fake.messages["m1"].is_draft = True
-    with pytest.raises(AccountMismatch):
-        await writes.edit_draft("m1", DraftEdit(subject="x"))
     with pytest.raises(AccountMismatch):
         await writes.send_draft("m1")
     assert not fake.ows_calls
