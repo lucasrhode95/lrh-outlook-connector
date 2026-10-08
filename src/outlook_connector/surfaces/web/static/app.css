@@ -209,7 +209,7 @@ input[type="search"]::placeholder { color: #9bafc4; opacity: 1; }
 .sidebar li:hover { background: #23394c; }
 .sidebar li.active { background: var(--selection); color: var(--text); font-weight: 700; }
 .sidebar .count { color: var(--muted); font-size: 12px; }
-.scope-filters { display: grid; flex: none; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: 10px 6px; margin: auto 0 0; padding: 16px 0 2px; border-top: 1px solid var(--line); }
+.scope-filters { display: grid; flex: none; grid-template-columns: minmax(0, 1fr); align-items: center; gap: 10px; margin: auto 0 0; padding: 16px 0 2px; border-top: 1px solid var(--line); }
 .scope-filters #scope-title { grid-column: 1 / -1; }
 .section-label { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .025em; text-transform: uppercase; }
 .scope-option { display: flex; min-width: 0; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; font-size: 12px; white-space: nowrap; user-select: none; }
