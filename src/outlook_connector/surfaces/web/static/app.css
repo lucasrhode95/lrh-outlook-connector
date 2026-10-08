@@ -269,8 +269,8 @@ input[type="search"]::placeholder { color: #9bafc4; opacity: 1; }
 .more { display: block; margin: 14px auto; }
 
 .reader { padding: 24px 28px; border-left: 1px solid var(--line); background: #172331; }
-.reader-head { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
-.reader-title { color: var(--text); font-size: 17px; font-weight: 700; line-height: 1.4; }
+.reader-head { display: flex; flex-direction: column; align-items: flex-start; margin-bottom: 18px; }
+.reader-title { color: #c9deeb; font-family: "Segoe UI", system-ui, sans-serif; font-size: 20px; font-weight: 600; letter-spacing: -.012em; line-height: 1.4; }
 .meta { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 12px; margin: 0; padding: 14px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .meta dt { color: var(--muted); }
 .meta dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
