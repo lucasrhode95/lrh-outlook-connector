@@ -134,35 +134,59 @@
   <text class="card-title" x="660" y="903">REMOTE</text>
   <text class="card-subtitle" x="660" y="927"><tspan class="code">remote/</tspan> · adapters behind MailReader, MailWriter, RuleWriter and SignatureStore</text>
 
-  <rect x="660" y="958" width="500" height="100" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="680" y="990">transport.py · graph.py</text>
-  <text class="detail" x="680" y="1018">keep-alive · host allowlist · GET retries</text>
-  <text class="detail" x="680" y="1044">paging · $batch · ImmutableId</text>
+  <rect x="660" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="982" font-size="19">graph.py</text>
+  <text class="detail" x="672" y="1008" font-size="16">paging · batches · files</text>
 
-  <rect x="1180" y="958" width="500" height="100" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <rect x="1198" y="970" width="32" height="26" rx="5" fill="#2b6cb0"/>
-  <text class="badge" x="1214" y="989" text-anchor="middle">R</text>
-  <text class="section-title code" x="1240" y="990">graph_mail.py · mapping</text>
-  <text class="detail" x="1200" y="1018">folders · messages · conversations</text>
-  <text class="detail" x="1200" y="1044">$search · attachments · MIME</text>
+  <rect x="915" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="982" font-size="19">graph_mail.py</text>
+  <text class="detail" x="927" y="1008" font-size="16">mail · search · files</text>
 
-  <rect x="660" y="1066" width="500" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="680" y="1098">ids.py · cloud_settings.py</text>
-  <text class="detail" x="680" y="1130">Graph immutable id ↔ OWS id</text>
-  <text class="detail" x="680" y="1160">Cloud Settings · native signatures</text>
+  <rect x="1170" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="982" font-size="19">graph_mapping.py</text>
+  <text class="detail" x="1182" y="1008" font-size="16">Graph JSON → models</text>
 
-  <rect x="1180" y="1066" width="500" height="110" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <rect x="1198" y="1078" width="32" height="26" rx="5" fill="#b7791f"/>
-  <text class="badge" x="1214" y="1097" text-anchor="middle">W</text>
-  <text class="section-title code" x="1240" y="1098">ows.py · ows_mail.py · ows_rules.py</text>
-  <text class="detail" x="1200" y="1130">drafts · send · read state · flags</text>
-  <text class="detail" x="1200" y="1160">move · soft delete · inbox-rule reads/writes</text>
+  <rect x="1425" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="982" font-size="19">urls.py</text>
+  <text class="detail" x="1437" y="1008" font-size="16">host allowlist</text>
+
+  <rect x="660" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="1056" font-size="19">ows.py</text>
+  <text class="detail" x="672" y="1082" font-size="16">JSON RPC · transport</text>
+
+  <rect x="915" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="1056" font-size="19">ows_mapping.py</text>
+  <text class="detail" x="927" y="1082" font-size="16">OWS request bodies</text>
+
+  <rect x="1170" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="1056" font-size="19">ows_mail.py</text>
+  <text class="detail" x="1182" y="1082" font-size="16">drafts · send · changes</text>
+
+  <rect x="1425" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="1056" font-size="19">ows_rules.py</text>
+  <text class="detail" x="1437" y="1082" font-size="16">read · write rules</text>
+
+  <rect x="660" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="1130" font-size="19">ports.py</text>
+  <text class="detail" x="672" y="1156" font-size="16">adapter interfaces</text>
+
+  <rect x="915" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="1130" font-size="19">transport.py</text>
+  <text class="detail" x="927" y="1156" font-size="16">auth · host · retries</text>
+
+  <rect x="1170" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="1130" font-size="19">ids.py</text>
+  <text class="detail" x="1182" y="1156" font-size="16">Graph ID ↔ OWS ID</text>
+
+  <rect x="1425" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="1130" font-size="19">cloud_settings.py</text>
+  <text class="detail" x="1437" y="1156" font-size="16">signature settings</text>
 
   <!-- Remote to Microsoft. -->
   <path class="read-flow" d="M1680 1008 H1916"/>
   <text class="flow-label" x="1800" y="994" text-anchor="middle">HTTPS reads</text>
-  <path class="write-flow" d="M1680 1113 H1916"/>
-  <text class="flow-label" x="1800" y="1099" text-anchor="middle">OWS mail + rule calls</text>
+  <path class="write-flow" d="M1680 1064 H1916"/>
+  <text class="flow-label" x="1800" y="1050" text-anchor="middle">OWS mail + rule calls</text>
   <path class="write-flow" d="M1680 1160 H1870 V1220 H1916"/>
   <text class="flow-label" x="1800" y="1208" text-anchor="middle">signature reads/writes</text>
   <text class="detail" x="1940" y="1228">Cloud Settings · native roaming signatures</text>
