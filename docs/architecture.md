@@ -233,6 +233,7 @@ lrh-outlook-connector/
 
 ### 5.9 `service/`
 
+- Numeric input bounds are validated once at service entry points, shared by MCP and web. MCP schemas describe those bounds without enforcing a second range.
 - Conversation expansion for exports and read-state changes runs in groups of four, using the shared request cap from the ports module and remote transport.
 
 **`mailbox.py`:**

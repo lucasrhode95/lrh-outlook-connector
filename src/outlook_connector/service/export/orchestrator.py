@@ -76,10 +76,12 @@ class Exports:
     async def export(self, request: ExportRequest) -> ExportArtifact:
         """Export a selection to one local file (requirements v4 §10).
 
-        Entry point: ``request`` is an ExportRequest (its fields validated by the model); this method
-        checks that something is selected and, through ``_select``, the message limit. The steps after
-        ``_select`` trust the selection and do not re-check it.
+        Entry point: the request is structurally validated as an ExportRequest. This method checks
+        the export limit and that something is selected; _select enforces the selected-message cap.
+        The steps after _select trust the selection and do not re-check it.
         """
+        if not 1 <= request.limit <= EXPORT_MAX_MESSAGES:
+            raise InvalidRequest(f"limit must be between 1 and {EXPORT_MAX_MESSAGES}.")
         if not request.conversation_ids and not request.message_ids and not request.selects_folder_or_dates:
             raise InvalidRequest("Select conversations, messages, a folder, or a date window (since/until).")
         selection = await self._select(request)

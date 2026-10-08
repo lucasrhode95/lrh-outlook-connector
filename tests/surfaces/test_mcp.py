@@ -151,6 +151,8 @@ async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
     assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3"]
     message = await call(server, "get_message", message_id="m2")
     assert message["text"] == "Thanks!"
+    short = await call(server, "get_message", message_id="m2", max_chars=1)
+    assert short["text"] == "T" and short["next_offset"] == 1
 
 
 async def test_scope_is_one_tool_argument(server: FastMCP) -> None:
@@ -158,6 +160,26 @@ async def test_scope_is_one_tool_argument(server: FastMCP) -> None:
     for name in ("list_messages", "search_messages", "get_conversation", "export_messages", "set_read_state"):
         properties = tools[name].inputSchema["properties"]
         assert "scope" in properties
+
+
+async def test_numeric_limits_are_descriptive_only(server: FastMCP) -> None:
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    expected = {
+        "list_messages": {"limit": "1 to 200"},
+        "search_messages": {"limit": "1 to 100"},
+        "get_conversation": {"max_chars": "1 to 400000"},
+        "get_message": {
+            "offset": "0 or greater",
+            "max_chars": "1 to 200000",
+        },
+        "export_messages": {"limit": "1 to 2000"},
+    }
+    for tool_name, fields in expected.items():
+        properties = tools[tool_name].inputSchema["properties"]
+        for field, description in fields.items():
+            schema = properties[field]
+            assert "minimum" not in schema and "maximum" not in schema
+            assert description in schema["description"]
 
 
 async def test_list_messages_without_sent_items(server: FastMCP) -> None:

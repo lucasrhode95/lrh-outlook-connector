@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H35–H38.
+1. **Performance and cleanup:** H36–H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -26,14 +26,6 @@ Status wording:
 # Performance
 
 # Service and code cleanup
-
-## H35 — Limits are validated in more than one layer
-
-**Status:** Pending.
-
-**Problem:** MCP signatures and service methods both enforce several numeric bounds, sometimes with different minimums.
-
-**Next:** make the service authoritative for validation because both MCP and web call it. Surface schemas/descriptions should document limits but not enforce a second, different rule.
 
 ## H36 — Derived counts are stored beside the data they count
 
