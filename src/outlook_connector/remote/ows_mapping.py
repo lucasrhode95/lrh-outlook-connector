@@ -5,10 +5,11 @@ Pure functions, no I/O: ``ows_mail`` sends what they build through ``ows.Ows``.
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
 from outlook_connector.domain.errors import WriteOutcomeUnknown
-from outlook_connector.domain.models import DraftMessage
+from outlook_connector.domain.models import DraftMessage, InlineImage
 from outlook_connector.remote import ids
 from outlook_connector.remote.ows import outcome
 from outlook_connector.remote.ports import FolderTarget
@@ -47,6 +48,18 @@ def per_id(message_ids: list[str], items: list[dict[str, Any]]) -> dict[str, str
             f"Outlook answered {len(items)} item results for {len(message_ids)} messages; it was not retried."
         )
     return {mid: outcome(item) for mid, item in zip(message_ids, items, strict=True)}
+
+
+def _inline_attachment(image: InlineImage) -> dict[str, Any]:
+    """Assumes the service has validated image bytes, content type and matching CID."""
+    return {
+        "__type": "FileAttachment:#Exchange",
+        "Name": image.name,
+        "ContentType": image.content_type,
+        "ContentId": image.content_id,
+        "IsInline": True,
+        "Content": base64.b64encode(image.content).decode("ascii"),
+    }
 
 
 def create(message: DraftMessage) -> dict[str, Any]:
@@ -91,6 +104,7 @@ def create(message: DraftMessage) -> dict[str, Any]:
             "operation": "New",
         }
         compose = "newMail"
+    item["Attachments"] = [_inline_attachment(image) for image in message.inline_images]
     return {
         "ClientSupportsIrm": True,
         "ComposeOperation": compose,

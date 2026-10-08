@@ -711,11 +711,13 @@ full records were unchanged (hashed comparison), all test contents were absent, 
 signature-list/default values were restored. Default/list revision timestamps can advance when
 values are changed and restored; no claim of restoring those metadata revisions is made.
 
-**Limits.** The tests prove native create/read/update/delete, embedded PNG add/remove, list
-registration/removal, independent default changes and no-default behavior through our authentication.
-They do not prove rename, editing RTF, concurrent-write races, every image format, public MCP write
-tools, or integration/recipient rendering of automatic signatures in a draft. Graph-first routing
-remains unchanged: these native operations fill the documented roaming-signature gap in Graph.
+**Limits of the 2026-10-07 lifecycle tests.** Those tests proved native create/read/update/delete,
+embedded PNG add/remove, list registration/removal, independent default changes and no-default
+behavior through our authentication. The 2026-10-08 follow-up below tests rename behavior, case and
+special-name round-trips, and a CID-to-data-URI-to-inline-draft image path. It still does not prove
+RTF editing, concurrent-write races, every image format, visual browser rendering, or recipient-
+dependent corporate add-in behavior. Graph-first routing remains unchanged: native signatures fill
+the documented roaming-signature gap in Graph.
 
 ### 4.9 W7 HTML compatibility matrix (2026-10-07)
 
@@ -764,6 +766,54 @@ drafts used by these checks to Deleted Items (`done: 4`, `unknown: 0`). No messa
 test draft remains in Drafts. Nothing was permanently deleted. No mailbox content, addresses or
 identifiers were retained here.
 
+### 4.11 Native signature name and inline-image follow-up (2026-10-08)
+
+**Scope.** Live calls used the connector's encrypted, bound read/write profiles and its transport;
+no browser credentials were used. Only unique synthetic names and drafts were created. Writes were
+sent once. No real signature content was changed and no message was sent.
+
+**Rename and case.** Writing the same content under a new name created a second list entry; it did
+not replace the old entry. Both new-message and reply defaults stayed on the old name. Deleting that
+synthetic old entry removed it from the list but left both default pointers on the now-missing name.
+The original defaults were restored and read back. Two names that differed only by letter case
+coexisted and returned their distinct contents. Treat names as exact, case-sensitive keys; updating
+content does not rename. A rename is create under the new name, then delete the old one, and callers
+must not expect default pointers to follow.
+
+**Other names.** A synthetic name with spaces, an accented character, plus and ampersand round-tripped
+through the list, exact-name content read and reply default, which was then restored. A comma-name
+probe returned `InvalidRequest` before its round-trip could be proven. A read-only cleanup scan found
+no comma test entry or content. Reject commas in the connector to avoid ambiguity in the
+comma-joined name list. The W8 name validation applies this result; the failed variant was not retried.
+
+**Inline image path.** A synthetic OWS draft with a CID-referenced inline PNG was read through Graph;
+the connector downloaded bytes matching the generated PNG. Those bytes were embedded as a
+`data:image/png` URI in a throwaway native signature. Cloud Settings read-back contained the same
+PNG bytes. A second synthetic draft inserted the signature content with a CID and inline attachment;
+Graph read-back retained the CID reference, inline attachment flag and byte-identical image. This
+proves the storage/attachment association used by W8. Visual browser rendering was not inspected.
+
+**Cleanup.** Six non-comma signature fixtures were removed. The list returned to its pre-test count
+of two, a read-only scan found no W8 test names or content, and the original defaults were verified
+restored. The two synthetic image drafts were moved to Deleted Items (`done: 2`, `unknown: 0`); no
+test draft remains in Drafts. Nothing was permanently deleted.
+
+**Public-tool validation (2026-10-08).** The local MCP server used the encrypted read/write token
+profiles to exercise list/get/create/update/delete and default selection with unique synthetic
+signatures. A new-message draft used the selected native default. Graph read-back confirmed its
+signature text, recipient, CID reference and byte-equal inline PNG. One synthetic draft was sent once
+to the signed-in account (`sent`). A strict post-send check for the custom `data-signature-name`
+attribute did not pass; read-only inspection confirmed the sent copy retained signature text and a
+CID reference. A separate reply draft used a temporary reply default; its Graph read-back confirmed
+the signature block before quoted synthetic history, the inline CID, and a recipient matching the
+synthetic sender. Visual browser rendering was not inspected.
+
+The temporary signatures were deleted and the original defaults restored. A later read-only signature
+list found the pre-test count of two, no synthetic W8 signature name, and defaults either empty or
+pointing to listed signatures. The sent item and synthetic drafts were moved to Deleted Items; a
+read-only Drafts scan found no matching test draft. No item was permanently deleted, and the one
+self-send was not retried.
+
 ## 5. Substrate search (`/searchservice/api/v2/query`), parked
 
 - **Works STANDALONE** at `https://outlook.office.com/searchservice/api/v2/query` with the `search` token (§2) and `X-AnchorMailbox: Oid:<oid>@<tid>`.
@@ -803,4 +853,6 @@ identifiers were retained here.
   the original baseline, both original signature records were unchanged, and all temporary contents
   were absent. No message writes or sends occurred in these signature tests.
 - 2026-10-08 (W10 public-tool validation): four synthetic drafts were moved to Deleted Items; none were sent.
+- 2026-10-08 (W8 research): six synthetic native signature fixtures were removed; the current list returned to its pre-test count of two and a read-only check found no test names/content. Original defaults were restored and verified. Two synthetic image drafts were moved to Deleted Items (`done: 2`, `unknown: 0`); none were sent.
+- 2026-10-08 (W8 public tools): temporary signatures were deleted and defaults restored; one synthetic self-send and synthetic drafts were moved to Deleted Items; no matching test draft or signature remains. The send was not retried.
 - No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.

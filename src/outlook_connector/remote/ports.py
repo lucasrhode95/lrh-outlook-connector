@@ -127,6 +127,38 @@ class FetchedSummaries:
     failed: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class SignatureSettings:
+    """Fresh native signature settings; scope is opaque and passed back unchanged."""
+
+    names: tuple[str, ...]
+    new_default: str | None
+    reply_default: str | None
+    scope: Any
+    revision: str
+
+
+@dataclass(frozen=True)
+class SignatureContents:
+    """HTML and text contents plus a read-time revision for one exact signature name."""
+
+    html: str | None
+    text: str | None
+    revision: str
+
+
+class SignatureStore(Protocol):
+    """Account-scoped native signature settings; each write is sent once."""
+
+    def account(self) -> dict[str, Any]: ...
+    async def settings(self) -> SignatureSettings: ...
+    async def contents(self, name: str, settings: SignatureSettings) -> SignatureContents | None: ...
+    async def create(self, name: str, html: str, text: str, settings: SignatureSettings) -> None: ...
+    async def update(self, name: str, html: str, text: str, settings: SignatureSettings) -> None: ...
+    async def delete(self, name: str) -> None: ...
+    async def set_default(self, name: str | None, which: str, settings: SignatureSettings) -> None: ...
+
+
 class MailWriter(Protocol):
     """Writes as the signed-in account. Each call is sent once and never retried."""
 
