@@ -162,7 +162,6 @@ class Conversations:
                 excluded=excluded,
                 notes=notes,
             ),
-            body_errors=len(errors),
         )
 
     async def bodies(
