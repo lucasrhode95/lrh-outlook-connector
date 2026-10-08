@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H37–H38.
+1. **Performance and cleanup:** H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -26,22 +26,6 @@ Status wording:
 # Performance
 
 # Service and code cleanup
-
-## H37 — Repeated logic still has multiple sources of truth
-
-**Status:** Pending.
-
-**Main cleanup targets:**
-
-- one canonical message timestamp (`received_at` or `sent_at`);
-- one failure/detail formatter and one fetched-failure shape;
-- one shared authentication/retry loop for normal requests and downloads;
-- one authority for URL/host validation;
-- remove duplicate recipient de-duplication;
-- one definition of the UI's default port/idle timeout;
-- use the production id helpers in the fake mailbox;
-
-Recent constructor/protocol cleanup reduced unrelated duplication, but these review targets remain.
 
 ## H38 — Small dead-code cleanup
 

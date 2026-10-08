@@ -88,6 +88,7 @@ lrh-outlook-connector/
 │  ├─ remote/                      # all Microsoft protocol knowledge (async)
 │  │  ├─ ports.py                  # MailReader / MailWriter protocols the service depends on
 │  │  ├─ transport.py              # shared httpx.AsyncClient and request policy
+│  │  ├─ urls.py                   # central outbound host policy and Graph continuation links
 │  │  ├─ graph.py                  # Graph plumbing: paging, $batch, ImmutableId preference, downloads
 │  │  ├─ graph_mail.py             # MailReader over Graph
 │  │  └─ graph_mapping.py          # Graph JSON → domain models
@@ -119,6 +120,7 @@ lrh-outlook-connector/
 │  │  ├─ mutations.py              # read state, flag, move, delete
 │  │
 │  └─ surfaces/
+│     ├─ ui_settings.py            # one default UI port and idle timeout
 │     ├─ mcp_main.py               # FastMCP (stdio) tools
 │     └─ web/
 │        ├─ web_main.py            # uvicorn launch + idle shutdown (imported only by `ui`)
@@ -148,9 +150,9 @@ lrh-outlook-connector/
 ### 5.2 `remote/transport.py`
 
 - One `httpx.AsyncClient` per process. It keeps connections alive within a call.
-- Host allowlist: `graph.microsoft.com`, `outlook.office.com`, `outlook.cloud.microsoft`. No redirects. (Sign-in traffic to `login.microsoftonline.com` goes through MSAL, not this client.)
+- `remote/urls.py` is the sole outbound URL policy: it owns the HTTPS host allowlist and keeps Graph continuation links under the versioned Graph root. No redirects. Sign-in traffic to `login.microsoftonline.com` goes through MSAL, not this client.
 - Response size caps. Downloads (attachments, MIME) stream.
-- Retries **only for idempotent requests**: GETs, and read-style POSTs the caller marks idempotent (`$batch` of GETs). They honor `429` / `Retry-After`. Writes (`write=True`) are sent once: an answer that never completes, or a 5xx, raises `WriteOutcomeUnknown` (the write may have happened); a 4xx or 429 is a definite failure. A 401 still renews the token once, since nothing was processed.
+- One auth/retry state machine handles ordinary requests and streamed downloads. Retries are limited to idempotent requests: GETs, and read-style POSTs the caller marks idempotent (`$batch` of GETs). They honor `429` / `Retry-After`. Writes (`write=True`) are sent once: an answer that never completes, or a 5xx, raises `WriteOutcomeUnknown` (the write may have happened); a 4xx or 429 is a definite failure. A 401 still renews the token once, since nothing was processed.
 - At most **4 requests in flight** per process: Exchange Online allows about 4 concurrent requests per app and mailbox (and 10,000 per 10 minutes).
 - **401** (token rejected: revoked, or a continuous-access-evaluation challenge): the token is renewed once (`force_refresh`, or the `claims` challenge from `WWW-Authenticate`) and the request retried; a second 401 raises `AuthenticationRequired` with the sign-in command. **403** is "access denied" for that item and never asks for a new sign-in.
 - Maps HTTP and Graph/OWS errors to domain errors. An error names the operation in progress (`operation()` context, e.g. "While fetching message bodies"), the HTTP status, the service error code and a shortened message, and the `request-id`. Throttling errors state the limits. Logs metadata only.
@@ -158,7 +160,7 @@ lrh-outlook-connector/
 ### 5.3 `remote/ids.py`
 
 - Graph immutable REST id → OWS `ItemId`: swap the base64 alphabet (`-`→`/`, `_`→`+`). The same applies to `conversationId`. Verified live (research §4.2).
-- This is the only place that converts IDs.
+- This is the only place that converts IDs; the synthetic mailbox calls these helpers too.
 
 ### 5.4 `remote/graph.py`, `graph_mail.py`, `graph_mapping.py`
 
@@ -219,6 +221,8 @@ lrh-outlook-connector/
 ### 5.7 `domain/models.py` and `errors.py`
 
 - Pydantic models: `Folder`, `Recipient`, `MessageSummary` (with `also_in` for merged copies, and `meeting` on meeting mail: kind, start, end, location, out of date; read from Graph's `eventMessage` fields in the same listing, so no extra requests), `Message`, `Attachment`, `Coverage` (with `excluded` counts per `ExclusionReason`: `deleted_or_junk`, `outgoing`), `MessagePage` (with cursor), `ConversationHit` (with `message_count`) + `SearchResult`, `MessageContent`, `ConversationMessage` + `Conversation`, `ConversationSize`, `ExportRequest`, `ExportArtifact`. Drafts add OutgoingMessage (explicit text/HTML, reply context and signature selection), private DraftMessage (including inline images), DraftResult and SendResult. Signature tools return SignatureList, SignatureDetails and SignatureWriteResult; mutations add ItemResult and MutationResult.
+- `MessageSummary` exposes one `received_at` value: Graph receive time, with send time as fallback. It has no parallel sent-time field.
+- `Failure` is the structured per-item failure value for batch reads.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
 - These models are the schema source for MCP (FastMCP derives tool input/output schemas from them) and for the web JSON API. No hand-written schemas.
 - `ExportError` (step, status, code, message, request id, likely cause, `retry`, fix) describes a gap in an export or conversation body.
@@ -256,7 +260,7 @@ lrh-outlook-connector/
 
 **`failures.py`:**
 - One classification of failed Microsoft requests for exports and conversations: `export_error(step, failure)` turns the remote layer's `Failure` (status, code, shortened message, request id; status `None` = no response) into an `ExportError` with the likely cause, `retry` and the fix: 429/503 throttled (retry), other 5xx or no response service or network (retry), 403 access denied, 404 deleted or moved during the export, anything else unexpected (report it with the request id). `error_from` separately classifies the known local 150 MB attachment download limit and recommends downloading that attachment directly from Outlook.
-- `error_block` renders the TXT block used by exports and `get_conversation` (which also returns the `ExportError` itself); `error_summary` writes the export header's one "Export errors: …" line.
+- `describe` is the one detail formatter for structured remote failures and `ExportError`. `error_block` renders the TXT block used by exports and `get_conversation` (which also returns the `ExportError` itself); `error_summary` writes the export header's one "Export errors: …" line.
 - Later (E3): build the reply tree from `Message-ID` / `In-Reply-To` / `References`, label branches, with a fallback for the user's own messages that lack headers.
 
 **`writes.py`:**
@@ -335,10 +339,10 @@ lrh-outlook-connector/
 - Bounded responses with self-contained cursors.
 - Attachments, MIME and export artifacts are returned as local file paths, never inline base64.
 - Server instructions explain the scope object, what is out of reach (hidden folders, non-mail items; search is mail only), merged copies, coverage and cursors, `scope.sent_items=false` for "latest mail", `include_total`, the export options (`format=jsonl` for analysis), Graph's throttling limits (no parallel tool calls; prefer one folder/date-window export), the 150 MB attachment download limit, and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
-- List and search results are compact by default (`detail="full"` for every field).
+- List and search results are compact by default (`detail="full"` for every field). Message dates have one `received_at` value.
 
 **`web/`:**
-- Starlette JSON API over the same service calls, plus `POST /api/export` (one download; an `X-Export-Errors` header carries the "Export errors" line when something could not be exported, and the UI shows it) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
+- Starlette JSON API over the same service calls. UI port and idle timeout defaults come from `surfaces/ui_settings.py`. It also provides `POST /api/export` (one download; an `X-Export-Errors` header carries the "Export errors" line when something could not be exported, and the UI shows it) and `POST /api/heartbeat` (keeps the idle timer alive while a tab is open).
 - `index.html` + `app.js` provide:
   - Outlook-style rows: sender, subject and preview; unread rows with a blue bar and blue subject; Outlook dates ("Fri 9:31 AM"); flag and paperclip icons; file chips under messages with attachments (names fetched after the list loads, one batched `POST /api/attachments` per 200 messages; a chip downloads its file); meeting mail labelled (Invite, Updated, Canceled, Accepted, Tentative, Declined) with its time and place, a conversation showing its current invitation. The whole row is clickable; colors follow Outlook's light and dark themes;
   - a conversation-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, conversations show an accurate count. An expanded conversation spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;

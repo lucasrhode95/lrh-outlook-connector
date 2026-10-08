@@ -278,8 +278,8 @@ def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[l
         cc = plain(original.cc)
     if not to and not cc and sender:
         to = [sender]
-    to = _unique(_addresses(to, "to"))
-    return to, [a for a in _unique(_addresses(cc, "cc")) if a.lower() not in {t.lower() for t in to}]
+    to = _addresses(to, "to")
+    return to, [a for a in _addresses(cc, "cc") if a.lower() not in {t.lower() for t in to}]
 
 
 FORMATTING = (
