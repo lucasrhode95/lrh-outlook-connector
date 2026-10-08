@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import time
 from datetime import UTC, datetime, timedelta, timezone
@@ -701,7 +702,7 @@ async def test_a_per_folder_listing_reads_only_folders_with_mail_in_the_window(
     assert read == {"f-inbox", "f-proj"}  # n8 in Inbox, n7 in Projects; the others have none since then
 
 
-async def test_per_folder_reads_use_counts_and_defer_older_folders(
+async def test_per_folder_reads_use_count_weighted_chunks_with_current_heads(
     mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     for index in range(160):
@@ -749,7 +750,8 @@ async def test_per_folder_reads_use_counts_and_defer_older_folders(
     page = await mailbox.list_messages(limit=10)
 
     assert [item.id for item in page.items] == [f"busy-{index:02d}" for index in range(59, 49, -1)]
-    assert reads == [("f-inbox", 10, 0)]
+    assert reads.count(("f-inbox", 10, 0)) == 1
+    assert {fid for fid, _size, _skip in reads} == {"f-inbox", "f-sent", "f-project"}
     state = cursors.decode(page.cursor, "list_messages")
     assert state["offsets"]["f-sent"] == 0
 
@@ -895,3 +897,55 @@ async def test_bad_message_ids_use_neutral_not_found_wording(mailbox: Mailbox, o
         else:
             await mailbox.attachments("bad-id")
     assert "deleted on the server" not in str(error.value)
+
+
+@pytest.mark.parametrize("new_folder", [False, True])
+async def test_concurrent_unknown_folder_reads_share_one_refresh(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch, new_folder: bool
+) -> None:
+    await mailbox.folders()
+    if new_folder:
+        fake.add_folder("new-or-outside", "New")
+    original = mailbox.reader.list_folders
+    all_started = asyncio.Event()
+    calls = 0
+    started = 0
+
+    async def fetch():  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        await all_started.wait()
+        return await original()
+
+    async def reach():  # type: ignore[no-untyped-def]
+        nonlocal started
+        started += 1
+        if started == 4:
+            all_started.set()
+        return await mailbox.reach(["new-or-outside"])
+
+    monkeypatch.setattr(mailbox.reader, "list_folders", fetch)
+    results = await asyncio.gather(*(reach() for _ in range(4)))
+    assert calls == 1
+    assert all(("new-or-outside" in folders) is new_folder for folders, _hidden in results)
+    await mailbox.reach(["new-or-outside"])
+    assert calls == 1
+
+
+async def test_eventual_count_dates_do_not_hide_newest_message_on_the_first_page(
+    mailbox: Mailbox, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _junk_heavy(fake)
+    original = mailbox.reader.count_messages
+
+    async def lagging_counts(**kwargs):  # type: ignore[no-untyped-def]
+        counts = await original(**kwargs)
+        fake.add(FakeMessage("newest", "Arrived after count", "f-sent", "2026-10-10T09:00:00Z"))
+        return counts
+
+    monkeypatch.setattr(mailbox.reader, "count_messages", lagging_counts)
+    page = await mailbox.list_messages(limit=3)
+    assert [m.id for m in page.items] == ["newest", "n8", "n7"]
+    assert page.cursor
+    next_page = await mailbox.list_messages(limit=3, cursor=page.cursor)
+    assert "newest" not in {m.id for m in next_page.items}

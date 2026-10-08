@@ -134,7 +134,7 @@ class FetchedSummaries:
 
 @dataclass(frozen=True)
 class SignatureSettings:
-    """Fresh native signature settings; scope is opaque and passed back unchanged."""
+    """Fresh native settings; opaque scope is passed back unchanged, or None if no records exist."""
 
     names: tuple[str, ...]
     new_default: str | None

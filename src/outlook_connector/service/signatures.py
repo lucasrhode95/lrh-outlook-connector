@@ -28,6 +28,7 @@ _DATA_IMAGE = re.compile(
     r"""(?P<prefix>\bsrc\s*=\s*)(?P<quote>["'])(?P<uri>data:image/[^"'<> \t\r\n]+)(?P=quote)""",
     re.IGNORECASE,
 )
+_HTML_ATTRIBUTE = re.compile(r"""(?P<name>[^\s/=>]+)\s*=\s*(?P<value>"[^"]*"|'[^']*'|[^\s>]+)""")
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpg",
     "image/png": "png",
@@ -278,6 +279,20 @@ class _PassiveSignatureHtml(HTMLParser):
             compact = re.sub(r"[\s\x00-\x1f]+", "", unescape(value or "")).lower()
             if name.startswith("on") or compact.startswith(("javascript:", "vbscript:")):
                 raise InvalidRequest("Active HTML URLs and event handlers are not allowed in a signature.")
+        # HTMLParser accepts unquoted attributes, but inline conversion requires a quoted data URI.
+        # Match whole attribute values so text inside another quoted attribute is not treated as src.
+        for attribute in _HTML_ATTRIBUTE.finditer(self.get_starttag_text() or ""):
+            if attribute.group("name").lower() != "src":
+                continue
+            source = attribute.group("value")
+            decoded = unescape(source.strip("\"'"))
+            if (
+                decoded.strip().lower().startswith("data:image/")
+                and _DATA_IMAGE.fullmatch(f"src={source}") is None
+            ):
+                raise InvalidRequest(
+                    "Signature image data URIs must use a quoted src attribute without whitespace."
+                )
 
     handle_startendtag = handle_starttag
 

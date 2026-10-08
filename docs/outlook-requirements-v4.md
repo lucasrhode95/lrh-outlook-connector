@@ -98,7 +98,9 @@ Lazy population:
 
 ## 8. Listing, conversations and search
 
-**Scope, shared by list, search, conversation and export:** one `scope` object has independent keys: `scope.deleted_items` (default false) includes Deleted Items and Junk Email (O4); a folder named in the request is always included, and a subfolder counts with its parent. `scope.sent_items` (default true) includes Sent Items, Drafts and Outbox; `scope.meeting_mail` (default true) includes meeting mail (invitations, RSVPs, cancellations) where scope applies. A conversation stays whole. True shows more mail and false filters more; outside export, the service rejects a non-default key an operation cannot apply. Export accepts scope with conversation or message selections but applies it only to folder/date-window selections. Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by folder/date-window/conversation export); search covers mail only. A message id named explicitly is authoritative: `get_message` and export read it wherever Graph can, hidden folders and Sync Issues included, and copies still merge. Web GET requests express these keys as `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests use a nested `scope` object. `since`/`until` without a time zone are UTC; the service normalizes both naive and aware dates once, for every caller. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
+Mailbox-wide listings are newest first. Folder counts guide chunk sizes but their eventual newest dates do not replace current head reads. Concurrent reads are cancelled and awaited when their call fails or is cancelled.
+
+**Scope, shared by list, search, conversation and export:** one `scope` object has independent keys: `scope.deleted_items` (default false) includes Deleted Items and Junk Email (O4); a folder named in the request is always included, and a subfolder counts with its parent. `scope.sent_items` (default true) includes Sent Items, Drafts and Outbox; `scope.meeting_mail` (default true) includes meeting mail (invitations, RSVPs, cancellations) where scope applies. A conversation keeps sent and meeting mail but follows scope.deleted_items. True shows more mail and false filters more; outside export, the service rejects a non-default key an operation cannot apply. Export applies scope.deleted_items to conversations, all scope keys to folder/date-window selections, and no scope filters to explicit message ids. Results count what was left out. **Hidden folders, Sync Issues (classic Outlook's conflict copies) and non-mail items are out of reach** (never listed, searched or selected by folder/date-window/conversation export); search covers mail only. A message id named explicitly is authoritative: `get_message` and export read it wherever Graph can, hidden folders and Sync Issues included, and copies still merge. Web GET requests express these keys as `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests use a nested `scope` object. `since`/`until` without a time zone are UTC; the service normalizes both naive and aware dates once, for every caller. **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 
 **List** (`list_messages`): folder-scoped or **mailbox-wide** (for A2), with inclusive `since`/`until` and a count limit. An optional server total (per-folder counts) helps plan large reads; it counts copies separately and includes meeting mail even when `scope.meeting_mail=false` hides it. A mailbox-wide listing read folder by folder reports the window's Deleted Items and Junk counts (subfolders included) on its first page, from the same count batch that chooses the folders; a count that fails is never replaced by a cached total in what is reported, and one failed folder never hides the others' counts.
 
@@ -134,14 +136,14 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 ### 10.1 Selection and options (UI and MCP)
 
-The selection is any mix of **whole conversations**, **individual messages** and a **folder** and/or **date window** (`since`/`until`), deduplicated by message and by copy. Scope narrows folder/date-window selections; it never selects anything and does not narrow conversations or explicit messages. A request with scope alone is refused. Individual messages are exported wherever they are (§8); folder/date-window selections follow the scope rules. At most 2,000 messages; `limit` lowers that, and a larger selection is refused with its count rather than cut.
+The selection is any mix of **whole conversations**, **individual messages** and a **folder** and/or **date window** (`since`/`until`), deduplicated by message and by copy. Scope never selects anything. It narrows folder/date-window selections; conversations keep sent and meeting mail but follow scope.deleted_items, and explicit message ids are authoritative. A request with scope alone is refused. Individual messages are exported wherever they are (§8); folder/date-window selections follow the scope rules. At most 2,000 logical messages (copies count once); `limit` lowers that, and a larger selection is refused with its count rather than cut.
 
 | Option | Default | Effect |
 |---|---|---|
 | `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures and quoted history; 74% of file attachments) are included when the rendered body references their `cid:`; if the content id or rendered body is unavailable, include them rather than silently dropping them. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
 | `combine` | `per_conversation` | `per_conversation`: one TXT per conversation, chronological; a selected individual message goes into its conversation's TXT. `all`: one TXT for the whole selection, chronological, with per-conversation section headers. `none`: one TXT per message. |
 | `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, one `received_at` timestamp, folder, people, body, attachments), always one file. |
-| `scope` | `{"deleted_items": false, "sent_items": true, "meeting_mail": true}` | Independently narrow folder/date-window selection (see §8). |
+| `scope` | `{"deleted_items": false, "sent_items": true, "meeting_mail": true}` | Narrow folder/date windows; `deleted_items` also applies to conversations (see §8). |
 | `body` | `unique` | `unique` strips quoted reply history (Graph `uniqueBody`). `full` keeps it. |
 
 TXT content:
@@ -198,14 +200,14 @@ Native Outlook roaming signatures are managed by list_signatures, get_signature,
 create_signature, update_signature, delete_signature and set_default_signature. The settings are
 account-bound through the write sign-in; each write is sent once. Names are exact and case-sensitive;
 commas are refused because the name list uses commas as separators. Creation and content update take
-passive HTML and derive the text format. Update changes contents without renaming. New-message and
+passive HTML and derive the text format; data-image `src` attributes must be quoted without whitespace in the URI. Update changes contents without renaming. New-message and
 reply/forward defaults are independent and may be cleared; deleting a selected signature may leave a
 dangling default. Add-in-generated, recipient-dependent signatures are outside connector behavior.
 
 create_draft freshly reads the native default appropriate to new mail or reply/forward, inserting it
 after the supplied body and before Exchange's quoted reply history. An explicit signature name
 overrides that default. include_signature=false suppresses insertion. A missing or unreadable
-selected/configured signature fails without fallback. Native data-URI images become inline attachments
+selected/configured signature fails without fallback. Absent list/default setting records mean no names/defaults, so unsigned drafts remain usable. Present records must still be readable and share the account scope. With no scope returned, native signature writes ask the user to configure a signature in Outlook first; the connector never invents a scope. Native data-URI images become inline attachments
 with matching CID references; text-only signatures are escaped as body text. A replacement draft
 resolves the default again, so a caller must select a named signature again if it wants the same one.
 

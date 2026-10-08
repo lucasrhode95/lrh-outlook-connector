@@ -30,6 +30,7 @@ from outlook_connector.domain.models import (
     Scope,
 )
 from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first
 from outlook_connector.service.export import attachments as policy
 from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
@@ -140,11 +141,11 @@ class Exports:
         conversation_ids = list(dict.fromkeys(request.conversation_ids))
         for start in range(0, len(conversation_ids), MAX_CONCURRENT_REQUESTS):
             batch = conversation_ids[start : start + MAX_CONCURRENT_REQUESTS]
-            expanded = await asyncio.gather(
+            expanded = await gather_cancel_on_error(
                 *(
                     self.conversations.messages(
                         conversation_id,
-                        scope=Scope(sent_items=True, meeting_mail=True, deleted_items=True),
+                        scope=Scope(deleted_items=request.scope.deleted_items),
                         merge_result=False,
                     )
                     for conversation_id in batch
@@ -201,8 +202,7 @@ class Exports:
             _add(excluded, page.coverage.excluded)
             for item in page.items:
                 selected.setdefault(item.id, item)
-            unique = {m.internet_message_id or m.id: m for m in selected.values()}  # copies count once
-            _check_limit(unique, request.limit, more=page.cursor is not None)
+            _check_limit(selected, request.limit, more=page.cursor is not None)
             cursor = page.cursor
             if cursor is None:
                 return
@@ -425,9 +425,10 @@ def _add(total: dict[ExclusionReason, int], counts: dict[ExclusionReason, int]) 
 
 
 def _check_limit(selected: dict[str, MessageSummary], limit: int, *, more: bool = False) -> None:
-    if len(selected) > limit:
+    count = len({m.internet_message_id or m.id for m in selected.values()})
+    if count > limit:
         raise InvalidRequest(
-            f"The selection holds {'more than ' if more else ''}{len(selected)} messages, above "
+            f"The selection holds {'more than ' if more else ''}{count} messages, above "
             f"the limit of {limit} (at most {EXPORT_MAX_MESSAGES}). Narrow the date window or "
             "split the export."
         )

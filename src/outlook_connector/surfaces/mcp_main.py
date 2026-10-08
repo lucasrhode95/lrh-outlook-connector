@@ -61,8 +61,8 @@ Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSV
 `scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is \
 always included; subfolders count with their parent. True shows more mail, false filters more. Use \
 `scope.sent_items=false` for "the latest mail I received", including mail that rules filed into \
-other folders. Export scope filters folder/date windows only; selected conversations \
-and message ids stay whole. \
+other folders. Export scope filters folder/date windows; conversations follow scope.deleted_items but keep \
+sent and meeting mail, and explicit message ids are authoritative. \
 coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, grouped into conversations \
@@ -91,12 +91,13 @@ by folder (full pages, a bit slower) and coverage.notes says so: pass that note 
 path for you to read with your own file tools. Downloads are limited to 150 MB; for a larger attachment, \
 download it directly from Outlook. save_message_mime saves the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
-are included and merged. Folder/date-window selections follow scope; conversation selections stay whole. \
+are included and merged. Folder/date-window selections follow scope; conversations follow \
+scope.deleted_items but keep sent and meeting mail. \
 Scope alone does not select anything.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
 and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
-2,000 messages (`limit` lowers that). Scope alone is not a selection; conversation and message \
-selections stay whole. For a large period, prefer \
+2,000 messages (`limit` lowers that). Scope alone is not a selection; conversations follow \
+scope.deleted_items, and explicit message ids are authoritative. For a large period, prefer \
 a folder/date-window export over enumerating ids. format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
@@ -121,10 +122,10 @@ signature. create_draft freshly resolves and inserts the default for new mail or
 signature selects a named signature and include_signature=false suppresses all signatures.
 - Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
 Drafts are composed once, never edited. To change one, create a replacement with the full intended
-content (use the same reply_to_message_id for a reply), check its server read-back, then delete the
-old draft with delete_messages and use the new id. Never delete first. The old version remains in
-Deleted Items; tell the user. Outlook edits and attachments are not carried over. There is no version
-check against the old draft; read it first if needed.
+content (use the same reply_to_message_id and reply_all choice for a reply), check its server read-back,
+then delete the old draft with delete_messages and use the new id. Never delete first. The old version
+remains in Deleted Items; tell the user. Outlook edits and attachments are not carried over.
+There is no version check against the old draft; read it first if needed.
 - Sending: only after the user explicitly asks, call send_draft with the existing Microsoft draft id.
 Never confirm on the user's behalf. It sends the stored draft without changing it, once.
 On status "unknown", ask the user to check Sent Items and Outbox before any further send.
@@ -366,8 +367,9 @@ def build_server(context: AppContext) -> FastMCP:
         """Export conversations, messages and/or a folder/date window to one local file; returns its path.
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
-        are exported once. Scope narrows only folder/date-window selections; selected conversations and
-        messages stay whole. Scope alone is not a selection. The result counts exclusions and body gaps.
+        are exported once. Sent/meeting scope narrows only folder/date-window selections.
+        Conversations follow scope.deleted_items; explicit message ids are authoritative.
+        Scope alone is not a selection. The result counts exclusions and body gaps.
         With attachments, inline images are included when their CID is found in the rendered body;
         if the content id or body cannot be read, the image is included rather than silently dropped.
         """
@@ -480,7 +482,8 @@ def build_server(context: AppContext) -> FastMCP:
         Set signature to select a native signature by exact name, or include_signature=False to
         suppress all signatures. A missing or unreadable selected signature raises instead of falling back.
         Drafts are composed once. To change one, create a full replacement (using the same
-        ``reply_to_message_id`` for a reply), verify its read-back, then delete the old draft with
+        ``reply_to_message_id`` and ``reply_all`` choice for a reply), verify its read-back, then delete
+        the old draft with
         ``delete_messages`` and use the new id. Never delete first. Outlook edits and attachments
         are not carried over; the old version remains in Deleted Items. There is no version check
         against the old draft, so read it first if needed.

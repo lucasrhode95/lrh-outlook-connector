@@ -16,7 +16,6 @@ there would remove it from the folder view), so there is never a hard delete.
 
 from __future__ import annotations
 
-import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 
@@ -35,6 +34,7 @@ from outlook_connector.remote.ports import (
     FolderTarget,
     MailWriter,
 )
+from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.failures import describe
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.scope import validate_scope
@@ -68,7 +68,7 @@ class Mutations:
         selected_conversations = list(dict.fromkeys(conversation_ids or []))
         for start in range(0, len(selected_conversations), MAX_CONCURRENT_REQUESTS):
             batch = selected_conversations[start : start + MAX_CONCURRENT_REQUESTS]
-            expanded_conversations = await asyncio.gather(
+            expanded_conversations = await gather_cancel_on_error(
                 *(self._conversation(conversation_id, scope=scope) for conversation_id in batch)
             )
             for conversation_id, (expanded, truncated) in zip(batch, expanded_conversations, strict=True):
