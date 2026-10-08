@@ -1,6 +1,6 @@
-# Outlook connector
+# Outlook for MCP clients
 
-Connect your Outlook mailbox to local MCP clients and a small browser UI.
+A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
 - Find messages by subject and contents, then read messages and full conversations.
 - Export conversations, messages, or a folder/date window with attachments.
@@ -9,9 +9,14 @@ Connect your Outlook mailbox to local MCP clients and a small browser UI.
 
 ![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](docs/connector-overview.svg)
 
-## Setup
+## Requirements
 
-Python 3.12 or newer is required.
+- Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Use an Exchange Online mailbox.
+
+A separate Python installation is optional: uv selects an installed Python 3.12 or newer, or installs a managed version when needed.
+
+## Setup
 
 ```bash
 uv sync
@@ -21,7 +26,9 @@ uv run outlook-connector auth write  # optional: drafts, sending, rules, signatu
 
 > Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens stay in the encrypted local cache.
 
-For example, add the local stdio server to Claude Code with `uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp`. Other local MCP clients use the same command in their stdio settings. ChatGPT does not connect directly to a local MCP server; it requires a remote MCP endpoint. OpenAI documents [Secure MCP Tunnel for supported products](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
+Add the local stdio server to Claude Code with `uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp`. Other local MCP clients use the same command in their stdio settings.
+
+> **Client compatibility:** This connector requires an agentic client running locally that can launch a stdio MCP server, such as Claude Code or Codex. ChatGPT Web, Claude web chat, Copilot web chat, and similar hosted experiences cannot start this local process. This project does not provide a remote MCP endpoint; connecting hosted clients requires one to be deployed separately.
 
 The UI opens in your browser and stops after 30 minutes without activity:
 
