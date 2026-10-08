@@ -119,7 +119,7 @@ there is no tenant-specific Online Archive evidence; consult the public mail lim
 | 100, no window | 4.7 s, 96, no, 18 (+16) | 1.0 s, 13, 1 | 6 pages, 7.5 s |
 | 25, last 7 days | 2.1 s, 21, no, 7 (+16) | 0.4 s, 5, 1 | 5 pages, 2.5 s |
 | 100, last 7 days | 2.6 s, 75, yes, 8 (+16) | 0.8 s, 13, 1 | 5 pages, 3.9 s |
-| JSONL range export, last 30 days | 11.1 s, 185 messages, 22 (+214) | | 28.3 s, 185 messages, 20 (+198) |
+| JSONL folder/date-window export, last 30 days | 11.1 s, 185 messages, 22 (+214) | | 28.3 s, 185 messages, 20 (+198) |
 
 Both methods return the same message ids in the same order in all four cases (0 positions differ). Pages hold 21 of 25 and 96 of 100 because 4 copies (self-sent mail in Inbox and Sent Items) are folded into `also_in`, the same for both methods. The per-folder note names the left-out share and the biggest folders. A first run measured the same within 0.5 s (export 10.8 s vs 36.6 s).
 
