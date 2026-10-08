@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H31–H32 and H34–H38.
+1. **Performance and cleanup:** H32 and H34–H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -24,14 +24,6 @@ Status wording:
 # Correctness and reliability
 
 # Performance
-
-## H31 — `include_total` can send the same count batch twice
-
-**Status:** Pending.
-
-**Problem:** the first page of a per-folder listing counts folders to choose/list them, then `include_total` asks `_count` for effectively the same data again.
-
-**Next:** carry the first count result through the call and reuse it for `server_total` and H27's excluded counts.
 
 ## H32 — Conversation selections are expanded sequentially
 
