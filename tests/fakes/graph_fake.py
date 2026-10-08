@@ -20,7 +20,9 @@ from urllib.parse import parse_qs, unquote, urlencode, urlsplit
 
 import httpx
 
-ROOT = "https://graph.microsoft.com/v1.0"
+from outlook_connector.remote.ids import to_graph, to_ows
+from outlook_connector.remote.urls import GRAPH_ROOT
+
 REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
 
@@ -403,7 +405,7 @@ class FakeGraph:
             assert content["BodyType"] == "HTML", (
                 "a reply body must be HTML, or Exchange flattens the history"
             )
-            original = self.messages.get(_graph_id(item["ReferenceItemId"]["Id"]))
+            original = self.messages.get(to_graph(item["ReferenceItemId"]["Id"]))
             if original is None:
                 return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
             conversation = original.conversation
@@ -423,11 +425,11 @@ class FakeGraph:
                         bcc=addresses("BccRecipients"), is_draft=disposition == "SaveOnly", text=text,
                         attachments=list(inline), html=page)
         )  # fmt: skip
-        created = [{"ItemId": {"Id": _ows_id(new_id)}}] if disposition == "SaveOnly" else []
+        created = [{"ItemId": {"Id": to_ows(new_id)}}] if disposition == "SaveOnly" else []
         return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
 
     def _ows_target(self, item_id: dict[str, Any]) -> FakeMessage | None:
-        return self.messages.get(_graph_id(item_id["Id"]))
+        return self.messages.get(to_graph(item_id["Id"]))
 
     def ows_UpdateItem(self, body: dict[str, Any]) -> list[dict[str, Any]]:  # noqa: N802
         assert body["SuppressReadReceipts"] is True
@@ -478,7 +480,7 @@ class FakeGraph:
         if target["__type"] == "DistinguishedFolderId:#Exchange":
             folder = self.aliases[target["Id"]]
         else:
-            folder = _graph_id(target["Id"])
+            folder = to_graph(target["Id"])
             assert any(f["id"] == folder for f in self.folders), folder
         return self._ows_move(body["ItemIds"], folder)
 
@@ -626,7 +628,7 @@ class FakeGraph:
         if params.get("$count") == "true":
             body["@odata.count"] = len(items)
         if skip + top < len(items):
-            body["@odata.nextLink"] = f"{ROOT}{path}?{urlencode({**params, '$skip': skip + top})}"
+            body["@odata.nextLink"] = f"{GRAPH_ROOT}{path}?{urlencode({**params, '$skip': skip + top})}"
         return body
 
     def translate_ids(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any], None]:
@@ -762,11 +764,3 @@ def sample_mailbox() -> FakeGraph:
         )
     )
     return g
-
-
-def _ows_id(graph_id: str) -> str:
-    return graph_id.replace("-", "/").replace("_", "+")
-
-
-def _graph_id(ows_id: str) -> str:
-    return ows_id.replace("/", "-").replace("+", "_")

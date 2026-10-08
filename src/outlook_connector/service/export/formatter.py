@@ -40,7 +40,7 @@ def body_text(message: Message, kind: str) -> str:
 
 def render_message(item: RenderedMessage, *, position: str) -> str:
     m = item.message
-    lines = [RULE, f"[{position}] {stamp(m.received_at or m.sent_at)}"]
+    lines = [RULE, f"[{position}] {stamp(m.received_at)}"]
     lines.append(f"From:    {m.sender.display() if m.sender else '(unknown)'}")
     if m.to:
         lines.append(f"To:      {people(m.to)}")
@@ -81,7 +81,7 @@ def render_file(
     Assumes (not re-checked here): every item carries its body text, or the error block in ``text`` with
     ``export_error`` set (the orchestrator builds them).
     """
-    dates = [m.message.received_at or m.message.sent_at for m in items]
+    dates = [m.message.received_at for m in items]
     known = [d for d in dates if d]
     span = f"{stamp(min(known))} to {stamp(max(known))}" if known else "no dates"
     head = [
@@ -121,7 +121,6 @@ def jsonl_record(item: RenderedMessage, *, body_kind: str) -> str:
         "folder": m.folder,
         "also_in": m.also_in,
         "received_at": m.received_at.isoformat() if m.received_at else None,
-        "sent_at": m.sent_at.isoformat() if m.sent_at else None,
         "subject": m.subject,
         "from": person(m.sender),
         "to": [person(r) for r in m.to],

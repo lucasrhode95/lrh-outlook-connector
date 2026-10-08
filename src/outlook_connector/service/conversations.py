@@ -41,7 +41,7 @@ def base_subject(subject: str | None) -> str | None:
 
 
 def oldest_first(m: MessageSummary) -> float:
-    stamp = m.received_at or m.sent_at
+    stamp = m.received_at
     return stamp.timestamp() if stamp else 0.0
 
 

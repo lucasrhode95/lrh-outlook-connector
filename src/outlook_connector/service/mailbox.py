@@ -69,7 +69,6 @@ COMPACT_DROP = {
     "importance": None,
     "internet_message_id": None,
     "is_draft": None,
-    "sent_at": None,
     "folder_id": None,
 }
 
@@ -864,14 +863,14 @@ def _match_folder(ref: str, folders: dict[str, Folder]) -> Folder | None:
 
 
 def _within(m: MessageSummary, since: datetime | None, until: datetime | None) -> bool:
-    stamp = m.received_at or m.sent_at
+    stamp = m.received_at
     if stamp is None:
         return since is None and until is None
     return (since is None or stamp >= since) and (until is None or stamp <= until)
 
 
 def _stamp(m: MessageSummary) -> float:
-    stamp = m.received_at or m.sent_at
+    stamp = m.received_at
     return stamp.timestamp() if stamp else float("-inf")
 
 

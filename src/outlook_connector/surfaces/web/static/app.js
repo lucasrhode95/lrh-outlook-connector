@@ -297,7 +297,7 @@ function showCoverage(coverage) {
 function sortedConversations() {
   const conversations = [...state.conversations.values()];
   if (state.mode === "search") return conversations; // server rank order
-  const latest = (t) => Math.max(...[...t.messages.values()].map((m) => Date.parse(m.received_at || m.sent_at || 0)));
+  const latest = (t) => Math.max(...[...t.messages.values()].map((m) => Date.parse(m.received_at || 0)));
   return conversations.sort((a, b) => latest(b) - latest(a));
 }
 
@@ -434,13 +434,13 @@ function renderSingle(conversation) {
         response ? null : el("div", { class: "preview" }, message.preview || ""),
         meetingPanel(message.meeting),
         fileChips(message)),
-      sideColumn(message.received_at || message.sent_at, { flagged: message.flagged, attachments: message.has_attachments })));
+      sideColumn(message.received_at, { flagged: message.flagged, attachments: message.has_attachments })));
 }
 
 function renderConversation(conversation) {
   if (isSingle(conversation)) return renderSingle(conversation);
   // newest on top, like the list and Outlook's conversation view (exports and get_conversation stay oldest first)
-  const when = (m) => Date.parse(m.received_at || m.sent_at || 0);
+  const when = (m) => Date.parse(m.received_at || 0);
   const messages = [...conversation.messages.values()].sort((a, b) => when(b) - when(a));
   const newest = messages[0];
   const senders = [...new Set(messages.map((m) => who(m.sender)))].join(SEPARATOR);
@@ -457,7 +457,7 @@ function renderConversation(conversation) {
       el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
       el("div", { class: "preview" }, newest.preview || ""),
       meetingPanel(meeting)),
-    sideColumn(newest.received_at || newest.sent_at,
+    sideColumn(newest.received_at,
       { flagged: messages.some((m) => m.flagged), attachments: messages.some((m) => m.has_attachments) }));
   const node = el("div", { class: "conversation" }, row);
   if (conversation.expanded) {
@@ -490,7 +490,7 @@ function renderMessage(message, conversation) {
       response ? null : el("div", { class: "preview" }, message.preview || message.subject || ""),
       meetingPanel(message.meeting),
       fileChips(message)),
-    sideColumn(message.received_at || message.sent_at, { flagged: message.flagged, attachments: message.has_attachments }));
+    sideColumn(message.received_at, { flagged: message.flagged, attachments: message.has_attachments }));
 }
 
 function toggle(set, value, on) {

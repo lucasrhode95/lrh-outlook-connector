@@ -77,7 +77,8 @@ that is only invitations, RSVPs and cancellations disappears; one with real repl
 through them (get_conversation still returns the whole conversation).
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
-- Reading: get_conversation returns a whole conversation across folders, oldest first, with bodies \
+- Reading: messages expose one received_at timestamp (Graph receive time, with send time as fallback); \
+get_conversation returns a whole conversation across folders, oldest first, with bodies \
 without quoted history by default; a body that could not be fetched sets export_error on its \
 message; callers can count messages carrying export_error without inspecting their body text. \
 get_message reads one message with offset/max_chars continuation.

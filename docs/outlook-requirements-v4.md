@@ -90,6 +90,7 @@ Authentication requirements:
 Lazy population:
 
 - **Folders** are cached and served from the cache immediately; a cache older than 10 minutes is refreshed in the background. A full refresh is cheap: about 23 folders in under a second.
+- Every message exposes one `received_at` timestamp: Graph's `receivedDateTime` when present, otherwise `sentDateTime`; absent values remain null.
 - **Message metadata is not mirrored or cached.** It is fetched by every list/search/conversation call. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2). The summary cache for instant display was removed on 2026-10-04: listing is fast enough without it.
 - **Bodies and attachments** are fetched only on read or export. Attachment bytes are never cached automatically.
 - **No local retention** (decided 2026-10-02): mail deleted on the server is gone here too. Reading it gives "not found". A message selected by id that is gone when the export starts fails the export with a clear message; one deleted while the export runs is marked `[EXPORT ERROR]` in the file (§10.1).
@@ -139,7 +140,7 @@ The selection is any mix of **whole conversations**, **individual messages** and
 |---|---|---|
 | `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures and quoted history; 74% of file attachments) are included when the rendered body references their `cid:`; if the content id or rendered body is unavailable, include them rather than silently dropping them. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
 | `combine` | `per_conversation` | `per_conversation`: one TXT per conversation, chronological; a selected individual message goes into its conversation's TXT. `all`: one TXT for the whole selection, chronological, with per-conversation section headers. `none`: one TXT per message. |
-| `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, dates, folder, people, body, attachments), always one file. |
+| `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, one `received_at` timestamp, folder, people, body, attachments), always one file. |
 | `scope` | `{"deleted_items": false, "sent_items": true, "meeting_mail": true}` | Independently narrow folder/date-window selection (see §8). |
 | `body` | `unique` | `unique` strips quoted reply history (Graph `uniqueBody`). `full` keeps it. |
 
