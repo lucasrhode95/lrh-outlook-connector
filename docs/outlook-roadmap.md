@@ -115,7 +115,23 @@ of this feature, either in `create_signature` or as a documented agent step.
 contents, and deleting a selected signature can leave a dangling default. Cloud Settings normalizes
 HTML wrappers, line breaks and id prefixes, so verify visible text and decoded image bytes rather
 than byte-identical HTML. Names are the identifiers (no stable ids): check them against a fresh
-list. Rename, case sensitivity and commas in names are untested.
+list.
+
+**Research first (live, before building the tools):** with throwaway signatures only, never the
+user's real ones, and recorded in research §4.8:
+
+1. **Rename:** how Outlook renames a signature (same entry under a new name, or delete and
+   re-create), and whether the new-message/reply defaults follow the new name or dangle.
+2. **Case:** whether names are case-sensitive, and whether two names differing only in case can
+   coexist.
+3. **Commas and special characters:** whether a name containing a comma is accepted (the name list
+   is comma-joined), and how names with spaces, accents and other characters round-trip through
+   the list, contents and default settings.
+4. **Images:** that a signature created with a `data:` URI image (converted from a draft's `cid:`
+   inline attachment) reads back intact and renders when inserted into a new draft.
+
+Let the results shape name validation in `create_signature`/`update_signature` and whether
+`update_signature` supports renaming at all.
 
 **Corporate signature add-in (documented, not handled in code):** in this tenant the official
 signature is generated per message by the organization-deployed, mandatory officeatwork "Mail
