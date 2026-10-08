@@ -11,7 +11,7 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Performance and cleanup:** H30–H32 and H34–H38.
+1. **Performance and cleanup:** H31–H32 and H34–H38.
 2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
@@ -24,16 +24,6 @@ Status wording:
 # Correctness and reliability
 
 # Performance
-
-## H30 — Per-folder listing reads busy folders in several rounds
-
-**Status:** Pending.
-
-**Problem:** the per-folder merge starts every folder with a small chunk and doubles it as needed. A mailbox dominated by one busy folder can therefore read that folder two or three times sequentially for one page.
-
-**Current evidence:** the count batch can return both each folder's message count and its newest message date in the same request.
-
-**Next:** use the counts to size each folder's first read according to its expected share of the page, and use the newest date when useful to avoid reading folders that cannot contribute to the current merge. Aim for one read per contributing folder in the common case.
 
 ## H31 — `include_total` can send the same count batch twice
 
