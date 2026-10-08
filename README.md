@@ -1,6 +1,6 @@
-# Outlook connector
+# Outlook for MCP clients
 
-Connect your Outlook mailbox to local MCP clients and a small browser UI.
+A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
 - Find messages by subject and contents, then read messages and full conversations.
 - Export conversations, messages, or a folder/date window with attachments.
@@ -9,9 +9,14 @@ Connect your Outlook mailbox to local MCP clients and a small browser UI.
 
 ![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](docs/connector-overview.svg)
 
-## Setup
+## Requirements
 
-Python 3.12 or newer is required.
+- Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+- Use an Exchange Online mailbox.
+
+A separate Python installation is optional: uv selects an installed Python 3.12 or newer, or installs a managed version when needed.
+
+## Setup
 
 ```bash
 uv sync
@@ -21,7 +26,49 @@ uv run outlook-connector auth write  # optional: drafts, sending, rules, signatu
 
 > Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens stay in the encrypted local cache.
 
-For example, add the local stdio server to Claude Code with `uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp`. Other local MCP clients use the same command in their stdio settings. ChatGPT does not connect directly to a local MCP server; it requires a remote MCP endpoint. OpenAI documents [Secure MCP Tunnel for supported products](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt).
+### Configure a local MCP client
+
+Replace `/path/to/lrh-outlook-connector` with the absolute path to your clone.
+
+**Claude Code** — add the server from a terminal:
+
+```bash
+claude mcp add --transport stdio outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
+```
+
+See the [Claude Code MCP guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
+
+**Codex CLI** — register the same stdio command:
+
+```bash
+codex mcp add outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
+```
+
+See the [Codex MCP guide](https://developers.openai.com/codex/mcp/).
+
+**GitHub Copilot Chat in VS Code** — add this server to `.vscode/mcp.json` in your workspace:
+
+```json
+{
+  "servers": {
+    "outlook-connector": {
+      "type": "stdio",
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/lrh-outlook-connector",
+        "outlook-connector",
+        "mcp"
+      ]
+    }
+  }
+}
+```
+
+Replace the sample path with your clone’s absolute path. In Windows JSON paths, escape backslashes (for example, `C:\\Users\\you\\lrh-outlook-connector`). This example requires Copilot Chat’s Agent mode with local MCP support; see [VS Code’s MCP guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers).
+
+> **Client compatibility:** These examples require a locally running agentic client that can launch a stdio MCP server. Hosted ChatGPT Web, Claude web chat, Copilot web chat, and similar services cannot start this local process. This project does not provide a remote MCP endpoint; hosted clients require one to be deployed separately.
 
 The UI opens in your browser and stops after 30 minutes without activity:
 
@@ -31,7 +78,7 @@ uv run outlook-connector ui
 
 ![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](docs/ui-preview.svg)
 
-*Screenshot uses mocked mailbox data; no real mailbox content is shown.*
+> **Message preview:** The web UI is intended for manual message exports. The preview is plain text, not rendered HTML; it shows how extracted message content will appear in an export.
 
 ## MCP tools
 
