@@ -131,7 +131,7 @@
 <g><title>Text bodies from the server, in $batch requests of 20.</title><text class="detail" x="691" y="1285">• <tspan class="code">bodies(summaries, ...)</tspan></text></g>
 <text class="group-title" x="691" y="1324">Rules</text>
 <text class="detail" x="691" y="1354">copies of a message shown once (<tspan class="code">also_in</tspan>)</text>
-<text class="detail" x="691" y="1381">body errors counted in <tspan class="code">body_errors</tspan></text>
+<text class="detail" x="691" y="1381">per-message body errors use <tspan class="code">export_error</tspan></text>
 <text class="muted" x="691" y="1446">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">failures</tspan></text>
 <rect x="1247" y="1129" width="553" height="333" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1265" y="1164"><tspan class="code">Exports</tspan><tspan class="detail" dx="12">export/orchestrator.py</tspan></text>

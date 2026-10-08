@@ -239,7 +239,6 @@ class Conversation(Compact):
     messages: list[ConversationMessage]
     cursor: str | None = None
     coverage: Coverage
-    body_errors: int = 0  # messages on this page whose body could not be fetched (see export_error)
 
 
 class UserProfile(Compact):

@@ -249,7 +249,8 @@ lrh-outlook-connector/
 - `get_conversation(conversation_id, scope)`:
   1. fetch the conversation from remote;
   2. **sort locally**, oldest first;
-  3. hydrate bodies via `$batch` when requested (a body that cannot be fetched is marked in the text).
+  3. hydrate bodies via `$batch` when requested; a body-fetch failure is represented by that
+     message's `export_error` field, so callers count markers from the message list.
 
 - `bodies()` returns a body or an `ExportError` for every message (still throttled, access denied, deleted meanwhile); the text shows the `[EXPORT ERROR]` block (`failures.py`) in place of the body.
 
