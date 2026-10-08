@@ -224,8 +224,8 @@ async def test_get_message_bounded_with_continuation(mailbox: Mailbox) -> None:
     assert rest.next_offset is None and rest.text.endswith("regards")
 
 
-async def test_unique_body_is_the_default(mailbox: Mailbox) -> None:
-    assert (await mailbox.get_message("m2")).text == "Thanks!"
+async def test_full_body_with_quoted_history_is_the_default(mailbox: Mailbox) -> None:
+    assert (await mailbox.get_message("m2")).text == "Thanks!\n\n> First report"
 
 
 async def test_message_deleted_on_the_server_is_not_found(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -260,7 +260,11 @@ async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(ma
         "Sent Items",
         "Inbox/Projects/Project Alpha",
     ]
-    assert [t.text for t in conversation.messages] == ["First report", "Thanks!", "Follow-up with numbers"]
+    assert [t.text for t in conversation.messages] == [
+        "First report\n\nregards",
+        "Thanks!\n\n> First report",
+        "Follow-up with numbers",
+    ]
     assert conversation.subject == "Relatório de exemplo semanal"
     assert any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)
     assert conversation.coverage.excluded == {"deleted_or_junk": 1}
@@ -297,7 +301,7 @@ async def test_conversation_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> 
     conversations = Conversations(mailbox)
     first = await conversations.get_conversation(
         "c-rel", max_chars=15
-    )  # "First report" fits, "Thanks!" does not
+    )  # The first full body fills the budget; following messages continue on a cursor.
     assert [t.message.id for t in first.messages] == ["m1"] and first.cursor
     # the cursor restores the original options: max_chars=1000 here is ignored
     second = await conversations.get_conversation("c-rel", max_chars=1000, cursor=first.cursor)
@@ -450,7 +454,8 @@ async def test_conversation_body_denied_does_not_make_coverage_incomplete(
     fake.fail[r"/me/messages/m2"] = 403
     conversation = await Conversations(mailbox).get_conversation("c-rel")
     texts = {t.message.id: t.text or "" for t in conversation.messages}
-    assert "  Likely: access denied for this item" in texts["m2"] and texts["m1"] == "First report"
+    assert "  Likely: access denied for this item" in texts["m2"]
+    assert texts["m1"] == "First report\n\nregards"
     assert conversation.coverage.complete  # retrying will not help
     # The caller can count the per-message markers without reading their text.
     assert sum(t.export_error is not None for t in conversation.messages) == 1

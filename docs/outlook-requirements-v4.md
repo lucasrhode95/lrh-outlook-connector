@@ -128,7 +128,7 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 ## 9. Reading content (MCP)
 
-- `get_message` returns metadata plus a bounded body with an `offset`/`max_chars` continuation. Text is the default. HTML and `uniqueBody` are available on request.
+- `get_message` returns metadata plus a bounded full body, including quoted history, by default, with an `offset`/`max_chars` continuation. HTML and `uniqueBody` are available on request; `body=unique` omits quoted history.
 - The local UI reader shows the whole chosen body, however long, from one request (one server read); a failure says the complete message could not be loaded and never shows part of it as complete.
 - **Attachments are returned as raw files** (an MCP resource or file artifact) for the agent's client to read. No server-side text extraction. Attachment types: file, inline, item and reference. Item and reference attachments are listed with their metadata. Fetching them is best effort. Attachment and message MIME downloads have a local 150 MB limit; larger attachments must be downloaded directly from Outlook.
 - MIME (`$value`) is delivered as a file or resource, never inside JSON.
@@ -142,11 +142,11 @@ The selection is any mix of **whole conversations**, **individual messages** and
 
 | Option | Default | Effect |
 |---|---|---|
-| `include_attachments` | off | **On:** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures and quoted history; 74% of file attachments) are included when the rendered body references their `cid:`; if the content id or rendered body is unavailable, include them rather than silently dropping them. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
+| `include_attachments` | on | **On (default):** attachment files are downloaded into the ZIP, with sanitized and deduplicated names. A failed download becomes an `[EXPORT ERROR]` block and does not fail the export. Only **non-inline** attachments by default. Inline images (signatures and quoted history; 74% of file attachments) are included when the rendered body references their `cid:`; if the content id or rendered body is unavailable, include them rather than silently dropping them. Forwarded-mail attachments (`itemAttachment`) are saved as `.eml`. **Off:** the TXT lists non-inline attachment file names (and sizes) only. **No URL rewriting either way**, and the TXT never contains Microsoft URLs. |
 | `combine` | `per_conversation` | `per_conversation`: one TXT per conversation, chronological; a selected individual message goes into its conversation's TXT. `all`: one TXT for the whole selection, chronological, with per-conversation section headers. `none`: one TXT per message. |
 | `format` | `txt` | `txt` for people. `jsonl` for agents: one JSON record per message (ids, one `received_at` timestamp, folder, people, body, attachments), always one file. |
 | `scope` | `{"deleted_items": false, "sent_items": true, "meeting_mail": true}` | Narrow folder/date windows; `deleted_items` also applies to conversations (see §8). |
-| `body` | `unique` | `unique` strips quoted reply history (Graph `uniqueBody`). `full` keeps it. |
+| `body` | `full` | `full` keeps quoted reply history. `unique` strips it (Graph `uniqueBody`). |
 
 TXT content:
 

@@ -73,7 +73,7 @@ class Conversations:
         conversation_id: str,
         *,
         include_bodies: bool = True,
-        body: Literal["unique", "full"] = "unique",
+        body: Literal["unique", "full"] = "full",
         scope: Scope = DEFAULT_SCOPE,
         max_chars: int = 40000,
         cursor: str | None = None,

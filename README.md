@@ -93,14 +93,14 @@ uv run outlook-connector ui
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
 - `get_conversation` — Read a whole conversation across folders.
-- `get_message` — Read one message body and its attachment metadata.
+- `get_message` — Read one message body, including quoted history by default, and its attachment metadata.
 
 ### Attachments and exports
 
 - `list_attachments` — List a message's attachment metadata, including inline image IDs.
 - `download_attachment` — Save an attachment locally; downloads are limited to 150 MB.
 - `save_message_mime` — Save the original message as an `.eml` file.
-- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL. Conversations follow `scope.deleted_items`; sent/meeting filters only narrow folder/date windows. Explicit message ids are authoritative.
+- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL. Quoted history and attachment files are included by default; use `body="unique"` to omit quoted history or `include_attachments=false` to omit attachment files. Conversations follow `scope.deleted_items`; sent/meeting filters only narrow folder/date windows. Explicit message ids are authoritative.
 
 ### Rules and signatures
 

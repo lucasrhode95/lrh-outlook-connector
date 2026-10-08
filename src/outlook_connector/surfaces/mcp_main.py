@@ -79,8 +79,9 @@ through them (get_conversation still returns the whole conversation).
 - Copies of one message (mail sent to yourself or to a list you are on) are shown once; also_in \
 names the folders of the other copies.
 - Reading: messages expose one received_at timestamp (Graph receive time, with send time as fallback); \
-get_conversation returns a whole conversation across folders, oldest first, with bodies \
-without quoted history by default; a body that could not be fetched sets export_error on its \
+get_conversation returns a whole conversation across folders, oldest first, with full bodies including \
+quoted history by default; pass body="unique" to omit quoted reply history. A body that could not be \
+fetched sets export_error on its \
 message; callers can count messages carrying export_error without inspecting their body text. \
 get_message reads one message with offset/max_chars continuation.
 - Always read `coverage` before treating results as complete; follow `cursor` for more. \
@@ -99,7 +100,9 @@ Scope alone does not select anything.
 and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
 2,000 messages (`limit` lowers that). Scope alone is not a selection; conversations follow \
 scope.deleted_items, and explicit message ids are authoritative. For a large period, prefer \
-a folder/date-window export over enumerating ids. format="jsonl" \
+a folder/date-window export over enumerating ids. Quoted history and attachment files are included by \
+default; pass body="unique" to omit quoted history and include_attachments=false to omit files. \
+format="jsonl" \
 writes one JSON record per message (ids, dates, folder, people, body): use it to analyse mail; \
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
 be exported are marked [EXPORT ERROR] in TXT and carry an export_error object in JSONL (step, \
@@ -276,7 +279,7 @@ def build_server(context: AppContext) -> FastMCP:
     async def get_conversation(
         conversation_id: str,
         include_bodies: bool = True,
-        body: Literal["unique", "full"] = "unique",
+        body: Literal["unique", "full"] = "full",
         scope: Scope = DEFAULT_SCOPE,
         max_chars: Annotated[
             int, Field(description="Maximum body size from 1 to 400000 characters.")
@@ -286,7 +289,7 @@ def build_server(context: AppContext) -> FastMCP:
             Field(description="Continuation; it restores the original options, which are then ignored."),
         ] = None,
     ) -> Conversation:
-        """A whole conversation across folders, oldest first. body=unique strips quoted reply history."""
+        """A whole conversation, oldest first; full (default) includes quoted history, unique omits it."""
         return await (await services()).conversations.get_conversation(
             conversation_id,
             include_bodies=include_bodies,
@@ -299,13 +302,13 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     async def get_message(
         message_id: str,
-        body: BodyKind = "unique",
+        body: BodyKind = "full",
         offset: Annotated[int, Field(description="Body character offset; must be 0 or greater.")] = 0,
         max_chars: Annotated[
             int, Field(description="Maximum body size from 1 to 200000 characters.")
         ] = 20_000,
     ) -> MessageContent:
-        """One message's body (unique/full/html) with offset continuation, plus attachment metadata."""
+        """One message's body (full by default; unique or html on request) plus attachment metadata."""
         return await (await services()).mailbox.get_message(
             message_id, body=body, offset=offset, max_chars=max_chars
         )
@@ -331,7 +334,7 @@ def build_server(context: AppContext) -> FastMCP:
     async def export_messages(
         conversation_ids: list[str] | None = None,
         message_ids: list[str] | None = None,
-        include_attachments: bool = False,
+        include_attachments: bool = True,
         combine: Annotated[
             CombineMode,
             Field(
@@ -339,7 +342,7 @@ def build_server(context: AppContext) -> FastMCP:
                 "none: one TXT per message."
             ),
         ] = "per_conversation",
-        body: Literal["unique", "full"] = "unique",
+        body: Literal["unique", "full"] = "full",
         scope: Scope = DEFAULT_SCOPE,
         format: Annotated[
             ExportFormat,
@@ -371,7 +374,10 @@ def build_server(context: AppContext) -> FastMCP:
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
         are exported once. Sent/meeting scope narrows only folder/date-window selections.
         Conversations follow scope.deleted_items; explicit message ids are authoritative.
-        Scope alone is not a selection. The result counts exclusions and body gaps.
+        Full bodies including quoted history and attachment files are included by default. Set
+        body="unique" to omit quoted history, or include_attachments=false to omit attachment files.
+        Scope alone is not a selection.
+        The result counts exclusions and body gaps.
         With attachments, inline images are included when their CID is found in the rendered body;
         if the content id or body cannot be read, the image is included rather than silently dropped.
         """

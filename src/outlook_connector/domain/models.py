@@ -272,9 +272,9 @@ class ExportRequest(BaseModel):
     scope: Scope = Field(default_factory=Scope)
     limit: int = EXPORT_MAX_MESSAGES
     format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
-    include_attachments: bool = False
+    include_attachments: bool = True
     combine: CombineMode = "per_conversation"
-    body: Literal["unique", "full"] = "unique"
+    body: Literal["unique", "full"] = "full"
 
     @property
     def selects_folder_or_dates(self) -> bool:

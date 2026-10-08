@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -156,8 +157,9 @@ async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
     conversation_id = found["conversations"][0]["conversation_id"]
     conversation = await call(server, "get_conversation", conversation_id=conversation_id)
     assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3"]
+    assert "> First report" in conversation["messages"][1]["text"]
     message = await call(server, "get_message", message_id="m2")
-    assert message["text"] == "Thanks!"
+    assert message["text"] == "Thanks!\n\n> First report"
     short = await call(server, "get_message", message_id="m2", max_chars=1)
     assert short["text"] == "T" and short["next_offset"] == 1
 
@@ -228,6 +230,7 @@ async def test_attachment_download_and_export_return_local_paths(server: FastMCP
     assert eml["path"].endswith(".eml")
     artifact = await call(server, "export_messages", conversation_ids=["c-rel"])
     assert Path(artifact["path"]).exists() and artifact["message_count"] == 3
+    assert zipfile.is_zipfile(artifact["path"])
 
 
 async def test_errors_are_reported_as_tool_errors(server: FastMCP) -> None:

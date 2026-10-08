@@ -186,7 +186,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         return _json(sizes)
 
     async def message(request: Request) -> Response:
-        body = request.query_params.get("body", "unique")
+        body = request.query_params.get("body", "full")
         if body not in ("unique", "full"):
             raise InvalidRequest("body must be unique or full.")
         content = await (await context.services()).mailbox.get_message(

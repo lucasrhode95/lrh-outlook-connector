@@ -541,7 +541,7 @@ class Mailbox:
             self._photo = (await self.reader.profile_photo(),)
         return self._photo[0]
 
-    async def message(self, message_id: str, *, body: BodyKind = "unique") -> Message:
+    async def message(self, message_id: str, *, body: BodyKind = "full") -> Message:
         try:
             message = await self.reader.get_message(
                 message_id, body_format="html" if body == "html" else "text"
@@ -578,7 +578,7 @@ class Mailbox:
         self,
         message_id: str,
         *,
-        body: BodyKind = "unique",
+        body: BodyKind = "full",
         offset: int = 0,
         max_chars: int | None = 20000,
     ) -> MessageContent:
