@@ -271,7 +271,7 @@ class ExportRequest(BaseModel):
     until: datetime | None = None
     folder: str | None = None  # path, alias or id; None = whole mailbox
     scope: Scope = Field(default_factory=Scope)
-    limit: int = Field(default=EXPORT_MAX_MESSAGES, ge=1, le=EXPORT_MAX_MESSAGES)
+    limit: int = EXPORT_MAX_MESSAGES
     format: ExportFormat = "txt"  # jsonl: one JSON record per message, for agents
     include_attachments: bool = False
     combine: CombineMode = "per_conversation"
