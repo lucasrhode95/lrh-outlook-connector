@@ -366,20 +366,6 @@ class FakeGraph:
                     message.is_read = props["IsRead"]
                 elif field_uri == "item:Flag":
                     message.flagged = props["Flag"]["FlagStatus"] == "Flagged"
-                elif field_uri == "item:Subject":
-                    message.subject = props["Subject"]
-                elif field_uri == "item:Body":
-                    message.html = props["Body"]["Value"]
-                    message.text = unescape(re.sub(r"<[^>]+>", "", message.html.replace("<br>", "\n")))
-                elif field_uri in ("message:ToRecipients", "message:CcRecipients", "message:BccRecipients"):
-                    key = field_uri.split(":")[1]
-                    values = tuple(r["EmailAddress"] for r in props[key])
-                    if key == "ToRecipients":
-                        message.to = values
-                    elif key == "CcRecipients":
-                        message.cc = values
-                    else:
-                        message.bcc = values
                 else:
                     raise AssertionError(field_uri)
             out.append({"ResponseClass": "Success", "ResponseCode": "NoError"})
