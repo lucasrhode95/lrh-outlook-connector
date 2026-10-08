@@ -32,7 +32,11 @@ class CloudSettings:
         return self._tokens.get_token(PROFILE).claims()
 
     async def settings(self) -> SignatureSettings:
-        """Read the current list and both defaults. No settings are cached."""
+        """Read fresh settings; absent records mean no names/defaults, not an upstream failure.
+
+        Present records must still have one consistent scope. An entirely empty response has no
+        write scope; reads may report no signature, but writes must obtain a scope from Outlook.
+        """
         query = urlencode({"settingname": f"{LIST_SETTING},{NEW_SETTING},{REPLY_SETTING}"})
         with operation("reading native signatures"):
             data = await self._transport.json(
@@ -45,18 +49,21 @@ class CloudSettings:
         listed = _one(records, LIST_SETTING)
         new = _one(records, NEW_SETTING)
         reply = _one(records, REPLY_SETTING)
-        scope = listed.get("scope")
-        if scope is None:
+        present = tuple(record for record in (listed, new, reply) if record is not None)
+        if len(present) != len(records):
+            raise Upstream("Outlook returned unexpected native signature settings.")
+        scope = present[0].get("scope") if present else None
+        if present and any(record.get("scope") is None for record in present):
             raise Upstream("Outlook did not return the account scope for native signatures.")
-        if new.get("scope") != scope or reply.get("scope") != scope:
+        if any(record.get("scope") != scope for record in present):
             raise AccountMismatch("Native signature settings do not share the bound account scope.")
-        raw_names = listed.get("value")
+        raw_names = listed.get("value") if listed is not None else ""
         if not isinstance(raw_names, str):
             raise Upstream("Outlook returned an unreadable native signature list.")
         names = tuple(name for name in raw_names.split(",") if name)
         new_default = _default(new)
         reply_default = _default(reply)
-        revision = _revision((listed, new, reply))
+        revision = _revision(present)
         return SignatureSettings(names, new_default, reply_default, scope, revision)
 
     async def contents(self, name: str, settings: SignatureSettings) -> SignatureContents | None:
@@ -92,6 +99,7 @@ class CloudSettings:
         await self._write_contents(name, html, text, settings)
 
     async def _write_contents(self, name: str, html: str, text: str, settings: SignatureSettings) -> None:
+        _require_write_scope(settings)
         timestamp = 621355968000000000 + time.time_ns() // 100
         payload = [
             _content_record(name, settings.scope, "htm", html, timestamp),
@@ -124,6 +132,7 @@ class CloudSettings:
 
     async def set_default(self, name: str | None, which: str, settings: SignatureSettings) -> None:
         """Set one or both Outlook defaults in one write; None clears the pointer."""
+        _require_write_scope(settings)
         setting_names = (
             [NEW_SETTING, REPLY_SETTING]
             if which == "both"
@@ -170,20 +179,30 @@ def _records(data: Any) -> list[dict[str, Any]]:
     raise Upstream("Outlook returned an unreadable native signature settings response.")
 
 
-def _one(records: list[dict[str, Any]], name: str) -> dict[str, Any]:
+def _one(records: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
     matches = [record for record in records if record.get("name") == name]
-    if len(matches) != 1:
-        raise Upstream("Outlook did not return a complete native signature configuration.")
-    return matches[0]
+    if len(matches) > 1:
+        raise Upstream("Outlook returned duplicate native signature settings.")
+    return matches[0] if matches else None
 
 
-def _default(record: dict[str, Any]) -> str | None:
+def _default(record: dict[str, Any] | None) -> str | None:
+    if record is None:
+        return None
     value = record.get("value")
     if value is None or value == "":
         return None
     if not isinstance(value, str):
         raise Upstream("Outlook returned an unreadable native signature default.")
     return value
+
+
+def _require_write_scope(settings: SignatureSettings) -> None:
+    if settings.scope is None:
+        raise Upstream(
+            "Outlook did not return an account scope for signature writes. "
+            "Configure a native signature in Outlook, then retry."
+        )
 
 
 def _revision(records: tuple[dict[str, Any], ...]) -> str:

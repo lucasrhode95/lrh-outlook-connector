@@ -200,14 +200,14 @@ Native Outlook roaming signatures are managed by list_signatures, get_signature,
 create_signature, update_signature, delete_signature and set_default_signature. The settings are
 account-bound through the write sign-in; each write is sent once. Names are exact and case-sensitive;
 commas are refused because the name list uses commas as separators. Creation and content update take
-passive HTML and derive the text format. Update changes contents without renaming. New-message and
+passive HTML and derive the text format; data-image `src` attributes must be quoted without whitespace in the URI. Update changes contents without renaming. New-message and
 reply/forward defaults are independent and may be cleared; deleting a selected signature may leave a
 dangling default. Add-in-generated, recipient-dependent signatures are outside connector behavior.
 
 create_draft freshly reads the native default appropriate to new mail or reply/forward, inserting it
 after the supplied body and before Exchange's quoted reply history. An explicit signature name
 overrides that default. include_signature=false suppresses insertion. A missing or unreadable
-selected/configured signature fails without fallback. Native data-URI images become inline attachments
+selected/configured signature fails without fallback. Absent list/default setting records mean no names/defaults, so unsigned drafts remain usable. Present records must still be readable and share the account scope. With no scope returned, native signature writes ask the user to configure a signature in Outlook first; the connector never invents a scope. Native data-URI images become inline attachments
 with matching CID references; text-only signatures are escaped as body text. A replacement draft
 resolves the default again, so a caller must select a named signature again if it wants the same one.
 

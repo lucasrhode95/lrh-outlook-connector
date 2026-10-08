@@ -178,13 +178,17 @@ async def test_native_default_is_resolved_again_for_replies_and_changes_during_r
     assert len(fake.ows_calls) == before
 
 
+@pytest.mark.parametrize("quote", ['"', "'"])
 async def test_data_image_becomes_inline_attachment_and_is_read_back_byte_exactly(
-    services: tuple[Signatures, Writes], fake: FakeGraph
+    services: tuple[Signatures, Writes], fake: FakeGraph, quote: str
 ) -> None:
     signatures, writes = services
     image = b"\x89PNG\r\nsynthetic image bytes"
     data_uri = base64.b64encode(image).decode("ascii")
-    html = f'<p>With logo</p><img alt="logo" src="data:image/png;base64,{data_uri}">'
+    html = (
+        '<p>With logo</p><img alt="literal src=data:image example" '
+        f"src={quote}data:image/png;base64,{data_uri}{quote}>"
+    )
     await signatures.create_signature("Logo", html)
     await signatures.set_default_signature("Logo", "new")
 
@@ -192,7 +196,7 @@ async def test_data_image_becomes_inline_attachment_and_is_read_back_byte_exactl
         OutgoingMessage(to=["bob@example.com"], subject="Logo", text_body="Body")
     )
     saved = fake.messages[draft.id]
-    assert "data:image" not in (draft.html_body or "")
+    assert f"src={quote}data:image" not in (draft.html_body or "")
     assert "cid:signature-" in (draft.html_body or "")
     (attachment,) = saved.attachments
     assert attachment.inline and attachment.content_type == "image/png"
@@ -230,3 +234,69 @@ async def test_write_account_must_match_the_bound_read_account(fake: FakeGraph) 
     with pytest.raises(AccountMismatch):
         await signatures.list_signatures()
     assert not fake.calls
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "draft"])
+async def test_unquoted_signature_data_image_is_rejected_before_writing(
+    services: tuple[Signatures, Writes], fake: FakeGraph, operation: str
+) -> None:
+    signatures, writes = services
+    html = "<p>Logo</p><img src=data:image/png;base64,YWJj>"
+    fake.signature_contents["Logo"] = {"htm": html, "txt": "Logo"}
+    fake.signature_new_default = "Logo"
+    with pytest.raises(InvalidRequest, match="quoted src"):
+        if operation == "create":
+            await signatures.create_signature("New", html)
+        elif operation == "update":
+            await signatures.update_signature("Logo", html)
+        else:
+            await writes.create_draft(
+                OutgoingMessage(to=["bob@example.com"], subject="Synthetic", text_body="Body")
+            )
+    assert not fake.ows_calls
+    assert fake.signature_revision == 1
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+async def test_no_native_setting_records_lists_empty_and_creates_unsigned_draft(
+    services: tuple[Signatures, Writes], fake: FakeGraph, monkeypatch: pytest.MonkeyPatch, wrapped: bool
+) -> None:
+    signatures, writes = services
+    original = fake.handle_cloud_settings
+
+    def empty_settings(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "roaming_signature_list" in request.url.params.get("settingname", ""):
+            return httpx.Response(200, json={"value": []} if wrapped else [])
+        return original(request)
+
+    monkeypatch.setattr(fake, "handle_cloud_settings", empty_settings)
+    listed = await signatures.list_signatures()
+    assert listed.signatures == [] and listed.new_default is None and listed.reply_default is None
+    draft = await writes.create_draft(
+        OutgoingMessage(to=["bob@example.com"], subject="Synthetic", text_body="Body")
+    )
+    assert draft.verified and 'id="Signature"' not in (draft.html_body or "")
+    assert len(fake.ows_calls) == 1
+    with pytest.raises(Upstream, match="Configure a native signature in Outlook"):
+        await signatures.create_signature("New", "<p>New</p>")
+    with pytest.raises(Upstream, match="Configure a native signature in Outlook"):
+        await signatures.set_default_signature(None, "both")
+    assert fake.signature_revision == 1
+
+
+async def test_native_settings_appearing_during_empty_read_require_rereading(
+    services: tuple[Signatures, Writes], fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signatures, _ = services
+    original = fake.handle_cloud_settings
+    reads = 0
+
+    def appearing_settings(request: httpx.Request) -> httpx.Response:
+        nonlocal reads
+        reads += 1
+        return httpx.Response(200, json=[]) if reads == 1 else original(request)
+
+    monkeypatch.setattr(fake, "handle_cloud_settings", appearing_settings)
+    with pytest.raises(Upstream, match="changed while"):
+        await signatures.list_signatures()
+    assert not fake.ows_calls
