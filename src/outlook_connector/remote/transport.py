@@ -39,13 +39,13 @@ from outlook_connector.domain.errors import (
     Upstream,
     WriteOutcomeUnknown,
 )
+from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
 
 log = logging.getLogger(__name__)
 
 ALLOWED_HOSTS = frozenset({"graph.microsoft.com", "outlook.cloud.microsoft", "outlook.office.com"})
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 MAX_JSON_BYTES = 32 * 1024 * 1024
-MAX_CONCURRENCY = 4  # Exchange Online: concurrent requests per app per mailbox
 MAX_ATTEMPTS = 4  # per retried request (GETs and read-style POSTs); writes are sent once
 MAX_ERROR_TEXT = 200
 
@@ -74,7 +74,7 @@ class Transport:
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(60.0, connect=15.0), follow_redirects=False
         )
-        self._limit = asyncio.Semaphore(MAX_CONCURRENCY)
+        self._limit = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
         self._sleep = sleep
 
     async def aclose(self) -> None:

@@ -28,6 +28,7 @@ from outlook_connector.domain.models import (
     MessageSummary,
     Scope,
 )
+from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
 from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first
 from outlook_connector.service.export import attachments as policy
 from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
@@ -132,20 +133,28 @@ class Exports:
         """
         selected: dict[str, MessageSummary] = {}
         excluded: dict[str, int] = defaultdict(int)
-        for conversation_id in dict.fromkeys(request.conversation_ids):
-            items, left_out, truncated = await self.conversations.messages(
-                conversation_id,
-                scope=Scope(sent_items=True, meeting_mail=True, deleted_items=True),
-            )
-            if truncated:
-                raise InvalidRequest(
-                    f"Conversation {conversation_id} is larger than the server listing limit; "
-                    "export its messages by message id instead."
+        conversation_ids = list(dict.fromkeys(request.conversation_ids))
+        for start in range(0, len(conversation_ids), MAX_CONCURRENT_REQUESTS):
+            batch = conversation_ids[start : start + MAX_CONCURRENT_REQUESTS]
+            expanded = await asyncio.gather(
+                *(
+                    self.conversations.messages(
+                        conversation_id,
+                        scope=Scope(sent_items=True, meeting_mail=True, deleted_items=True),
+                    )
+                    for conversation_id in batch
                 )
-            _add(excluded, left_out)
-            for item in items:
-                selected.setdefault(item.id, item)
-            _check_limit(selected, request.limit)
+            )
+            for conversation_id, (items, left_out, truncated) in zip(batch, expanded, strict=True):
+                if truncated:
+                    raise InvalidRequest(
+                        f"Conversation {conversation_id} is larger than the server listing limit; "
+                        "export its messages by message id instead."
+                    )
+                _add(excluded, left_out)
+                for item in items:
+                    selected.setdefault(item.id, item)
+                _check_limit(selected, request.limit)
         if request.selects_folder_or_dates:
             await self._select_folder_or_dates(request, selected, excluded)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]

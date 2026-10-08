@@ -25,6 +25,8 @@ from outlook_connector.domain.models import (
 
 BodyFormat = Literal["text", "html"]
 
+MAX_CONCURRENT_REQUESTS = 4  # Shared Exchange Online request cap for service scheduling and transport
+
 
 @dataclass
 class FetchedMessages:

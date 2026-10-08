@@ -17,10 +17,10 @@ from outlook_connector.domain.errors import (
     NotFound,
     Throttled,
 )
-from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient, Scope
+from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, MessageSummary, Recipient, Scope
 from outlook_connector.remote.graph import MAX_DOWNLOAD_BYTES, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ports import BodyFormat, FetchedMessages
+from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, BodyFormat, FetchedMessages
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.attachments import dedupe, safe_name
@@ -98,6 +98,45 @@ async def test_a_download_that_times_out_is_marked_not_fatal(exports: Exports, f
     text = Path(artifact.path).read_text(encoding="utf-8")  # no file was downloaded: a flat TXT
     assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
     assert "  Likely: Microsoft service or network problem\n" in text
+
+
+async def test_many_selected_conversations_expand_concurrently_with_transport_limit(
+    exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    conversation_ids = [f"bulk-export-{index}" for index in range(9)]
+    for index, conversation_id in enumerate(conversation_ids):
+        fake.add(
+            FakeMessage(
+                f"bulk-export-message-{index}",
+                "Synthetic bulk export",
+                "f-inbox",
+                f"2026-09-{index + 1:02d}T09:00:00Z",
+                conversation=conversation_id,
+            )
+        )
+    await exports.conversations.mailbox.folders()
+
+    active = 0
+    peak = 0
+    original = exports.conversations.messages
+
+    async def capture(
+        conversation_id: str, *, scope: Scope
+    ) -> tuple[list[MessageSummary], dict[str, int], bool]:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        try:
+            await asyncio.sleep(0.001)
+            return await original(conversation_id, scope=scope)
+        finally:
+            active -= 1
+
+    monkeypatch.setattr(exports.conversations, "messages", capture)
+    artifact = await exports.export(ExportRequest(conversation_ids=conversation_ids, limit=9))
+
+    assert peak == MAX_CONCURRENT_REQUESTS
+    assert artifact.message_count == len(conversation_ids)
 
 
 async def test_combine_all_is_one_txt_with_sections(exports: Exports) -> None:
