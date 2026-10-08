@@ -79,12 +79,12 @@ async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(expo
     text = zip_text(artifact.path, f"{stem}.txt")
     assert "Attachment: 2026-09-28 Relatório de exemplo semanal/numbers.xlsx" in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
-    assert "> First report" not in text  # unique body by default
+    assert "> First report" in text  # full body, including quoted history, by default
     assert "buy now" not in text and artifact.messages_excluded == {"deleted_or_junk": 1}
 
 
 async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
     assert (
         artifact.filename == "2026-09-28 Relatório de exemplo semanal.txt"
         and artifact.content_type.startswith("text/plain")
@@ -96,6 +96,14 @@ async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: 
 async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(message_ids=["m2"], body="full"))
     assert "> First report" in Path(artifact.path).read_text(encoding="utf-8")
+
+
+async def test_export_defaults_include_quoted_history_and_attachments(exports: Exports) -> None:
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
+    assert artifact.filename.endswith(".zip") and artifact.attachment_files == 2
+    assert any(name.endswith("numbers.xlsx") for name in zip_names(artifact.path))
+    text_name = next(name for name in zip_names(artifact.path) if name.endswith(".txt"))
+    assert "> First report" in zip_text(artifact.path, text_name)
 
 
 async def test_a_download_that_times_out_is_marked_not_fatal(exports: Exports, fake: FakeGraph) -> None:
@@ -147,7 +155,9 @@ async def test_many_selected_conversations_expand_concurrently_with_transport_li
 
 
 async def test_combine_all_is_one_txt_with_sections(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel", "c-lunch"], combine="all"))
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel", "c-lunch"], combine="all", include_attachments=False)
+    )
     text = Path(artifact.path).read_text(encoding="utf-8")
     assert artifact.filename.endswith(".txt") and text.count("### Conversation:") == 2
 
@@ -239,9 +249,9 @@ async def test_forwarded_mail_attachment_is_saved_as_eml(exports: Exports, fake:
 
 
 async def test_server_deleted_message_is_gone_from_the_export(exports: Exports, fake: FakeGraph) -> None:
-    await exports.export(ExportRequest(conversation_ids=["c-rel"]))
+    await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
     del fake.messages["m2"]
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
+    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
     text = Path(artifact.path).read_text(encoding="utf-8")
     assert artifact.message_count == 2 and "Thanks!" not in text and "DELETED" not in text
 
@@ -408,7 +418,9 @@ async def test_each_message_carries_its_source_ids(exports: Exports) -> None:
 async def test_folder_date_window_export_counts_what_it_leaves_out(exports: Exports) -> None:
     artifact = await exports.export(
         ExportRequest(
-            since=datetime(2026, 9, 28, tzinfo=UTC), until=datetime(2026, 9, 29, 23, 59, tzinfo=UTC)
+            since=datetime(2026, 9, 28, tzinfo=UTC),
+            until=datetime(2026, 9, 29, 23, 59, tzinfo=UTC),
+            include_attachments=False,
         )
     )
     assert artifact.message_count == 3  # m1, m2, m3; junk m4 left out, m5 outside the window
@@ -448,13 +460,23 @@ async def test_meeting_scope_does_not_narrow_conversation_or_explicit_message_se
         )
     )
     conversation = await exports.export(
-        ExportRequest(conversation_ids=["c-rel"], scope=Scope(meeting_mail=False), format="jsonl")
+        ExportRequest(
+            conversation_ids=["c-rel"],
+            scope=Scope(meeting_mail=False),
+            format="jsonl",
+            include_attachments=False,
+        )
     )
     records = [json.loads(line) for line in Path(conversation.path).read_text(encoding="utf-8").splitlines()]
     assert {record["id"] for record in records} == {"m1", "m2", "m3", "meeting-export"}
 
     explicit = await exports.export(
-        ExportRequest(message_ids=["m4"], scope=Scope(deleted_items=True), format="jsonl")
+        ExportRequest(
+            message_ids=["m4"],
+            scope=Scope(deleted_items=True),
+            format="jsonl",
+            include_attachments=False,
+        )
     )
     record = json.loads(Path(explicit.path).read_text(encoding="utf-8"))
     assert explicit.message_count == 1 and record["id"] == "m4"
@@ -517,7 +539,9 @@ async def test_denied_body_is_not_retryable_and_jsonl_carries_the_error(
     exports: Exports, fake: FakeGraph
 ) -> None:
     fake.fail[r"/me/messages/m2"] = 403
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], format="jsonl"))
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], format="jsonl", include_attachments=False)
+    )
     records = {
         r["id"]: r for r in map(json.loads, Path(artifact.path).read_text(encoding="utf-8").splitlines())
     }
@@ -532,7 +556,7 @@ async def test_denied_body_is_not_retryable_and_jsonl_carries_the_error(
         "retry": False,
         "fix": "retrying will not help",
     }
-    assert "export_error" not in records["m1"] and records["m1"]["body"] == "First report"
+    assert "export_error" not in records["m1"] and records["m1"]["body"] == "First report\n\nregards"
 
 
 async def test_jsonl_failed_attachment_record_carries_its_export_error(
@@ -603,12 +627,14 @@ async def test_copies_are_exported_once(exports: Exports, fake: FakeGraph) -> No
 
 
 async def test_jsonl_export_has_one_record_per_message(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], format="jsonl"))
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], format="jsonl", include_attachments=False)
+    )
     assert artifact.filename.endswith(".jsonl") and artifact.content_type.startswith("application/x-ndjson")
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
     assert [r["id"] for r in records] == ["m1", "m2", "m3"]
     assert records[0]["received_at"] == "2026-09-28T09:00:00+00:00"
-    assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report"
+    assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report\n\nregards"
     assert records[2]["attachments"][0]["name"] == "numbers.xlsx" and records[0]["from"]["address"]
 
 
@@ -747,7 +773,12 @@ async def test_explicit_hidden_copy_merges_with_whole_conversation_selection(
         )
     )
     artifact = await exports.export(
-        ExportRequest(conversation_ids=["c-rel"], message_ids=["copy-hidden"], combine="all")
+        ExportRequest(
+            conversation_ids=["c-rel"],
+            message_ids=["copy-hidden"],
+            combine="all",
+            include_attachments=False,
+        )
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
     assert artifact.message_count == 3 and "Also in: Hidden" in text
@@ -791,6 +822,7 @@ async def test_conversation_export_follows_deleted_scope_but_keeps_sent_and_meet
             conversation_ids=["c-rel"],
             scope=Scope(deleted_items=include_deleted, sent_items=False, meeting_mail=False),
             format="jsonl",
+            include_attachments=False,
         )
     )
     records = [json.loads(line) for line in Path(artifact.path).read_text().splitlines()]

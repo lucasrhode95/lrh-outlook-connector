@@ -99,8 +99,10 @@ def test_folders_messages_search_conversation_and_message(client: TestClient) ->
     conversation = client.get("/api/conversations/c-rel").json()
     assert [t["message"]["id"] for t in conversation["messages"]] == ["m1", "m2", "m3"]
     assert "text" not in conversation["messages"][0]  # the UI lists conversations without bodies
-    message = client.get("/api/messages/m2", params={"body": "full"}).json()
+    message = client.get("/api/messages/m2").json()
     assert "> First report" in message["text"]
+    unique_message = client.get("/api/messages/m2", params={"body": "unique"}).json()
+    assert unique_message["text"] == "Thanks!"
 
 
 def test_conversation_sizes(client: TestClient) -> None:
@@ -135,7 +137,7 @@ def test_errors_map_to_http_status(client: TestClient) -> None:
 
 
 def test_export_downloads_one_file(client: TestClient) -> None:
-    response = client.post("/api/export", json={"conversation_ids": ["c-rel"], "include_attachments": True})
+    response = client.post("/api/export", json={"conversation_ids": ["c-rel"]})
     assert response.status_code == 200 and response.headers["content-type"] == "application/zip"
     assert "attachment" in response.headers["content-disposition"]
     with zipfile.ZipFile(BytesIO(response.content)) as archive:

@@ -6,6 +6,7 @@ const { test } = require('node:test');
 const vm = require('node:vm');
 
 const source = readFileSync(join(__dirname, '../../src/outlook_connector/surfaces/web/static/app.js'), 'utf8');
+const page = readFileSync(join(__dirname, '../../src/outlook_connector/surfaces/web/static/index.html'), 'utf8');
 
 class Element {
   constructor() {
@@ -80,6 +81,11 @@ function reader(handler, full = false) {
 function part(text, id = 'mail') {
   return { text, offset: 0, message: { id, subject: id }, attachments: [] };
 }
+
+test('quoted history is enabled by default', () => {
+  assert.match(page, /<input id="opt-full" type="checkbox" checked>/);
+  assert.match(page, /<input id="opt-attachments" type="checkbox" checked>/);
+});
 
 test('loads the whole body in one request with the chosen body kind', async () => {
   const ui = reader(async () => part('Hello😀\n  middle \nEnd'), true);
