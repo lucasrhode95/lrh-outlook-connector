@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import functools
-from collections.abc import Callable, Coroutine, Mapping
+from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -301,27 +301,6 @@ class GraphMailReader(MailReader):
                 values = response.body.get("value", [])
                 out[mid] = [mapping.attachment(i, mid) for i in values if isinstance(i, dict)]
         return out, failed
-
-    @_named("reading inline attachment ids")
-    async def attachment_content_ids(
-        self, attachments: Mapping[str, list[str]]
-    ) -> dict[str, dict[str, str | None]]:
-        """Content ids of attachments, {message id: [attachment ids]}, looked up together: one
-        $batch item per attachment, 20 per batch across messages."""
-        pairs = [(mid, aid) for mid, aids in attachments.items() for aid in aids]
-        requests = {
-            str(index): relative(
-                f"/me/messages/{mid}/attachments/{aid}",
-                {"$select": "microsoft.graph.fileAttachment/contentId"},
-            )
-            for index, (mid, aid) in enumerate(pairs)
-        }
-        responses = await self._graph.batch(requests) if requests else {}
-        out: dict[str, dict[str, str | None]] = {mid: {} for mid in attachments}
-        for index, (mid, aid) in enumerate(pairs):
-            response = responses[str(index)]
-            out[mid][aid] = response.body.get("contentId") if response.status == 200 else None
-        return out
 
     @_named("downloading an attachment")
     async def download_attachment(self, message_id: str, attachment_id: str, dest: Path) -> int:

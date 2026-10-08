@@ -6,7 +6,6 @@ Swapping an adapter (another tenant, a policy change) must not change anything a
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -89,10 +88,6 @@ class MailReader(Protocol):
     ) -> tuple[dict[str, list[Attachment]], dict[str, Failure]]:
         """Attachments per message, and why listing failed for the others (per item, not raised)."""
         ...
-
-    async def attachment_content_ids(
-        self, attachments: Mapping[str, list[str]]
-    ) -> dict[str, dict[str, str | None]]: ...
 
     async def download_attachment(self, message_id: str, attachment_id: str, dest: Path) -> int: ...
 
