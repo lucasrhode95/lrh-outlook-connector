@@ -15,15 +15,6 @@ class Failure:
     message: str | None = None
     request_id: str | None = None
 
-    def describe(self) -> str:
-        """ "HTTP 429 TooManyRequests, request-id <id>" or "no response from Microsoft"."""
-        text = (
-            f"HTTP {self.status} {self.code or 'no error code'}"
-            if self.status
-            else "no response from Microsoft"
-        )
-        return f"{text}, request-id {self.request_id}" if self.request_id else text
-
 
 class ConnectorError(Exception):
     """Base class for errors the surfaces know how to present.

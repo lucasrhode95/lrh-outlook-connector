@@ -18,6 +18,14 @@ def run(argv: list[str], script: Script) -> int:
     return cli.main(argv)
 
 
+def test_ui_defaults_use_shared_values() -> None:
+    from outlook_connector.surfaces.ui_settings import DEFAULT_UI_IDLE_MINUTES, DEFAULT_UI_PORT
+
+    args = cli.build_parser().parse_args(["ui"])
+    assert args.port == DEFAULT_UI_PORT
+    assert args.idle_minutes == DEFAULT_UI_IDLE_MINUTES
+
+
 def test_auth_signs_in_with_device_code(capsys: pytest.CaptureFixture[str]) -> None:
     script = Script(
         device_result=token_result(

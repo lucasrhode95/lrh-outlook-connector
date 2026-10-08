@@ -129,7 +129,7 @@ class FetchedSummaries:
     """A batch lookup: every requested id is in exactly one of the two maps."""
 
     summaries: dict[str, MessageSummary | None] = field(default_factory=dict)  # None: not on the server
-    failed: dict[str, str] = field(default_factory=dict)
+    failed: dict[str, Failure] = field(default_factory=dict)  # not fetched (throttled, error): why
 
 
 @dataclass(frozen=True)

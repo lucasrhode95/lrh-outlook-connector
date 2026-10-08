@@ -121,7 +121,6 @@ class MessageSummary(Compact):
     to: list[Recipient] = Field(default_factory=list)
     cc: list[Recipient] = Field(default_factory=list)
     received_at: datetime | None = None
-    sent_at: datetime | None = None
     is_read: bool | None = None
     is_draft: bool | None = None
     has_attachments: bool = False

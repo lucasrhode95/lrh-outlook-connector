@@ -9,12 +9,13 @@ import pytest
 from starlette.testclient import TestClient
 
 from outlook_connector.bootstrap import AppContext
+from outlook_connector.surfaces.ui_settings import DEFAULT_UI_PORT
 from outlook_connector.surfaces.web.routes import Activity, create_app
 from tests.fakes.graph_fake import FakeGraph, FakeMessage, sample_mailbox
 from tests.surfaces.test_mcp import FakeTokens
 
 TOKEN = "session-token-for-tests"
-PORT = 8765
+PORT = DEFAULT_UI_PORT
 
 
 @pytest.fixture

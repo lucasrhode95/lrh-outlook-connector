@@ -20,7 +20,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextvars import ContextVar
 from typing import Any, BinaryIO
 from urllib.parse import urlsplit
@@ -40,10 +40,10 @@ from outlook_connector.domain.errors import (
     WriteOutcomeUnknown,
 )
 from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.remote.urls import validate_url
 
 log = logging.getLogger(__name__)
 
-ALLOWED_HOSTS = frozenset({"graph.microsoft.com", "outlook.cloud.microsoft", "outlook.office.com"})
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_ATTEMPTS = 4  # per retried request (GETs and read-style POSTs); writes are sent once
@@ -97,73 +97,20 @@ class Transport:
     ) -> httpx.Response:
         """Send a request and return a successful response, or raise a domain error.
 
-        Assumes (not re-checked here): ``url`` is built by ``remote/`` (Graph or OWS); the host allowlist
-        below is the one guard every URL passes.
+        Assumes the URL is built by remote adapters; _send enforces the outbound URL policy.
         """
-        _check_host(url)
-        retry = False if write else (method.upper() == "GET") if retry is None else retry
-        attempts = MAX_ATTEMPTS if retry else 1
-        renewal: dict[str, Any] | None = None  # after a 401: how to renew the token, for one request
-        renewed = False
-        attempt = 0
-        while attempt < attempts:
-            attempt += 1
-            request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
-            renewal = None
-            started = time.monotonic()
-            try:
-                async with self._limit:
-                    response = await self._client.request(
-                        method, url, headers=request_headers, json=json_body
-                    )
-            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-                if attempt < attempts:
-                    await self._sleep(min(2**attempt, 20))
-                    continue
-                raise _no_response(
-                    f"Could not reach {urlsplit(url).hostname} ({type(exc).__name__})."
-                ) from None
-            except httpx.HTTPError as exc:  # sent, but no complete response
-                if write:
-                    raise _unknown(url, type(exc).__name__) from None
-                if attempt < attempts:
-                    await self._sleep(min(2**attempt, 20))
-                    continue
-                raise _no_response(
-                    f"No complete response from {urlsplit(url).hostname} ({type(exc).__name__})."
-                ) from None
-            log.debug(
-                "http %s %s -> %s in %dms",
-                method,
-                _path(url),
-                response.status_code,
-                (time.monotonic() - started) * 1000,
-            )
-            if response.status_code == 401:
-                if not renewed:  # the token was rejected (revoked, expired early): renew once
-                    renewed, renewal = True, _renewal(response)
-                    attempt -= 1
-                    continue
-                raise self._sign_in_required(profile, response)
-            if response.status_code in RETRY_STATUSES and attempt < attempts:
-                await self._sleep(_retry_after(response, attempt))
-                continue
-            if response.is_success:
-                return response
-            if write and response.status_code >= 500:
-                raise _unknown(url, f"HTTP {response.status_code}, {error_code(response) or 'no error code'}")
-            raise _error_for(response)
-        raise AssertionError("unreachable")
-
-    def _bearer(self, profile: str, renewal: dict[str, Any] | None) -> str:
-        return f"Bearer {self._tokens.get_token(profile, **(renewal or {})).value}"
-
-    def _sign_in_required(self, profile: str, response: httpx.Response) -> AuthenticationRequired:
-        code = error_code(response) or "no error code"
-        return AuthenticationRequired(
-            f"Microsoft rejected the sign-in for this request (HTTP 401, {code}), also after renewing it.",
-            command=self._tokens.sign_in_command(profile),
+        response = await self._send(
+            method,
+            url,
+            profile=profile,
+            headers=headers,
+            json_body=json_body,
+            retry=retry,
+            write=write,
         )
+        if not isinstance(response, httpx.Response):
+            raise AssertionError("A non-streaming request returned a download result.")
+        return response
 
     async def json(self, method: str, url: str, **kwargs: Any) -> Any:
         response = await self.request(method, url, **kwargs)
@@ -184,55 +131,160 @@ class Transport:
     async def download(
         self, url: str, dest: BinaryIO, *, profile: str, headers: dict[str, str] | None = None, max_bytes: int
     ) -> tuple[str | None, int]:
-        """Stream a GET response body into ``dest``. Returns (content type, size).
+        """Stream a GET response body into dest. Returns (content type, size).
 
-        Retried like any GET: throttling (429/503, after Retry-After), a gateway error, or a
-        connection that fails or drops mid-download starts the download again from scratch. What
-        still fails is a domain error, never a raw HTTP client exception.
-
-        Assumes (not re-checked here): ``url`` is built by ``remote/``; the host allowlist is checked as
-        for ``request``.
+        Retried like any GET: throttling, a gateway error, or a connection that fails or drops
+        mid-download starts the download again from scratch. What still fails is a domain error,
+        never a raw HTTP client exception.
         """
-        _check_host(url)
+        result = await self._send(
+            "GET",
+            url,
+            profile=profile,
+            headers=headers,
+            retry=True,
+            write=False,
+            destination=dest,
+            max_bytes=max_bytes,
+        )
+        if isinstance(result, httpx.Response):
+            raise AssertionError("A download returned a non-streaming response.")
+        return result
+
+    async def _send(
+        self,
+        method: str,
+        url: str,
+        *,
+        profile: str,
+        headers: dict[str, str] | None,
+        json_body: Any = None,
+        retry: bool | None,
+        write: bool,
+        destination: BinaryIO | None = None,
+        max_bytes: int | None = None,
+    ) -> httpx.Response | tuple[str | None, int]:
+        """One auth and retry state machine for ordinary requests and streamed downloads."""
+        validate_url(url)
+        should_retry = False if write else (method.upper() == "GET" if retry is None else retry)
+        attempts = MAX_ATTEMPTS if should_retry else 1
         renewal: dict[str, Any] | None = None
         renewed = False
         attempt = 0
-        while True:
+        streaming = destination is not None
+        if streaming and max_bytes is None:
+            raise AssertionError("A streamed download requires a byte limit.")
+
+        while attempt < attempts:
             attempt += 1
             request_headers = {"Authorization": self._bearer(profile, renewal), **(headers or {})}
             renewal = None
+            started = time.monotonic()
+            wait: float | None = None
             try:
-                async with self._limit, self._client.stream("GET", url, headers=request_headers) as response:
+                async with (
+                    self._limit,
+                    self._response(
+                        method, url, request_headers, json_body=json_body, stream=streaming
+                    ) as response,
+                ):
+                    log.debug(
+                        "http %s %s -> %s in %dms",
+                        method,
+                        _path(url),
+                        response.status_code,
+                        (time.monotonic() - started) * 1000,
+                    )
+                    if not response.is_success and streaming:
+                        await response.aread()
                     if response.status_code == 401:
-                        await response.aread()
-                        if not renewed:
-                            renewed, renewal = True, _renewal(response)
-                            attempt -= 1
-                            continue
-                        raise self._sign_in_required(profile, response)
-                    if response.status_code in RETRY_STATUSES and attempt < MAX_ATTEMPTS:
-                        await response.aread()
+                        if renewed:
+                            raise self._sign_in_required(profile, response)
+                        renewed, renewal = True, _renewal(response)
+                        attempt -= 1
+                        wait = 0
+                    elif response.status_code in RETRY_STATUSES and attempt < attempts:
                         wait = _retry_after(response, attempt)
                     elif not response.is_success:
-                        await response.aread()
+                        if write and response.status_code >= 500:
+                            raise _unknown(
+                                url,
+                                f"HTTP {response.status_code}, {error_code(response) or 'no error code'}",
+                            )
                         raise _error_for(response)
+                    elif destination is not None:
+                        if max_bytes is None:
+                            raise AssertionError("A streamed download requires a byte limit.")
+                        return await self._stream_response(response, destination, max_bytes)
                     else:
-                        dest.seek(0)
-                        dest.truncate()
-                        size = 0
-                        async for chunk in response.aiter_bytes():
-                            size += len(chunk)
-                            if size > max_bytes:
-                                raise DownloadLimitExceeded(max_bytes)
-                            dest.write(chunk)
-                        return response.headers.get("content-type"), size
+                        return response
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                if attempt < attempts:
+                    wait = float(min(2**attempt, 20))
+                else:
+                    raise _no_response(
+                        f"Could not reach {urlsplit(url).hostname} ({type(exc).__name__})."
+                    ) from None
             except httpx.HTTPError as exc:
-                if attempt >= MAX_ATTEMPTS:
-                    connect = isinstance(exc, httpx.ConnectError | httpx.ConnectTimeout)
-                    what = "Could not reach" if connect else "No complete response from"
-                    raise _no_response(f"{what} {urlsplit(url).hostname} ({type(exc).__name__}).") from None
-                wait = float(min(2**attempt, 20))
-            await self._sleep(wait)  # outside the concurrency limit, like request()
+                if write:
+                    raise _unknown(url, type(exc).__name__) from None
+                if attempt < attempts:
+                    wait = float(min(2**attempt, 20))
+                else:
+                    raise _no_response(
+                        f"No complete response from {urlsplit(url).hostname} ({type(exc).__name__})."
+                    ) from None
+
+            if wait is None:
+                raise AssertionError("The request state machine produced no result.")
+            if wait > 0:
+                await self._sleep(wait)
+
+        raise AssertionError("unreachable")
+
+    @contextlib.asynccontextmanager
+    async def _response(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        *,
+        json_body: Any,
+        stream: bool,
+    ) -> AsyncIterator[httpx.Response]:
+        """Keep a streamed response open while its consumer reads it."""
+        if stream:
+            if json_body is not None:
+                raise AssertionError("A streamed download cannot carry a JSON body.")
+            async with self._client.stream(method, url, headers=headers) as response:
+                yield response
+        else:
+            yield await self._client.request(method, url, headers=headers, json=json_body)
+
+    @staticmethod
+    async def _stream_response(
+        response: httpx.Response, dest: BinaryIO, max_bytes: int
+    ) -> tuple[str | None, int]:
+        """Write one successful response, enforcing its local size limit."""
+        dest.seek(0)
+        dest.truncate()
+        size = 0
+        async for chunk in response.aiter_bytes():
+            size += len(chunk)
+            if size > max_bytes:
+                raise DownloadLimitExceeded(max_bytes)
+            dest.write(chunk)
+        return response.headers.get("content-type"), size
+
+    def _bearer(self, profile: str, renewal: dict[str, Any] | None) -> str:
+        return f"Bearer {self._tokens.get_token(profile, **(renewal or {})).value}"
+
+    def _sign_in_required(self, profile: str, response: httpx.Response) -> AuthenticationRequired:
+        code = error_code(response) or "no error code"
+        return AuthenticationRequired(
+            f"Microsoft rejected the sign-in for this request (HTTP 401, {code}), also after renewing it.",
+            command=self._tokens.sign_in_command(profile),
+        )
 
 
 def _no_response(text: str) -> Upstream:
@@ -247,12 +299,6 @@ def _unknown(url: str, what: str) -> WriteOutcomeUnknown:
         f"{prefix}{urlsplit(url).hostname} gave no clear answer ({what}). The change may or may not "
         "have been made; it was not retried. Check the mailbox before trying again."
     )
-
-
-def _check_host(url: str) -> None:
-    parts = urlsplit(url)
-    if parts.scheme != "https" or parts.hostname not in ALLOWED_HOSTS:
-        raise InvalidRequest(f"Refusing to call a non-allowlisted URL host: {parts.hostname}")
 
 
 def _path(url: str) -> str:
