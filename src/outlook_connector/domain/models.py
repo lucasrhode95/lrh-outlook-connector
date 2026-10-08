@@ -322,6 +322,17 @@ class OutgoingMessage(BaseModel):
     html_body: str | None = None
     reply_to_message_id: str | None = None
     reply_all: bool = False
+    signature: str | None = None
+    include_signature: bool = True
+
+
+class InlineImage(BaseModel):
+    """A validated synthetic image to attach inline while saving a draft."""
+
+    name: str
+    content_type: str
+    content_id: str
+    content: bytes
 
 
 class DraftMessage(Compact):
@@ -334,6 +345,30 @@ class DraftMessage(Compact):
     html_body: str
     reply_to_message_id: str | None = None
     reply_all: bool = False
+    inline_images: list[InlineImage] = Field(default_factory=list, exclude=True)
+
+
+class SignatureInfo(Compact):
+    name: str
+    readable: bool
+
+
+class SignatureList(Compact):
+    signatures: list[SignatureInfo]
+    new_default: str | None = None
+    reply_default: str | None = None
+
+
+class SignatureDetails(Compact):
+    name: str
+    html: str
+    text: str
+
+
+class SignatureWriteResult(Compact):
+    status: Literal["created", "updated", "deleted", "default_set"]
+    name: str | None = None
+    for_type: Literal["new", "reply", "both"] | None = None
 
 
 class DraftResult(Compact):

@@ -17,9 +17,16 @@ from tests.fakes.msal_fakes import jwt
 READ_TOOLS = {
     "auth_status", "list_folders", "list_messages", "search_messages", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
-    "list_rules",
+    "list_rules", "list_signatures", "get_signature",
 }  # fmt: skip
-WRITE_TOOLS = {"create_draft", "send_draft"}
+WRITE_TOOLS = {
+    "create_draft",
+    "send_draft",
+    "create_signature",
+    "update_signature",
+    "delete_signature",
+    "set_default_signature",
+}
 CHANGE_TOOLS = {"set_read_state", "set_flag"}
 RELOCATE_TOOLS = {
     "move_messages",
@@ -63,8 +70,8 @@ def server(fake: FakeGraph) -> FastMCP:
     return build_server(context)
 
 
-async def call(server: FastMCP, name: str, **arguments: Any) -> Any:
-    result = await server.call_tool(name, arguments)
+async def call(server: FastMCP, tool_name: str, **arguments: Any) -> Any:
+    result = await server.call_tool(tool_name, arguments)
     if isinstance(result, tuple):  # (content blocks, structured output)
         structured = result[1]
         return structured.get("result", structured) if isinstance(structured, dict) else structured
@@ -90,6 +97,25 @@ async def test_tools_and_annotations(server: FastMCP) -> None:
     assert "Never confirm on the user's behalf" in (server.instructions or "")
     assert "Drafts are composed once" in (server.instructions or "")
     assert "Never delete first" in (server.instructions or "")
+
+
+async def test_signature_tools_are_public_and_default_for_argument_is_required(
+    server: FastMCP, fake: FakeGraph
+) -> None:
+    tools = {tool.name: tool for tool in await server.list_tools()}
+    assert {"list_signatures", "get_signature"} <= set(tools)
+    assert {"create_signature", "update_signature", "delete_signature", "set_default_signature"} <= set(tools)
+    assert tools["list_signatures"].annotations and tools["list_signatures"].annotations.readOnlyHint
+    assert tools["create_signature"].annotations and not tools["create_signature"].annotations.readOnlyHint
+    assert tools["set_default_signature"].inputSchema["required"] == ["name", "for"]
+    assert set(tools["set_default_signature"].inputSchema["properties"]) == {"name", "for"}
+
+    created = await call(server, "create_signature", **{"name": "Synthetic", "html": "<p>Signature</p>"})
+    assert created["status"] == "created"
+    selected = await call(server, "set_default_signature", **{"name": "Synthetic", "for": "both"})
+    assert selected["status"] == "default_set" and fake.signature_new_default == "Synthetic"
+    listed = await call(server, "list_signatures")
+    assert listed["signatures"][0]["name"] == "Synthetic" and listed["signatures"][0]["readable"]
 
 
 async def test_draft_replacement_is_created_and_verified_before_deletion(

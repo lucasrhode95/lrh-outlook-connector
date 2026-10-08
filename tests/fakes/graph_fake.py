@@ -8,6 +8,7 @@ on the same mailbox, so a write can be read back through Graph. All data is synt
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import re
@@ -139,6 +140,12 @@ class FakeGraph:
     me: str = "me@example.com"
     reply_drops_history: bool = False  # simulate a reply draft that lost the quoted original
     reply_flattens_html: bool = False  # simulate a reply whose quoted original lost its formatting
+    signature_scope: str = "scope-user-x"
+    signature_contents: dict[str, dict[str, str]] = field(default_factory=dict)
+    signature_new_default: str = ""
+    signature_reply_default: str = ""
+    signature_revision: int = 1
+    signature_change_after_contents: bool = False
     display_name: str = "Doe, Jane"
     photo: bytes | None = None  # the user's 48x48 profile photo; None: no photo set
 
@@ -190,6 +197,8 @@ class FakeGraph:
             self.drop_downloads -= 1
             raise httpx.ReadTimeout("Injected read timeout.", request=request)
         if request.url.host == "outlook.cloud.microsoft":
+            if request.url.path.startswith("/ows/v1/OutlookCloudSettings/settings/"):
+                return self.handle_cloud_settings(request)
             return self.handle_ows(request)
         assert request.headers.get("authorization", "").startswith("Bearer "), "missing bearer token"
         prefer = request.headers.get("prefer", "")
@@ -203,6 +212,76 @@ class FakeGraph:
                 status, content=content, headers={"content-type": "application/octet-stream", **request_id}
             )
         return httpx.Response(status, json=body, headers=request_id)
+
+    # --------------------------------------------------------- Cloud Settings (signatures)
+    def handle_cloud_settings(self, request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("authorization", "").startswith("Bearer ")
+        if request.method == "GET":
+            setting_name = request.url.params.get("settingname", "")
+            if setting_name == "roaming_signature_list,roaming_new_signature,roaming_reply_signature":
+                settings = [
+                    {
+                        "name": "roaming_signature_list",
+                        "value": ",".join(self.signature_contents),
+                        "type": "BlobArray",
+                        "scope": self.signature_scope,
+                        "Timestamp": self.signature_revision,
+                    },
+                    {
+                        "name": "roaming_new_signature",
+                        "value": self.signature_new_default,
+                        "type": "String",
+                        "scope": self.signature_scope,
+                        "Timestamp": self.signature_revision,
+                    },
+                    {
+                        "name": "roaming_reply_signature",
+                        "value": self.signature_reply_default,
+                        "type": "String",
+                        "scope": self.signature_scope,
+                        "Timestamp": self.signature_revision,
+                    },
+                ]
+                return httpx.Response(200, json=settings)
+            formats = self.signature_contents.get(setting_name)
+            if formats is None:
+                return httpx.Response(200, json=[])
+            response = httpx.Response(
+                200,
+                json=[
+                    {
+                        "name": setting_name,
+                        "scope": self.signature_scope,
+                        "secondaryKey": key,
+                        "type": "Blob",
+                        "value": value,
+                    }
+                    for key, value in formats.items()
+                ],
+            )
+            if self.signature_change_after_contents:
+                self.signature_change_after_contents = False
+                self.signature_revision += 1
+            return response
+        if request.method == "PATCH":
+            records = json.loads(request.content)
+            for record in records:
+                name = record["name"]
+                if name == "roaming_new_signature":
+                    self.signature_new_default = record["value"]
+                elif name == "roaming_reply_signature":
+                    self.signature_reply_default = record["value"]
+                else:
+                    formats = self.signature_contents.setdefault(name, {})
+                    formats[record["secondaryKey"]] = record["value"]
+                self.signature_revision += 1
+            return httpx.Response(200, json={})
+        if request.method == "DELETE":
+            name = json.loads(request.content)["name"]
+            self.signature_contents.pop(name, None)
+            self.signature_revision += 1
+            return httpx.Response(200, json={})
+        return httpx.Response(405, json={"error": "unsupported"})
 
     # ------------------------------------------------------------------ OWS (writes)
     def handle_ows(self, request: httpx.Request) -> httpx.Response:
@@ -309,7 +388,17 @@ class FakeGraph:
         if content["BodyType"] == "HTML":  # what the HTML shows, as Graph's text view would
             text = unescape(re.sub(r"<[^>]+>", "", text.replace("<br>", "\n")))
         conversation = f"conv-new-{len(self.messages)}"
-        inline: list[FakeAttachment] = []
+        inline: list[FakeAttachment] = [
+            FakeAttachment(
+                f"signature-{index}",
+                attachment["Name"],
+                base64.b64decode(attachment["Content"]),
+                attachment["ContentType"],
+                inline=bool(attachment["IsInline"]),
+                content_id=attachment["ContentId"],
+            )
+            for index, attachment in enumerate(item.get("Attachments", []))
+        ]
         if item["__type"] in ("ReplyToItem:#Exchange", "ReplyAllToItem:#Exchange"):
             assert content["BodyType"] == "HTML", (
                 "a reply body must be HTML, or Exchange flattens the history"
@@ -320,7 +409,7 @@ class FakeGraph:
             conversation = original.conversation
             if not self.reply_drops_history:
                 text += "\n\nFrom: " + original.sender + "\n" + original.text
-                inline = [a for a in original.attachments if a.inline]
+                inline.extend(a for a in original.attachments if a.inline)
                 quoted = f"<p>{original.text}</p>" if self.reply_flattens_html else original.html
                 page += f"<div><b>From:</b> {original.sender}</div>{quoted}"  # Exchange re-wraps it
         else:
