@@ -1,6 +1,6 @@
 """The single export path (requirements v4 §10), used by both the local UI and MCP.
 
-selection (conversations + messages + a range) → copies merged → bodies (Graph $batch) →
+selection (conversations + messages + folder/date window) → copies merged → bodies (Graph $batch) →
 attachments (policy) → grouping (per conversation / all / none) →
 TXT or JSONL rendering → packaging.
 """
@@ -26,6 +26,7 @@ from outlook_connector.domain.models import (
     ExportRequest,
     Message,
     MessageSummary,
+    Scope,
 )
 from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first
 from outlook_connector.service.export import attachments as policy
@@ -39,9 +40,8 @@ from outlook_connector.service.failures import (
     export_error,
 )
 from outlook_connector.service.mailbox import OUTGOING_FOLDERS, merge_copies
-from outlook_connector.service.scope import validate_scope
 
-RANGE_PAGE = 200
+FOLDER_DATE_PAGE = 200
 SHOWN_FAILURES = 3
 UNREADABLE_HINT = (
     "They may have been deleted or moved in Outlook, or Microsoft is throttling requests. "
@@ -79,17 +79,8 @@ class Exports:
         checks that something is selected and, through ``_select``, the message limit. The steps after
         ``_select`` trust the selection and do not re-check it.
         """
-        validate_scope(
-            request.scope,
-            sent_items=request.by_range,
-            meeting_mail=request.by_range,
-            deleted_items=request.by_range or bool(request.conversation_ids),
-        )
-        if not request.conversation_ids and not request.message_ids and not request.by_range:
-            raise InvalidRequest(
-                "Select at least one conversation or message, or a range "
-                "(since/until/folder/scope.sent_items=false)."
-            )
+        if not request.conversation_ids and not request.message_ids and not request.selects_folder_or_dates:
+            raise InvalidRequest("Select conversations, messages, a folder, or a date window (since/until).")
         selection = await self._select(request)
         summaries = selection.summaries
         if not summaries:
@@ -111,7 +102,7 @@ class Exports:
             failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, ExportError)]
             summary = error_summary(list(missing.values()), failed_files, list(attachment_failures.values()))
             files = self._render(summaries, fetched, downloads, request, selection, summary)
-            base = files[0].folder if len(files) == 1 else _range_name(summaries)
+            base = files[0].folder if len(files) == 1 else _selection_name(summaries)
             result = package(files, base_name=base)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
@@ -133,7 +124,9 @@ class Exports:
     # ---------------------------------------------------------------- selection
 
     async def _select(self, request: ExportRequest) -> Selection:
-        """Conversations, the range and messages selected by id, copies merged, within ``request.limit``.
+        """Select conversations, a folder/date window and messages by id, then merge copies.
+
+        The selection must stay within ``request.limit``.
 
         Assumes (not re-checked here): ``request`` was validated by ``export``.
         """
@@ -141,7 +134,8 @@ class Exports:
         excluded: dict[str, int] = defaultdict(int)
         for conversation_id in dict.fromkeys(request.conversation_ids):
             items, left_out, truncated = await self.conversations.messages(
-                conversation_id, scope=request.scope
+                conversation_id,
+                scope=Scope(sent_items=True, meeting_mail=True, deleted_items=True),
             )
             if truncated:
                 raise InvalidRequest(
@@ -152,8 +146,8 @@ class Exports:
             for item in items:
                 selected.setdefault(item.id, item)
             _check_limit(selected, request.limit)
-        if request.by_range:
-            await self._select_range(request, selected, excluded)
+        if request.selects_folder_or_dates:
+            await self._select_folder_or_dates(request, selected, excluded)
         explicit = [mid for mid in dict.fromkeys(request.message_ids) if mid not in selected]
         known = await self._fetch(explicit)
         selected.update({mid: MessageSummary.model_validate(m.model_dump()) for mid, m in known.items()})
@@ -164,7 +158,7 @@ class Exports:
         _check_limit({m.id: m for m in merged}, request.limit)
         return Selection(sorted(merged, key=oldest_first), dict(excluded), known)
 
-    async def _select_range(
+    async def _select_folder_or_dates(
         self, request: ExportRequest, selected: dict[str, MessageSummary], excluded: dict[str, int]
     ) -> None:
         """Every message in the window, page by page, with the listing's scope rules. Copies on
@@ -180,7 +174,7 @@ class Exports:
                 folder=request.folder,
                 since=request.since,
                 until=request.until,
-                limit=RANGE_PAGE,
+                limit=FOLDER_DATE_PAGE,
                 cursor=cursor,
                 scope=request.scope,
                 skip_returned_copies=False,
@@ -416,7 +410,7 @@ def _check_limit(selected: dict[str, MessageSummary], limit: int, *, more: bool 
     if len(selected) > limit:
         raise InvalidRequest(
             f"The selection holds {'more than ' if more else ''}{len(selected)} messages, above "
-            f"the limit of {limit} (at most {EXPORT_MAX_MESSAGES}). Narrow the date range or "
+            f"the limit of {limit} (at most {EXPORT_MAX_MESSAGES}). Narrow the date window or "
             "split the export."
         )
 
@@ -431,7 +425,7 @@ def _day(message: MessageSummary) -> str:
     return stamp.strftime("%Y-%m-%d") if stamp else "undated"
 
 
-def _range_name(summaries: list[MessageSummary]) -> str:
+def _selection_name(summaries: list[MessageSummary]) -> str:
     return f"outlook-export {_day(summaries[0])} to {_day(summaries[-1])}" if summaries else "outlook-export"
 
 
@@ -439,7 +433,7 @@ def _groups(summaries: list[MessageSummary], combine: str) -> list[tuple[str, st
     """(title, file base name, members oldest first), groups ordered by their first message."""
     if combine == "all":
         conversations = len({m.conversation_id or m.id for m in summaries})
-        return [(f"Outlook export: {conversations} conversation(s)", _range_name(summaries), summaries)]
+        return [(f"Outlook export: {conversations} conversation(s)", _selection_name(summaries), summaries)]
     if combine == "none":
         return [
             (f"Message: {m.subject or '(no subject)'}", f"{_day(m)} {m.subject or 'message'}", [m])

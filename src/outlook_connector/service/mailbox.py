@@ -3,7 +3,9 @@
 Remote first: every call asks Outlook (Graph). The local store caches the folder list only; no
 message data is kept locally, so a message deleted on the server is gone here too.
 
-Scope rules shared by list, search, conversations, sizes and export (a folder counts with its parents):
+Scope filters list, search, conversation reads, sizes and folder/date-window exports.
+Selected export conversations and message ids stay whole. A folder counts with its
+parents:
 - Deleted Items and Junk Email are left out unless ``scope.deleted_items`` (a folder asked for by
   name is always included).
   Sent Items, Drafts and Outbox are included unless ``scope.sent_items`` is false. List and
@@ -12,7 +14,8 @@ Scope rules shared by list, search, conversations, sizes and export (a folder co
   with real replies shows through them. Every flag points the same way: true shows more mail.
 - Hidden folders, Sync Issues (classic Outlook's conflict and failure copies, decided 2026-10-04),
   and items outside the mail folders (e.g. Teams meeting records) are out of reach:
-  never listed, searched, counted, included in conversations or range exports, and list_folders does
+  never listed, searched, counted, included in conversations or folder/date-window exports, and
+  list_folders does
   not show them.
 - Copies of one message (same Internet message id, e.g. mail you sent to yourself or to a list you
   are on) are shown once; ``also_in`` names the folders of the other copies.

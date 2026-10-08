@@ -261,12 +261,12 @@ EXPORT_MAX_MESSAGES = 2000  # hard cap per export
 class ExportRequest(BaseModel):
     """What to export: conversations, messages, and/or every message in a folder/date window.
 
-    All selections are combined.
+    All selections are combined. Scope narrows only folder/date-window selections.
     """
 
     conversation_ids: list[str] = Field(default_factory=list)
     message_ids: list[str] = Field(default_factory=list)
-    # range selection: active when any of these is set
+    # A folder/date-window selection is active when any of these is set.
     since: datetime | None = None
     until: datetime | None = None
     folder: str | None = None  # path, alias or id; None = whole mailbox
@@ -278,14 +278,8 @@ class ExportRequest(BaseModel):
     body: Literal["unique", "full"] = "unique"
 
     @property
-    def by_range(self) -> bool:
-        return bool(
-            self.since
-            or self.until
-            or self.folder
-            or not self.scope.sent_items
-            or not self.scope.meeting_mail
-        )
+    def selects_folder_or_dates(self) -> bool:
+        return bool(self.since or self.until or self.folder)
 
 
 class ExportArtifact(Compact):
