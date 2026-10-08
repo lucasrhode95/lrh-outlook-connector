@@ -362,3 +362,27 @@ async def test_per_item_error_stops_subsequent_chunks(mutations: Mutations, fake
     fake.ows_UpdateItem = fail_one  # type: ignore[method-assign]
     result = await mutations.set_flag(ids, True, continue_on_error=False)
     assert result.counts == {"done": 19, "failed": 2} and result.results[-1].detail == "not sent"
+
+
+async def test_failed_read_state_expansion_cancels_siblings_before_any_write(
+    mutations: Mutations, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started, cleaned_up = asyncio.Event(), asyncio.Event()
+    failure = InvalidRequest("Synthetic expansion failure")
+
+    async def expand(conversation_id: str, **_kwargs):  # type: ignore[no-untyped-def]
+        if conversation_id == "bad":
+            await started.wait()
+            raise failure
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.sleep(0)
+            cleaned_up.set()
+
+    monkeypatch.setattr(mutations, "_conversation", expand)
+    with pytest.raises(InvalidRequest) as caught:
+        await mutations.set_read([], True, conversation_ids=["bad", "slow"])
+    assert caught.value is failure and cleaned_up.is_set()
+    assert not fake.ows_calls

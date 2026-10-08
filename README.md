@@ -39,7 +39,7 @@ uv run outlook-connector ui
 
 - `auth_status` — Check the local sign-in state and sign-in commands.
 - `list_folders` — List reachable mail folders and their counts.
-- `list_messages` — Read a page of recent messages; filter by folder, dates, and scope.
+- `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
 - `get_conversation` — Read a whole conversation across folders.
 - `get_message` — Read one message body and its attachment metadata.
@@ -49,7 +49,7 @@ uv run outlook-connector ui
 - `list_attachments` — List a message's attachment metadata, including inline image IDs.
 - `download_attachment` — Save an attachment locally; downloads are limited to 150 MB.
 - `save_message_mime` — Save the original message as an `.eml` file.
-- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL.
+- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL. Conversations follow `scope.deleted_items`; sent/meeting filters only narrow folder/date windows. Explicit message ids are authoritative.
 
 ### Rules and signatures
 
@@ -60,7 +60,7 @@ uv run outlook-connector ui
 - `delete_rule` — Propose or confirm deletion of a supported inbox rule.
 - `list_signatures` — List native Outlook signatures and defaults.
 - `get_signature` — Read one native signature's HTML and text.
-- `create_signature` — Create a native Outlook signature.
+- `create_signature` — Create a native Outlook signature from passive HTML; quote data-image `src` attributes.
 - `update_signature` — Replace a native signature's contents.
 - `delete_signature` — Delete a native Outlook signature.
 - `set_default_signature` — Set or clear the new-message and reply defaults.
@@ -74,7 +74,9 @@ uv run outlook-connector ui
 - `move_messages` — Move selected messages to a folder.
 - `delete_messages` — Move selected messages to Deleted Items.
 
-Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once, and send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
+With no native signature settings or default, drafts are unsigned. If Outlook returns no account scope, configure a native signature in Outlook before using signature-write tools.
+
+Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once; a replacement reply keeps the same `reply_to_message_id` and `reply_all` choice. Send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
 
 ## Development
 
