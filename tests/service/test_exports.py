@@ -10,9 +10,15 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from outlook_connector.domain.errors import Failure, InvalidRequest, NotFound, Throttled
+from outlook_connector.domain.errors import (
+    DownloadLimitExceeded,
+    Failure,
+    InvalidRequest,
+    NotFound,
+    Throttled,
+)
 from outlook_connector.domain.models import EXCLUSION_TEXT, ExportRequest, Recipient, Scope
-from outlook_connector.remote.graph import Graph
+from outlook_connector.remote.graph import MAX_DOWNLOAD_BYTES, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ports import BodyFormat, FetchedMessages
 from outlook_connector.remote.transport import Transport
@@ -111,6 +117,29 @@ async def test_combine_none_is_one_file_per_message_in_a_zip(exports: Exports) -
 async def test_selected_messages_join_their_conversation_file(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-lunch"], message_ids=["m1", "m3"]))
     assert artifact.text_files == 2 and artifact.message_count == 3
+
+
+async def test_download_limit_is_classified_and_recommends_outlook(
+    exports: Exports, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = exports.reader.download_attachment
+
+    async def exceed_limit(message_id: str, attachment_id: str, dest: Path) -> int:
+        if attachment_id == "a1":
+            raise DownloadLimitExceeded(MAX_DOWNLOAD_BYTES)
+        return await original(message_id, attachment_id, dest)
+
+    monkeypatch.setattr(exports.reader, "download_attachment", exceed_limit)
+    artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
+    assert artifact.export_errors == {"downloading an attachment": 1}
+    text = zip_text(artifact.path, "2026-09-29 Relatório de exemplo semanal.txt")
+    assert "  Error:  Download exceeds the connector's local 150 MB limit." in text
+    assert "  Likely: attachment exceeds the connector's 150 MB download limit" in text
+    assert "  Fix:    download the attachment directly from Outlook" in text
+    assert artifact.error_summary == (
+        "Export errors: 1 attachment (1 connector download limit) could not be exported; "
+        "they are marked [EXPORT ERROR] below."
+    )
 
 
 async def test_failed_download_becomes_an_export_error_block(exports: Exports, fake: FakeGraph) -> None:

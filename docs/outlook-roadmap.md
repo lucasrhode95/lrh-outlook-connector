@@ -11,9 +11,8 @@ Snapshot **2026-10-08**.
 
 ## Current priority
 
-1. **Correctness:** H26.
-2. **Performance and cleanup:** H30–H32 and H34–H38.
-3. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
+1. **Performance and cleanup:** H30–H32 and H34–H38.
+2. **W12:** README rewrite and architecture doc cleanup, last, once everything above is finished.
 
 Status wording:
 
@@ -23,16 +22,6 @@ Status wording:
 - **Later** — useful work outside the current build sequence.
 
 # Correctness and reliability
-
-## H26 — Oversized attachments are classified as unexpected failures
-
-**Status:** Pending.
-
-**Problem:** the connector's 150 MB download guard is a known local limit, but exports currently classify it like an unexpected error.
-
-**Why 150 MB:** keep the existing 150 MB limit as a connector policy. The code currently defines `MAX_DOWNLOAD_BYTES = 150 * 1024 * 1024` and streams attachment downloads to disk through that guard. This is not a Microsoft Graph download requirement; 150 MB is instead a conservative local ceiling that also lines up with upper Outlook/Exchange attachment/message limits in some Microsoft contexts. Most mail providers impose much tighter practical limits, so a normal file attachment reaching this guard should be extremely rare. Retaining it protects against unexpectedly huge downloads/disk usage without materially constraining ordinary email export.
-
-**Next:** classify hitting the guard explicitly as a known connector limit rather than an unexpected failure: the attachment is larger than the connector's 150 MB download limit and should be downloaded directly from Outlook.
 
 # Performance
 

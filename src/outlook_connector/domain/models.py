@@ -213,13 +213,13 @@ ExportStep = Literal["fetching message bodies", "listing attachments", "download
 
 
 class ExportError(Compact):
-    """Why part of an export (or a conversation body) is missing: the step, Microsoft's answer, the
+    """Why part of an export (or a conversation body) is missing: the step, remote or local error,
     likely cause, whether retrying can help, and what to do."""
 
     step: ExportStep
     status: int | None = None  # HTTP status; None: no response (or no HTTP failure at all)
     code: str | None = None  # Microsoft's error code
-    message: str | None = None  # Microsoft's message, shortened to one line
+    message: str | None = None  # remote or connector message, shortened to one line
     request_id: str | None = None
     likely_cause: str
     retry: bool  # retrying later can succeed

@@ -51,6 +51,8 @@ The client starts one `outlook-connector mcp` process per session. Read tools: l
 list_attachments, download_attachment, save_message_mime, export_messages, auth_status,
 list_signatures and get_signature. Reading never changes the mailbox, not even read state.
 
+Attachment and message MIME downloads share a 150 MB limit. Download a larger attachment directly from Outlook.
+
 Write tools (they need the write sign-in): native signatures use list_signatures, get_signature,
 create_signature, update_signature, delete_signature and set_default_signature. These manage
 Outlook's native roaming-signature settings; the organization's recipient-dependent add-in is not
@@ -118,7 +120,8 @@ says which ones and what to do. Anything else that cannot be exported (a body, a
 attachment listing) is marked in place, and the result's `error_summary` (the file header's "Export
 errors" line) says how many and why. For exports with attachments, inline images are included
 when their content id is found in the rendered body. If the content id or rendered body cannot be read,
-the image is included rather than silently dropped.
+the image is included rather than silently dropped. A file attachment over the connector's 150 MB
+limit gets a specific export error and should be downloaded directly from Outlook.
 
 In TXT the mark is a block:
 

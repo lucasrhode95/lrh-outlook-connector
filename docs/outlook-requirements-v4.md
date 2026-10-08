@@ -125,7 +125,7 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 
 - `get_message` returns metadata plus a bounded body with an `offset`/`max_chars` continuation. Text is the default. HTML and `uniqueBody` are available on request.
 - The local UI reader shows the whole chosen body, however long, from one request (one server read); a failure says the complete message could not be loaded and never shows part of it as complete.
-- **Attachments are returned as raw files** (an MCP resource or file artifact) for the agent's client to read. No server-side text extraction. Attachment types: file, inline, item and reference. Item and reference attachments are listed with their metadata. Fetching them is best effort.
+- **Attachments are returned as raw files** (an MCP resource or file artifact) for the agent's client to read. No server-side text extraction. Attachment types: file, inline, item and reference. Item and reference attachments are listed with their metadata. Fetching them is best effort. Attachment and message MIME downloads have a local 150 MB limit; larger attachments must be downloaded directly from Outlook.
 - MIME (`$value`) is delivered as a file or resource, never inside JSON.
 - Read tools are annotated `readOnlyHint=true`, `destructiveHint=false`. **Read tools never change mailbox state, including read state.**
 
@@ -167,6 +167,7 @@ Anything that fails during the export (a body, an attachment download, an attach
 | other 5xx, no response | Microsoft service or network problem | yes | retry later |
 | 403 | access denied for this item (e.g. encrypted or protected) | no | retrying will not help |
 | 404 | deleted or moved in Outlook during the export | no | refresh and select it again |
+| connector download exceeds 150 MB | known local connector limit | no | download the attachment directly from Outlook |
 | anything else | unexpected error | no | report it with the request id |
 
 JSONL carries the same error as an `export_error` object (on the message when its body is missing, on a failed attachment record, or as `attachments_export_error` when the attachments could not be listed). The export result has `export_errors` (per step) and `error_summary` (the header line), and the UI shows that line after the download.
