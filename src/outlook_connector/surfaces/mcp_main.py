@@ -86,7 +86,8 @@ When Junk Email and Deleted Items hold most of the mailbox, a mailbox-wide list_
 by folder (full pages, a bit slower) and coverage.notes says so: pass that note on to the user.
 - Mail deleted on the server is gone: nothing is kept locally.
 - Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
-path for you to read with your own file tools. save_message_mime saves the original .eml.
+path for you to read with your own file tools. Downloads are limited to 150 MB; for a larger attachment, \
+download it directly from Outlook. save_message_mime saves the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
 are included and merged. Folder/date-window selections follow scope; conversation selections stay whole. \
 Scope alone does not select anything.
@@ -307,7 +308,9 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=LOCAL_FILE)
     async def download_attachment(message_id: str, attachment_id: str) -> SavedFile:
-        """Save one attachment as a local file and return its path (forwarded emails as .eml)."""
+        """Save an attachment under 150 MB; download larger files from Outlook.
+
+        Forwarded emails are saved as .eml."""
         return await (await services()).files.download_attachment(message_id, attachment_id)
 
     @mcp.tool(annotations=LOCAL_FILE)

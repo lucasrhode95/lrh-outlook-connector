@@ -31,6 +31,7 @@ from outlook_connector.auth.tokens import TokenProvider
 from outlook_connector.domain.errors import (
     AuthenticationRequired,
     ConnectorError,
+    DownloadLimitExceeded,
     Failure,
     InvalidRequest,
     NotFound,
@@ -222,9 +223,7 @@ class Transport:
                         async for chunk in response.aiter_bytes():
                             size += len(chunk)
                             if size > max_bytes:
-                                raise InvalidRequest(
-                                    f"Download exceeds the {max_bytes // (1024 * 1024)} MiB limit."
-                                )
+                                raise DownloadLimitExceeded(max_bytes)
                             dest.write(chunk)
                         return response.headers.get("content-type"), size
             except httpx.HTTPError as exc:
