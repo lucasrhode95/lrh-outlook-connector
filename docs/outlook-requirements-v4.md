@@ -151,7 +151,10 @@ TXT content:
 
 **Export errors.** Messages selected by id are read from the server first. If any cannot be read, the export fails and writes no file: "not found" when they are gone, "throttled" when any is still throttled after the retries, otherwise a service error. The message counts them, names the first few with their case, and says: they may have been deleted or moved in Outlook, or Microsoft is throttling requests; refresh the list and retry; nothing was exported. Conversations and folder/date-window selections are listed from the server at export time.
 
-Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes. Callers never have to scan messages to learn about errors: the export result counts them (`export_errors`, `error_summary`), and `get_conversation` sets `export_error` on each affected message and counts them in `body_errors`. Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_conversation`):
+Anything that fails during the export (a body, an attachment download, an attachment listing) is marked in place, and the export completes.
+
+The export result reports aggregate error counts (`export_errors`, `error_summary`). `get_conversation` sets `export_error` on each affected message, so callers can count those markers without parsing the body text.
+Every such gap is one structured error, rendered the same way everywhere (TXT, JSONL, `get_conversation`):
 
 ```text
 [EXPORT ERROR] The body of this message could not be fetched.
