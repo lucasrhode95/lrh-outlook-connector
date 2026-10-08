@@ -35,7 +35,7 @@ points, not promised grants:
 
 - tenant: organizations, a tenant ID, or a verified tenant domain.
 - expected_user: optional sign-in email check; empty means no fixed email restriction.
-- profiles: the client ID and resource scope for each of read, write, and search.
+- profiles: the client ID and resource scope for each of graph, outlook, and search.
   Registered public clients can be substituted where your administrators permit them.
 - login_url, graph_resource, graph_url, ows_url, substrate_urls: endpoint and resource
   settings. URLs must use HTTPS; requests are restricted to their configured hosts.
@@ -59,9 +59,9 @@ From the repo root, with any Python ≥ 3.11. On Windows, set `PYTHONUTF8=1` so 
 text prints correctly.
 
 ```bash
-python research/probes/auth.py read        # sign in: Outlook Mobile -> Graph Mail.Read
-python research/probes/auth.py write       # sign in: One Outlook Web -> outlook.office.com
-python research/probes/auth.py search      # usually silent, via the write client's refresh token
+python research/probes/auth.py graph        # sign in: Outlook Mobile -> Graph Mail.Read
+python research/probes/auth.py outlook       # sign in: One Outlook Web -> outlook.office.com
+python research/probes/auth.py search      # usually silent, via the Outlook client's refresh token
 python research/probes/auth.py --status
 ```
 
@@ -89,7 +89,7 @@ A missing refresh token, skipped pair, transport failure, or expired refresh tok
 not establish that a capability is unsupported. Inspect the OAuth error and distinguish
 a scope denial from a sign-in problem. Only a successful API probe establishes usable behavior.
 
-Steps 2–5 need read. Step 4 also needs search, and step 7 needs write.
+Steps 2–5 need graph. Step 4 also needs search, and step 7 needs outlook.
 Route capabilities according to your results: documented Graph where usable, OWS for proven
 gaps, and unavailable or unresolved where neither is established. Update the findings with
 date, configuration context (without private identifiers), evidence and remaining uncertainty.
@@ -137,3 +137,5 @@ what Outlook Web itself does while you perform one deliberate action:
 mailbox content and addresses. Never commit them, share them, or turn them into test fixtures.
 Use them only to learn request contracts, which are then re-implemented with our own app-owned
 tokens. Browser credentials must never be reused (requirements v4 §4).
+
+Probe profiles are named `graph`, `outlook`, and `search`. Keep local probe configuration keys consistent with these names and sign in with `auth.py graph` or `auth.py outlook` when a matching probe token is missing.

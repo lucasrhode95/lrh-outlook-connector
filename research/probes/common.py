@@ -37,8 +37,8 @@ GRAPH_RESOURCE = SETTINGS["graph_resource"].rstrip("/")
 OWS_URL = SETTINGS["ows_url"]
 IMMUTABLE = 'IdType="ImmutableId"'
 PROFILES = {name: tuple(pair) for name, pair in SETTINGS["profiles"].items()}
-READ_CLIENT = PROFILES["read"][0]
-WRITE_CLIENT = PROFILES["write"][0]
+GRAPH_CLIENT = PROFILES["graph"][0]
+OUTLOOK_CLIENT = PROFILES["outlook"][0]
 # Only denials explicitly configured for the current environment are skipped.
 DENIED = {tuple(pair) for pair in SETTINGS["denied_pairs"]}
 ALLOWED_HOSTS = SETTINGS["allowed_hosts"]

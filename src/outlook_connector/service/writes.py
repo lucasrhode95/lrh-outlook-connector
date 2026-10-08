@@ -253,7 +253,7 @@ class Writes:
         claims = self.writer.account()
         if (claims.get("tid"), claims.get("oid")) != (self.account.tenant_id, self.account.object_id):
             raise AccountMismatch(
-                "The write sign-in belongs to a different Microsoft account than the one this "
+                "The Outlook sign-in belongs to a different Microsoft account than the one this "
                 "connector reads; nothing was written."
             )
 

@@ -39,8 +39,8 @@ def entry(**values):
     return {
         "access_token": access,
         "account": common._account({"access_token": access}),
-        "client_id": common.READ_CLIENT,
-        "scope": common.PROFILES["read"][1],
+        "client_id": common.GRAPH_CLIENT,
+        "scope": common.PROFILES["graph"][1],
         "expires_at": time.time() + 3600,
     }
 
@@ -56,38 +56,38 @@ class ProbeChecks(unittest.TestCase):
         )
 
     def test_expected_account_is_optional(self):
-        self.assertEqual(common._checked("read", entry()), token())
+        self.assertEqual(common._checked("graph", entry()), token())
 
     def test_optional_expected_account_is_enforced(self):
         with patch.object(common, "EXPECTED_USER", "other@example.com"):
             with self.assertRaisesRegex(SystemExit, "expected account"):
-                common._checked("read", entry())
+                common._checked("graph", entry())
 
     def test_expected_account_comparison_is_case_insensitive(self):
         with patch.object(common, "EXPECTED_USER", "USER@EXAMPLE.COM"):
-            self.assertEqual(common._checked("read", entry()), token())
+            self.assertEqual(common._checked("graph", entry()), token())
 
     def test_mixed_account_cache_is_rejected(self):
-        self.cache.return_value = {"write": entry(oid="another-user")}
+        self.cache.return_value = {"outlook": entry(oid="another-user")}
         with self.assertRaisesRegex(SystemExit, "different accounts"):
-            common._checked("read", entry())
+            common._checked("graph", entry())
 
     def test_same_identity_can_have_a_changed_email(self):
-        self.cache.return_value = {"write": entry(upn="renamed@example.com")}
-        self.assertEqual(common._checked("read", entry()), token())
+        self.cache.return_value = {"outlook": entry(upn="renamed@example.com")}
+        self.assertEqual(common._checked("graph", entry()), token())
 
     def test_missing_identity_is_rejected(self):
         with self.assertRaisesRegex(SystemExit, "no tenant/account identity"):
-            common._checked("read", entry(tid=None))
+            common._checked("graph", entry(tid=None))
 
     def test_wrong_account_is_not_saved_after_sign_in(self):
-        self.cache.return_value = {"read": entry()}
+        self.cache.return_value = {"graph": entry()}
         with patch.object(common, "_save") as save:
             with self.assertRaisesRegex(SystemExit, "different accounts"):
                 common._store_result(
-                    "write",
-                    common.WRITE_CLIENT,
-                    common.PROFILES["write"][1],
+                    "outlook",
+                    common.OUTLOOK_CLIENT,
+                    common.PROFILES["outlook"][1],
                     {"access_token": token(oid="another-user")},
                 )
             save.assert_not_called()
@@ -95,9 +95,9 @@ class ProbeChecks(unittest.TestCase):
     def test_changed_profile_does_not_reuse_cached_access_token(self):
         cached = entry()
         cached["client_id"] = "old-client"
-        self.cache.return_value = {"read": cached}
+        self.cache.return_value = {"graph": cached}
         with self.assertRaises(common.SignInRequired):
-            common.get_token("read")
+            common.get_token("graph")
         self.network.assert_not_called()
 
     def test_routing_uses_signed_in_email(self):
@@ -129,7 +129,7 @@ class ProbeChecks(unittest.TestCase):
     def test_transport_failure_is_not_a_scope_denial(self):
         cached = entry()
         cached["refresh_token"] = "synthetic-refresh"
-        self.cache.return_value = {"read": cached}
+        self.cache.return_value = {"graph": cached}
         with patch.object(
             common,
             "http",
@@ -137,7 +137,7 @@ class ProbeChecks(unittest.TestCase):
         ):
             self.assertEqual(
                 common.try_scope(
-                    common.READ_CLIENT, "https://graph.microsoft.com/Mail.Send"
+                    common.GRAPH_CLIENT, "https://graph.microsoft.com/Mail.Send"
                 )["result"],
                 "inconclusive",
             )
@@ -145,7 +145,7 @@ class ProbeChecks(unittest.TestCase):
     def test_opaque_refreshed_token_preserves_checked_sign_in_identity(self):
         cached = entry()
         cached["refresh_token"] = "synthetic-refresh"
-        self.cache.return_value = {"read": cached}
+        self.cache.return_value = {"graph": cached}
         with patch.object(
             common,
             "http",
@@ -153,9 +153,9 @@ class ProbeChecks(unittest.TestCase):
         ):
             with patch.object(common, "_save") as save:
                 fresh = common._refresh(
-                    "read",
-                    common.READ_CLIENT,
-                    common.PROFILES["read"][1],
+                    "graph",
+                    common.GRAPH_CLIENT,
+                    common.PROFILES["graph"][1],
                     "synthetic-refresh",
                 )
                 self.assertEqual(fresh["account"], cached["account"])
@@ -165,9 +165,9 @@ class ProbeChecks(unittest.TestCase):
         with patch.object(common, "_save") as save:
             with self.assertRaisesRegex(SystemExit, "no tenant/account identity"):
                 common._store_result(
-                    "read",
-                    common.READ_CLIENT,
-                    common.PROFILES["read"][1],
+                    "graph",
+                    common.GRAPH_CLIENT,
+                    common.PROFILES["graph"][1],
                     {"access_token": "opaque-token"},
                 )
             save.assert_not_called()
@@ -175,7 +175,7 @@ class ProbeChecks(unittest.TestCase):
     def test_opaque_cached_token_routes_using_checked_sign_in_identity(self):
         cached = entry()
         cached["access_token"] = "opaque-token"
-        self.cache.return_value = {"read": cached}
+        self.cache.return_value = {"graph": cached}
         with patch.object(common, "http", return_value=common.Resp(200)) as http:
             common.ows("opaque-token", "GetItem", "GetItemRequest", {})
             self.assertEqual(
@@ -184,9 +184,9 @@ class ProbeChecks(unittest.TestCase):
             )
 
     def test_local_denial_is_skipped_without_a_request(self):
-        with patch.object(common, "DENIED", {(common.READ_CLIENT, "*")}):
+        with patch.object(common, "DENIED", {(common.GRAPH_CLIENT, "*")}):
             self.assertEqual(
-                common.try_scope(common.READ_CLIENT, "scope")["result"],
+                common.try_scope(common.GRAPH_CLIENT, "scope")["result"],
                 "skipped_recorded_denial",
             )
         self.network.assert_not_called()

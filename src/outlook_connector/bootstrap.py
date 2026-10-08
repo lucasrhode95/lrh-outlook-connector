@@ -36,10 +36,10 @@ class Services:
     conversations: Conversations
     exports: Exports
     files: Files
-    writes: Writes  # uses the write sign-in, only when a write is made
+    writes: Writes  # uses the Outlook sign-in, only when a write is made
     mutations: Mutations  # likewise
-    rules: Rules  # OWS reads/writes use the bound write sign-in
-    signatures: Signatures  # native Cloud Settings use the bound write sign-in
+    rules: Rules  # OWS reads/writes use the bound Outlook sign-in
+    signatures: Signatures  # native Cloud Settings use the bound Outlook sign-in
 
 
 class AppContext:
@@ -57,10 +57,11 @@ class AppContext:
 
     async def services(self) -> Services:
         if self._services is None:
-            claims = self.tokens.get_token("read").claims()
+            claims = self.tokens.get_token("graph").claims()
             if not claims.get("tid") or not claims.get("oid"):
                 raise AuthenticationRequired(
-                    "The read token carries no account identity.", command=self.tokens.sign_in_command("read")
+                    "The Graph token carries no account identity.",
+                    command=self.tokens.sign_in_command("graph"),
                 )
             account = Account(tenant_id=claims["tid"], object_id=claims["oid"], username=claims.get("upn"))
             self._transport = Transport(self.tokens, client=self._http_client)

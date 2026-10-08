@@ -1,6 +1,6 @@
 """R3 + R4: can Graph return a whole conversation across folders, and how good are conversation headers?
 
-Read-only (profile 'read'). Samples recent conversations from Sent Items and Inbox,
+Read-only (profile 'graph'). Samples recent conversations from Sent Items and Inbox,
 then for each conversation:
 
 R3  GET /me/messages?$filter=conversationId eq '...'   (mailbox-wide)
@@ -122,7 +122,7 @@ def main() -> int:
     ap.add_argument("--max-messages", type=int, default=40)
     ap.add_argument("--skip-headers", action="store_true")
     args = ap.parse_args()
-    token = need("read")
+    token = need("graph")
     aliases = well_known_ids(token)
     cids = sample_conversations(token, args.conversations)
 

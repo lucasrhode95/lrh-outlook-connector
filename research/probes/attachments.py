@@ -1,6 +1,6 @@
 """Attachment shapes for exports: types, inline images, item/reference attachments.
 
-Read-only (profile 'read'). Scans recent messages with attachments and reports:
+Read-only (profile 'graph'). Scans recent messages with attachments and reports:
 - counts by @odata.type (file / item / reference) and isInline
 - inline file attachments whose contentId is referenced as cid: in body vs uniqueBody
 - whether /$value works per attachment type (first one of each type only)
@@ -22,7 +22,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--messages", type=int, default=40)
     args = ap.parse_args()
-    token = need("read")
+    token = need("graph")
     r = graph(token, "/me/messages", **{"$filter": "receivedDateTime ge 2000-01-01T00:00:00Z and hasAttachments eq true", "$top": str(args.messages),
                                          "$select": "id", "$orderby": "receivedDateTime desc"})
     messages = rows(r)

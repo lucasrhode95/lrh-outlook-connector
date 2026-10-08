@@ -6,12 +6,12 @@ Denials configured for the current environment are skipped; none are skipped by 
 
 from __future__ import annotations
 
-from common import GRAPH_RESOURCE, READ_CLIENT, WRITE_CLIENT, emit, try_scope
+from common import GRAPH_RESOURCE, GRAPH_CLIENT, OUTLOOK_CLIENT, emit, try_scope
 
 GRAPH = GRAPH_RESOURCE + "/"
 CASES = {
-    "outlook_mobile": (READ_CLIENT, ["Mail.ReadWrite", "Mail.Send", "Mail.ReadWrite.Shared", ".default"]),
-    "one_outlook_web": (WRITE_CLIENT, ["Mail.Read", "Mail.ReadWrite", "Mail.Send", ".default"]),
+    "outlook_mobile": (GRAPH_CLIENT, ["Mail.ReadWrite", "Mail.Send", "Mail.ReadWrite.Shared", ".default"]),
+    "one_outlook_web": (OUTLOOK_CLIENT, ["Mail.Read", "Mail.ReadWrite", "Mail.Send", ".default"]),
 }
 
 

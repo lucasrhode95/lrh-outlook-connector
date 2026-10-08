@@ -1,6 +1,7 @@
 """The ports the service depends on (architecture §6.1).
 
-Adapters: remote/graph_mail.py implements MailReader, remote/ows.py implements MailWriter.
+Adapters: remote/graph_mail.py implements MailReader, remote/ows_mail.py implements MailWriter,
+remote/ows_rules.py implements RuleWriter, and remote/cloud_settings.py implements SignatureStore.
 Swapping an adapter (another tenant, a policy change) must not change anything above this file.
 """
 

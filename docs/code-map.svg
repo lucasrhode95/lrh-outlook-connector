@@ -20,13 +20,11 @@
       g:hover > text { fill: #183153; }
       .call-flow { fill: none; stroke: #71869b; stroke-width: 2.6; stroke-linecap: square; stroke-linejoin: miter; marker-end: url(#arrow); }
       .impl-flow { fill: none; stroke: #71869b; stroke-width: 2.4; stroke-dasharray: 9 7; marker-end: url(#arrow); }
-      .read-flow { fill: none; stroke: #2b6cb0; stroke-width: 2.8; stroke-linecap: square; marker-end: url(#blue-arrow); }
-      .write-flow { fill: none; stroke: #b7791f; stroke-width: 2.8; stroke-linecap: square; marker-end: url(#amber-arrow); }
+      .api-flow { fill: none; stroke: #4b7187; stroke-width: 2.8; stroke-linecap: square; marker-end: url(#api-arrow); }
       .local-flow { fill: none; stroke: #7650a4; stroke-width: 2.8; stroke-linecap: square; marker-start: url(#purple-arrow); marker-end: url(#purple-arrow); }
     </style>
     <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#71869b"/></marker>
-    <marker id="blue-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#2b6cb0"/></marker>
-    <marker id="amber-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#b7791f"/></marker>
+    <marker id="api-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#4b7187"/></marker>
     <marker id="purple-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#7650a4"/></marker>
   </defs>
   <rect width="2600" height="3585" fill="#fff"/>
@@ -153,7 +151,7 @@
 <text class="group-title" x="691" y="1554">Methods</text>
 <g><title>Save the message (or reply) into Drafts; replies are checked for intact quoted history. Nothing is sent.</title><text class="detail" x="691" y="1611">• <tspan class="code">create_draft(message)</tspan></text></g>
 <g><title>Send a message the user confirmed with its code; once, never retried. An unclear answer is checked against Sent Items.</title><text class="detail" x="691" y="1638">• <tspan class="code">send(message, code)</tspan></text></g>
-<g><title>Refuses to write unless the write sign-in is the same Microsoft account as the read sign-in.</title><text class="detail" x="691" y="1665">• <tspan class="code">check_account()</tspan></text></g>
+<g><title>Refuses to write unless the Outlook sign-in is the same Microsoft account as the Graph sign-in.</title><text class="detail" x="691" y="1665">• <tspan class="code">check_account()</tspan></text></g>
 <text class="muted" x="691" y="1745">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">MailWriter</tspan> · <tspan class="code">Account</tspan></text>
 <rect x="1247" y="1482" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1265" y="1517"><tspan class="code">Mutations</tspan><tspan class="detail" dx="12">mutations.py</tspan></text>
@@ -199,7 +197,7 @@
 <text class="card-subtitle" x="660" y="2091"><tspan class="code">remote/</tspan> · Microsoft protocols and adapters for MailReader, MailWriter, RuleWriter, SignatureStore</text>
 <rect x="660" y="2128" width="560" height="221" fill="#f2f7fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="676" y="2142" width="32" height="26" rx="5" fill="#2b6cb0"/>
-<text class="badge" x="692" y="2161" text-anchor="middle">R</text>
+<text class="badge" x="692" y="2161" text-anchor="middle">G</text>
 <text class="section-title" x="718" y="2163"><tspan class="code">MailReader</tspan><tspan class="detail" dx="12">ports.py</tspan></text>
 <g><title>Every folder, hidden ones included (the service decides what is out of reach).</title><text class="detail" x="678" y="2200">• <tspan class="code">list_folders</tspan></text></g>
 <g><title>One page of messages, newest first; a continuation, or skip N.</title><text class="detail" x="678" y="2227">• <tspan class="code">list_messages</tspan></text></g>
@@ -213,7 +211,7 @@
 <g><title>The signed-in user's name, address and photo.</title><text class="detail" x="906" y="2308">• <tspan class="code">profile(_photo)</tspan></text></g>
 <rect x="1240" y="2128" width="560" height="221" fill="#fdf8ef" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="1256" y="2142" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="1272" y="2161" text-anchor="middle">W</text>
+<text class="badge" x="1272" y="2161" text-anchor="middle">O</text>
 <text class="section-title" x="1298" y="2163"><tspan class="code">MailWriter</tspan><tspan class="detail" dx="12">ports.py</tspan></text>
 <g><title>Save into Drafts without sending; the draft's id when the backend reports it.</title><text class="detail" x="1258" y="2200">• <tspan class="code">create_draft</tspan></text></g>
 <g><title>Send and keep a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2227">• <tspan class="code">send</tspan></text></g>
@@ -248,7 +246,7 @@
 <text class="section-title" x="1258" y="2704"><tspan class="code">Ows</tspan><tspan class="detail" dx="12">ows.py</tspan></text>
 <g><title>One item action in the JsonRequest envelope; returns the item results in request order (ResponseClass/ResponseCode).</title><text class="detail" x="1258" y="2741">• <tspan class="code">call(action, body)</tspan></text></g>
 <g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="2768">• <tspan class="code">call_request(action, ...)</tspan></text></g>
-<g><title>Claims of the write token: the account writes act as.</title><text class="detail" x="1258" y="2795">• <tspan class="code">account()</tspan></text></g>
+<g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="2795">• <tspan class="code">account()</tspan></text></g>
 <rect x="660" y="2882" width="1140" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="678" y="2917"><tspan class="code">Transport</tspan><tspan class="detail" dx="12">transport.py</tspan></text>
 <g><title>Send one request; return a successful response or raise a domain error.</title><text class="detail" x="678" y="2954">• <tspan class="code">request(...)</tspan></text></g>
@@ -277,8 +275,8 @@
 <g><title>Delete the cache; or an offline view of it (no network, no token values).</title><text class="detail" x="678" y="3389">• <tspan class="code">sign_out()</tspan> · <tspan class="code">status()</tspan></text></g>
 <rect x="1240" y="3233" width="560" height="232" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1258" y="3271">Profiles</text>
-<g><title>Graph Mail.Read. Required for mail reads.</title><text class="detail" x="1258" y="3301">• read: Outlook Mobile client</text></g>
-<g><title>→ outlook.office.com. Needed for drafts, sending, rules and mailbox changes.</title><text class="detail" x="1258" y="3328">• write: One Outlook Web client</text></g>
+<g><title>Graph Mail.Read. Required for mail reads.</title><text class="detail" x="1258" y="3301">• graph: Outlook Mobile client</text></g>
+<g><title>→ outlook.office.com. Needed for drafts, sending, rules and mailbox changes.</title><text class="detail" x="1258" y="3328">• outlook: One Outlook Web client</text></g>
 <text class="group-title" x="1258" y="3367">Cache</text>
 <g><title>token-cache.bin under the data folder, encrypted by Windows for your user; a lock file serialises refreshes across processes.</title><text class="detail" x="1258" y="3397">DPAPI-encrypted file · cross-process lock</text></g>
 <g><title>tenant id + object id must match, or AccountMismatch.</title><text class="detail" x="1258" y="3424">both profiles must be the same account</text></g>
@@ -299,7 +297,7 @@
 <g><title>Everything else reads through it.</title><text class="detail" x="1938" y="420">• <tspan class="code">Mailbox(reader, store)</tspan></text></g>
 <text class="detail" x="1938" y="447">• <tspan class="code">Conversations(mailbox)</tspan></text>
 <text class="detail" x="1938" y="474">• <tspan class="code">Exports(conversations)</tspan> · <tspan class="code">Files(mailbox)</tspan></text>
-<g><title>Mailbox and inbox-rule adapters use the account-bound write profile.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter · OwsRules</tspan></text></g>
+<g><title>Mailbox and inbox-rule adapters use the account-bound Outlook profile.</title><text class="detail" x="1938" y="501">• <tspan class="code">OwsMailWriter · OwsRules</tspan></text></g>
 <text class="detail" x="1938" y="528">• <tspan class="code">Writes · Mutations · Rules</tspan></text>
 <text class="detail" x="1938" y="555">• <tspan class="code">Signatures(CloudSettings, account)</tspan></text>
 <rect x="1900" y="656" width="620" height="522" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
@@ -322,43 +320,42 @@
 <text class="card-subtitle" x="1920" y="2091">first-party public clients · no app registration</text>
 <rect x="1920" y="2128" width="580" height="194" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="1936" y="2142" width="32" height="26" rx="5" fill="#2b6cb0"/>
-<text class="badge" x="1952" y="2161" text-anchor="middle">R</text>
+<text class="badge" x="1952" y="2161" text-anchor="middle">G</text>
 <text class="section-title" x="1978" y="2163"><tspan class="code">Microsoft Graph</tspan></text>
-<g><title>Documented API. The read sign-in.</title><text class="detail" x="1938" y="2200"><tspan class="code">graph.microsoft.com/v1.0</tspan></text></g>
+<g><title>Documented API. The Graph sign-in.</title><text class="detail" x="1938" y="2200"><tspan class="code">graph.microsoft.com/v1.0</tspan></text></g>
 <g><title>Folders, messages, conversations (conversationId filter).</title><text class="detail" x="1938" y="2227"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan></text></g>
 <g><title>Search, up to 20 requests in one, server counts.</title><text class="detail" x="1938" y="2254"><tspan class="code">$search</tspan> · <tspan class="code">$batch</tspan> · <tspan class="code">$count</tspan></text></g>
 <g><title>Attachment bytes, the original .eml, and id translation for $search hits.</title><text class="detail" x="1938" y="2281">attachments · MIME · <tspan class="code">translateExchangeIds</tspan></text></g>
 <rect x="1920" y="2352" width="580" height="194" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="1936" y="2366" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="1952" y="2385" text-anchor="middle">W</text>
+<text class="badge" x="1952" y="2385" text-anchor="middle">O</text>
 <text class="section-title" x="1978" y="2387"><tspan class="code">Outlook Web (OWS)</tspan></text>
-<g><title>Outlook Web's private JSON API; the write sign-in. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1938" y="2424"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text></g>
+<g><title>Outlook Web's private JSON API; the Outlook sign-in. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1938" y="2424"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text></g>
 <g><title>Drafts, sending, read state, flags.</title><text class="detail" x="1938" y="2451"><tspan class="code">CreateItem</tspan> · <tspan class="code">UpdateItem</tspan></text></g>
 <g><title>Moves and soft deletes.</title><text class="detail" x="1938" y="2478"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
 <g><title>OWS rule actions support reading and confirmed changes to supported inbox rules.</title><text class="detail" x="1938" y="2505">inbox rules: read and supported writes</text></g>
 <rect x="1920" y="2582" width="580" height="130" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1938" y="2614"><tspan class="code">Cloud Settings</tspan></text>
 <text class="detail" x="1938" y="2648">Native roaming signatures · read and write</text>
-<text class="detail" x="1938" y="2678">Account-bound write profile</text>
-<path class="write-flow" d="M1800 2962 H1840 V2648 H1916"/>
+<text class="detail" x="1938" y="2678">Account-bound Outlook profile</text>
+<path class="api-flow" d="M1800 2962 H1840 V2648 H1916"/>
 <text class="flow-label" x="1800" y="2634" text-anchor="middle">signature API</text>
 <rect x="1920" y="3233" width="580" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1938" y="3268"><tspan class="code">Entra ID</tspan></text>
 <g><title>Microsoft's sign-in service.</title><text class="detail" x="1938" y="3305"><tspan class="code">login.microsoftonline.com</tspan></text></g>
 <g><title>Sign-in by code in a browser; refresh tokens renew access silently.</title><text class="detail" x="1938" y="3332">device code · refresh tokens</text></g>
 <g><title>Through MSAL.</title><text class="detail" x="1938" y="3359">only <tspan class="code">TokenProvider</tspan> talks to it</text></g>
-<path class="read-flow" d="M1800 2922 H1852 V2188 H1916"/>
-<path class="write-flow" d="M1800 2962 H1872 V2412 H1916"/>
+<path class="api-flow" d="M1800 2922 H1852 V2188 H1916"/>
+<path class="api-flow" d="M1800 2962 H1872 V2412 H1916"/>
 <path class="call-flow" d="M1820 3289 H1916"/>
 <text class="flow-label" x="1868" y="3277" text-anchor="middle">sign-in</text>
 <rect x="80" y="3525" width="32" height="26" rx="5" fill="#2b6cb0"/>
-<text class="badge" x="96" y="3544" text-anchor="middle">R</text>
-<text class="flow-label" x="122" y="3545">Graph reads</text>
+<text class="badge" x="96" y="3544" text-anchor="middle">G</text>
+<text class="flow-label" x="122" y="3545">Graph profile</text>
 <rect x="270" y="3525" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="286" y="3544" text-anchor="middle">W</text>
-<text class="flow-label" x="312" y="3545">OWS writes</text>
-<path class="read-flow" d="M470 3538 H530"/><text class="flow-label" x="542" y="3545">read over HTTPS</text>
-<path class="write-flow" d="M720 3538 H780"/><text class="flow-label" x="792" y="3545">write over HTTPS</text>
+<text class="badge" x="286" y="3544" text-anchor="middle">O</text>
+<text class="flow-label" x="312" y="3545">Outlook profile</text>
+<path class="api-flow" d="M570 3538 H630"/><text class="flow-label" x="642" y="3545">API call over HTTPS</text>
 <path class="local-flow" d="M975 3538 H1035"/><text class="flow-label" x="1047" y="3545">local read and write</text>
 <path class="call-flow" d="M1255 3538 H1315"/><text class="flow-label" x="1327" y="3545">calls (points to the callee)</text>
 <path class="impl-flow" d="M1600 3538 H1660"/><text class="flow-label" x="1672" y="3545">port implemented by</text>

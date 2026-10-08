@@ -3,7 +3,7 @@
     python research/probes/search.py "relatório be" "relatorio be" "subject:relatório"
     python research/probes/search.py --no-substrate "..."
 
-Read-only. Profiles: 'read' (Graph) and, unless --no-substrate, 'search'
+Read-only. Profiles: 'graph' (Graph) and, unless --no-substrate, 'search'
 (One Outlook Web -> https://outlook.office.com/search/.default).
 
 Per query and backend: HTTP status, result count over N pages, server total /
@@ -152,7 +152,7 @@ def main() -> int:
     ap.add_argument("--pages", type=int, default=2)
     ap.add_argument("--no-substrate", action="store_true")
     args = ap.parse_args()
-    read = need("read")
+    read = need("graph")
     search_token, anchor, substrate_url, variant, discovery = None, None, None, None, None
     if not args.no_substrate:
         search_token = need("search")
