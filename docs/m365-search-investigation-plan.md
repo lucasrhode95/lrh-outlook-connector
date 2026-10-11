@@ -1,6 +1,6 @@
 # Microsoft 365 search investigation
 
-Last updated: **2026-10-10**
+Last updated: **2026-10-11**
 
 ## Objective
 
@@ -279,6 +279,46 @@ Current evidence:
   and [roadmap X10/X11](outlook-roadmap.md).
 - Teams: `lrh-teams-connector/docs/teams-api-research.md` and
   `lrh-teams-connector/docs/teams-connector-roadmap.md`.
+
+## Evidence update (2026-10-11 capture/source reconciliation)
+
+The October 10 browser HARs and source bundles were re-audited against both products' research
+records. The audit corrected route attribution by surface: OneDrive Files submitted Substrate
+`/search/api/v2/query` plus a SharePoint REST search proxy; company SharePoint submitted
+`/searchservice/api/v2/query`; Outlook and Teams global search also used `/searchservice/api/v2/query`;
+Teams Transcript queries used a separate `/search/api/v2/query` route. The common Graph Search API
+`POST /v1.0/search/query` remains a distinct connector-facing route family, with `entityTypes`
+choosing message/event/chatMessage/driveItem search and different permission/result contracts.
+
+The capture review added SharePoint's image-only `GET /api/v1/documents/searchpreview`, OneDrive's
+list-stream calls, SharePoint suggestion/init/configuration calls, and Teams recap/resource
+hydration routes to the dated product research. It also corrected the People/profile evidence:
+Teams Web did call `fetch`, `fetchShortProfile`, and `fetchfeaturesettings`, returning profile
+objects or per-entry status envelopes; free-form People Picker and working-set routes remain
+source-only. Teams bundle source now explains exact-hit navigation by message identity and
+timestamp, but no message-history request or click-triggered HTTP sequence was present in the HAR.
+One parseable mixed Search v2 response also included Message `Source` fields for
+`InternetMessageId`, conversation/client-thread identities, and sent/received/created timestamps.
+The Teams Web normalizer uses `InternetMessageId` for the UI result id and composes its exact-hit
+navigation object from reply-chain identity, `ClientThreadId`, and `DateTimeSent`. That identifies
+and dates the hit without assigning a history-page number. The normalizer also uses `ThreadSubType`
+and `ParentMessageId` for reply-chain derivation; they were not top-level captured Source fields,
+so their extraction is unresolved. The identifier is not yet cross-checked against Graph/Chat
+Service history IDs, and the history-fetch wire request is absent. Mapping
+`dateTimeSent` to Chat Service `startTime` remains inferential.
+
+The route inventory omits static assets and telemetry as non-result endpoints. It records
+bootstrap/configuration and image-preview paths when they explain a search surface or result
+hydration. No captured browser route is being promoted to a portable connector contract. No live
+probe or product-code change was made during this reconciliation.
+
+Remaining open checks include standalone authentication and permissions, true continuation for
+each browser provider, mapping SharePoint Search identities to Graph drive/item IDs, checking the
+Teams Search `InternetMessageId`/thread identities against Graph or Chat Service history, the
+post-click Teams history wire request, and the successful in-pane transcript-search request. See
+the dated endpoint/click-through ledger at [M365 search findings](m365-search-findings-2026-10-10.md)
+and the canonical [Outlook](outlook-api-research.md) and
+[Teams](../../lrh-teams-connector/docs/teams-api-research.md) research files.
 
 ## Evidence update (2026-10-10)
 

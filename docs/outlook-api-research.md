@@ -278,8 +278,13 @@ connector can use those private routes with app-owned authentication.
 
 | Surface | Captured/source contract | What remains unproven |
 |---|---|---|
-| SharePoint/OneDrive files | The personal-files capture submitted `POST /search/api/v2/query` with `EntityRequests[].EntityType=File`, query text, `From`, `Size`, content sources, sort and fields. The response envelope included `ApiVersion`, `SearchTerms`, `EntitySets` and result sets. Search-box suggestions used a separate `GET /search/api/v1/suggestions` route and returned suggestion groups. | Browser route parity with Graph, content-only matching, complete scope coverage, continuation behavior and mapping each result to a retrievable Graph drive/item reference. |
-| Outlook and Teams global search | Captures used the Substrate Search v2 route `POST /searchservice/api/v2/query`; request shapes include `EntityRequests` and, in some flows, `AnswerEntityRequests`. Suggestions and search-event telemetry are separate calls. Teams capture entity categories included files, people, messages and events across the observed flows. | Exact UI-filter-to-request mapping for every category, row-level result linkage, pagination semantics and a standalone app-owned-auth contract. |
+| OneDrive Files UI | Two submitted file searches used `POST /search/api/v2/query` with `EntityRequests[].EntityType=File`, query text, `From=0`, `Size=8`, content sources, sort and fields. Two additional SharePoint REST proxy searches used `POST /_api/sp.searchresultitemcollection.getsearchresultsasstream?scenario=...&textDecorations=...` with a JSON `payload`. All four returned HTTP 200 and Search-shaped envelopes with `EntitySets[].ResultSets[].Results`; paging fields included `Total` and `MoreResultsAvailable`. | This browser surface uses Substrate plus a SharePoint proxy; neither path is Graph Search API. Result-to-Graph identity mapping, complete scope, and an advancing page request remain unproven. |
+| Company SharePoint search page | Four submitted requests used `POST /searchservice/api/v2/query`; captured entity requests included `File` and `People`. Three HTTP 200 responses had result sets and one returned only `ApiVersion`, `SearchTerms`, and `Instrumentation`. The page also used `GET /search/api/v1/suggestions`, `GET /search/api/v2/init`, `GET /search/api/v2/resources`, and `POST /search/api/v1/userconfig`. | A separate Substrate-backed SharePoint page flow. Suggestion/init/config calls are not submitted-result calls. Search scope and result-to-Graph identity mapping remain unproven. |
+| SharePoint result preview | `GET /api/v1/documents/searchpreview` was called 24 times with query-key names `documentType`, `listId`, `siteId`, `spWebUrl`, `uniqueId`, and `webId`; all returned `image/jpeg`. | Each preview request's `uniqueId`, `siteId`, `webId`, and `listId` matched those fields in a captured Search result `Source` record in the same HAR. This proves item-level preview/result identity, but not that a user clicked each item, that the preview is file content, or that the SharePoint IDs map to Graph drive/item IDs. |
+| Outlook global search | The Outlook capture submitted one `POST /searchservice/api/v2/query` request for `Conversation`/`Exchange`. Separate `POST /search/api/v1/suggestions` requests asked for combinations of `People`, `File`, `Event`, and `Message`; `POST /search/api/v1/recommendations` returned an HTML-type recommendation response. | Suggestions/recommendations do not establish that Outlook submitted a file-, event-, or attachment-search request. Result-click behavior remains uncaptured. |
+| Outlook people/persona companion routes | Captures also include `GET /api/v1/livepersonacard/configuration` (3×200), `GET /api/v1/peopleInsights/owareadingpane` (3×200), `GET /api/v2/personaphoto` (23×200, 3×404), and `POST /api/v2/personacards/preparePersona` (3×200). | These are profile/persona configuration, photo, or reading-pane support calls. Their response contracts and correlation to any particular suggestion or result activation were not established; they are not submitted search requests. |
+| Outlook GraphQL meeting-support calls | In the Teams Recaps browser capture, Outlook Web also sent ten HTTP 200 POSTs to `/outlookgatewayb2/graphql?cv=...&n=...`. Operations were `SyncTeammatesCalendarGroup` (3), `TabsAndEntitlements` (1), `WorkingHours` (4), `getUserAuthSettings` (1), and `useGetMeetingResponseQuery` (1). Each response was a one-element array with `data` and `extensions`; observed data roots included `syncTeammatesCalendarGroup`, `appEntitlements`, `listTabs`, `flexibleWorkingHoursView`, `getUserAuthSettings`, and `getSchedulingServiceMeeting`. | This is Outlook's private GraphQL service, not Microsoft Graph and not a global search provider. It shows adjacent calendar, tab, working-hours, and meeting-response data calls. No standalone replay or full response contract was established. |
+| Teams global search | Captures used `POST /searchservice/api/v2/query`; request shapes include `EntityRequests` and, in some flows, `AnswerEntityRequests`. Teams also submitted three `POST /search/api/v2/query` Transcript requests and five `POST /search/api/v1/recommendations` recap requests. | See the Teams API research for request/result details and click-navigation source. Browser success does not prove standalone auth; continuation and transcript-search completeness remain open. |
 | Teams Meet search | SOURCE maps `MEETINGDOMAIN` to `Event`; `MEETING_SEARCH.DEFAULT_REQUEST_BODY` uses `Event`, `Exchange`, and supported/preferred result-source-format hints. A separate Meet-app `searchEvents` builder posts to `/search/api/v2/query` with lowercase `entityRequests[]`, date bounds, proximity sort, `from=0`, `size=30`; its parser reads `EntitySets[0].ResultSets[0].Results[].Source`. | The separate Meet-app builder has not been tied to the global Teams Meetings tab captured in the HAR. Source page-size settings are UI defaults, not server guarantees; standalone usability remains open. |
 | Meeting recap | Captured recap calls returned `EntitySets[].MeetingInsights`. SOURCE identifies `getMeetingRecapCatchupItems` and `getMeetingRecapCallSummary` request builders with `QueryParameters` fields for entity type/id/context and optional start/end times, top count and meeting-thread filter. The parser reads recording, summary, points-of-interest, speaker and timing fields; recommendations can expose `PaginationSessionId`. | The caller path that would reuse that pagination id has not been established; recap search coverage is not equivalent to calendar event search. |
 | Transcripts | CAPTURED ODSP transcript GET path: `/_api_cached/v2.1/drives/{drive}/items/{item}/cdnmedia/transcripts` (three HTTP 200 responses), with query keys `cTag`, `P1`–`P4`, `isformatjson`, `transcriptkey`, `applyhighlights`, `applymediaedits` and `kid`. SOURCE also shows legacy AMS `/v1/objects/{object}/views/transcript` and `/status`, Meeting Intelligence `/MeetingIntelligence/TranscriptService/storage/{storage}/scope/{scope}/`, and ODSP `/drives/{drive}/items/{item}/media/transcripts/{transcript}/content`. The storage/scope builder sets `isChannel=true` for channel meetings. | Retrieval does not prove global text search. The captured ODSP keys' semantics and continuation role are unverified; `applymediaedits=true` in the source builder is a content-control flag. View and download permissions remain distinct. |
@@ -294,7 +299,7 @@ that a live OWA token requests or receives the scope, or that OWA itself sends t
 Keep the Teams HAR and Teams client source as the evidence for those contracts; standalone
 connector authentication remains unproven.
 
-**Captured response and paging details (2026-10-10).** The personal SharePoint Files flow had four
+**Captured response and paging details (2026-10-10).** The OneDrive Files UI flow had four
 successful submitted searches: two `POST /search/api/v2/query` calls with `From=0`, `Size=8`, then
 two SharePoint proxy POSTs under `/{site}/{scope}/_api/{operation}` with `From=0`, `Size=25`.
 Observed result counts were 8, 8, 13 and 25. The later requests used SharePoint; the last also
@@ -307,6 +312,68 @@ Conversation/Exchange with `From=0`, `Size=25` and zero hits. The capture does n
 attachment-only search. In the broader Teams capture, a File-only request returned 25 hits and an
 Event-only answer request returned 25; response fields and total/page caveats are in
 `lrh-teams-connector/docs/teams-api-research.md`.
+
+**Additional endpoint reconciliation (2026-10-11, October 10 HARs).** In the OneDrive Files UI,
+the two SharePoint REST `getSearchResultsAsStream` calls are distinct from the two Search API
+`/search/api/v2/query` calls. Six `SP.List.GetListDataAsStream` calls and two
+`RenderListDataAsStream` calls also loaded list content; these are list/browse hydration, not
+additional global searches. The company SharePoint search page instead submitted through
+`/searchservice/api/v2/query`, with `GET /search/api/v1/suggestions` for suggestions. Its
+`/search/api/v1/events` requests are telemetry, and `/search/api/v1/userconfig` plus
+`/search/api/v2/init` are setup/configuration calls. The `GET /search/api/v2/resources` responses
+were resource payloads, not result pages.
+
+The SharePoint page's 24 successful `GET /api/v1/documents/searchpreview` responses were JPEG
+images. For all 24 requests, the query values for `uniqueId`, `siteId`, `webId`, and `listId` matched
+the corresponding four fields on a Search result `Source` record in that same HAR. This links each
+preview to a specific search-result item. It does not prove a user click caused the request (the
+page may preload previews), expose a file-content/open route, or map those SharePoint IDs to Graph
+drive/item IDs.
+Similarly, the OneDrive REST proxy search responses had `MoreResultsAvailable` in the envelope,
+but every observed submitted offset remained zero and no next-page request was captured. These
+routes are separate from Graph `POST /v1.0/search/query` with `entityTypes=["driveItem"]`.
+
+**SharePoint client-source pagination and result identity (2026-10-11).** The supplied SharePoint
+client assets contain two Search v2 request builders. `fetchScopedQueryAPI` builds a File request
+to Substrate `/search/api/v2/query` with `From=0`, `Size=5`, selected fields, highlighting, sort,
+merge and content-source settings; its client cache is keyed by `searchText` and has a 600,000 ms
+item lifetime. A separate Lists Home provider builds File requests with `Size=24` and
+`From=startRow`; its UI advances `startRow` by 24 when `MoreResultsAvailable` is true, and its
+response parser reads `EntitySets[0].ResultSets[0]`. The HAR showed only offset-zero submitted
+requests, so offset continuation is established in source but not exercised on the wire. The
+source callers have not been traced one-to-one to individual HAR entries, and the captured company
+SharePoint page's submitted result calls used `/searchservice/api/v2/query`; do not conflate that
+route with these source-built `/search/api/v2/query` requests. The cache duration describes this
+client cache, not server indexing delay or request latency.
+
+The Lists Home result parser preserves SharePoint fields including `AccessUrl`, `SPWebUrl`,
+`SpoUniqueId`, `SiteId`, `WebId`, `ListId`, and `ParentLink`; browser navigation can use `AccessUrl`
+or combine the SharePoint URL with the unique item ID. This identifies a result within SharePoint,
+but does not establish a mapping to Graph `driveId`/`itemId`. The `searchpreview` source builder
+uses a dynamic API host, the observed site/list/item identity keys, a `ClientScenario` header, and
+returns an image blob through an object URL. That source explains preview hydration; it does not
+establish that every preview request follows a user click or that it returns file content.
+
+The Recaps HAR also records Outlook's `/outlookgatewayb2/graphql` operations above. One response
+root is `getSchedulingServiceMeeting`, and another operation returns `listTabs`/`appEntitlements`;
+these are adjacent meeting UI data, not proof that Outlook GraphQL powers Teams global search or
+the Recaps transcript viewer. The same capture contains one additional GraphQL-named GET route with
+no identifiable operation or result contract; it remains an unexplained browser request.
+
+Across the UI captures, `/search/api/v1/suggestions` appears as both GET and POST depending on the
+surface; `/searchservice/api/v2/query` is the submitted route for Outlook/Teams global search and
+the captured company SharePoint page, while the OneDrive Files flow submitted `/search/api/v2/query`
+and the SharePoint REST proxy. The route method/body/version are therefore product-surface
+contracts, not interchangeable aliases. Search telemetry and bootstrap calls should not be counted
+as result providers.
+
+The supporting calls in these HARs include `GET /search/api/v2/init` (Outlook, OneDrive and
+SharePoint captures), `GET /search/api/v2/resources`, and SharePoint `POST /search/api/v1/userconfig`.
+The Outlook source bundle separately contains a `/search/api/v1/init` builder; that source string
+and the captured `/search/api/v2/init` calls are not enough to establish version equivalence.
+`POST /search/api/v1/events` is search telemetry. Outlook also made one successful
+`POST /search/api/v1/recommendations` request for an `HTML` entity; the Teams Recaps capture used
+that route family for `MeetingCatchUp`, so the recommendation payloads are surface-specific.
 
 Every explicit search offset observed across these flows was zero. `MoreResultsAvailable=true`
 appeared in some successful file-search responses, but no advancing request was captured; do not
