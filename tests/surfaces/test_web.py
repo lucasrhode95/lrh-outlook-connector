@@ -38,7 +38,7 @@ def test_index_embeds_the_session_token(client: TestClient) -> None:
 
 def test_status_reports_service_profile_names(client: TestClient) -> None:
     status = client.get("/api/status").json()
-    assert status["signed_in"] == {
+    assert status["client_credential_cached"] == {
         "outlook.graph": True,
         "outlook.api": False,
         "teams.spaces": False,

@@ -243,7 +243,7 @@ async def test_errors_are_reported_as_tool_errors(server: FastMCP) -> None:
 
 async def test_auth_status_is_offline(server: FastMCP, fake: FakeGraph) -> None:
     status = await call(server, "auth_status")
-    assert status["profiles"]["outlook.graph"]["signed_in"] and fake.calls == []
+    assert status["profiles"]["outlook.graph"]["client_credential_cached"] and fake.calls == []
 
 
 def test_server_name_uses_project_brand(server: FastMCP) -> None:

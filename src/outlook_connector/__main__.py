@@ -121,7 +121,7 @@ def _auth(args: argparse.Namespace) -> int:
 
 @_exit_codes
 def _status(args: argparse.Namespace) -> int:
-    """``status``: the signed-in account and profiles; ``--check`` also gets each token silently."""
+    """Show cached client credentials; ``--check`` also attempts each profile's token silently."""
     provider = _tokens(args)
     status = provider.status()
     checks: dict[str, dict[str, object]] = {}
@@ -157,7 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
     auth.add_argument("--sign-out", action="store_true", help="Sign out of the shared Microsoft account.")
     _add_unsecure(auth)
 
-    status = sub.add_parser("status", help="Show the signed-in account and profiles (offline by default).")
+    status = sub.add_parser(
+        "status", help="Show cached client credentials and resource-token state (offline by default)."
+    )
     status.add_argument(
         "--check",
         action="store_true",
@@ -230,7 +232,7 @@ def _status_dict(status: CacheStatus, checks: dict[str, dict[str, object]]) -> d
                 "purpose": p.purpose,
                 "client_id": p.client_id,
                 "scopes": list(p.scopes),
-                "signed_in": p.signed_in,
+                "client_credential_cached": p.client_credential_cached,
                 "access_token_expires_on": _iso(p.access_token_expires_on),
                 **({"check": checks[p.profile]} if p.profile in checks else {}),
             }
@@ -246,10 +248,12 @@ def _print_status(status: CacheStatus, checks: dict[str, dict[str, object]]) -> 
     for account in status.accounts:
         print(f"Account:     {account.username} (fingerprint {account.fingerprint})")
     for p in status.profiles:
-        state = "signed in" if p.signed_in else "not signed in"
+        state = "cached" if p.client_credential_cached else "not cached"
         print(f"\n[{p.profile}] {p.purpose}")
         print(f"  client {p.client_id} -> {' '.join(p.scopes)}")
-        print(f"  {state}; cached access token valid until {_iso(p.access_token_expires_on) or '-'}")
+        print(
+            f"  client credential {state}; access token valid until {_iso(p.access_token_expires_on) or '-'}"
+        )
         if p.profile in checks:
             check = checks[p.profile]
             if check["ok"]:

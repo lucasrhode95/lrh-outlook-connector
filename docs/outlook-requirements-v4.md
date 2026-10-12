@@ -88,6 +88,7 @@ Authentication requirements:
 - `--unsecure` is an explicit development mode: the shared package uses a separate plaintext cache file outside the repository, with a warning on every use. It is never an implicit fallback.
 - Interactive sign-in happens only through `outlook-connector auth`, which bootstraps the complete Outlook/Teams/SharePoint profile catalog. UI and MCP calls use silent auth and return an actionable "sign-in required" error.
 - Cross-process cache locking and account-generation checks protect concurrent connector processes and invalidate remembered credentials after shared sign-out/account switching.
+- Offline status separates OAuth client credential presence from cached resource access-token expiry. `status --check` attempts token acquisition per profile, but does not prove service authorization.
 - Core mail reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature access use `outlook.api`, including their read-only operations. The composition root binds the store to the current account identified by the shared token (§5).
 
 ## 5. Account binding and identity

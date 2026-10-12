@@ -127,7 +127,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         return JSONResponse(
             {
                 "account": next((a.username for a in cache.accounts), None),
-                "signed_in": {p.profile: p.signed_in for p in cache.profiles},
+                "client_credential_cached": {p.profile: p.client_credential_cached for p in cache.profiles},
                 "sign_in_command": context.tokens.sign_in_command("outlook.graph"),
             }
         )

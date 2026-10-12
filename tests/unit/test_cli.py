@@ -61,7 +61,7 @@ def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]
     data = json.loads(capsys.readouterr().out)
     assert [p["profile"] for p in data["profiles"]] == list(PROFILES)
     assert data["cache"]["mode"] == "plaintext-development"
-    assert [p["signed_in"] for p in data["profiles"]] == [True, False, False, False, False]
+    assert [p["client_credential_cached"] for p in data["profiles"]] == [True, False, False, False, False]
     assert script.created == []
 
 

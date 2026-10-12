@@ -44,8 +44,10 @@ uv run outlook-connector auth --sign-out
 uv run outlook-connector auth
 ```
 
-`uv run outlook-connector status` reads local profile state without network requests.
-`status --check` also attempts token acquisition for every profile; it does not verify that each
+`uv run outlook-connector status` reads local profile state without network requests. It reports
+cached client credentials and any matching resource access-token expiry. Profiles sharing one
+client can have the same credential state even when only one resource token is cached.
+`status --check` attempts token acquisition for every profile; it does not verify that each
 Microsoft service or mailbox operation is authorized.
 
 > Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens
@@ -109,7 +111,7 @@ uv run outlook-connector ui
 
 ### Find and read
 
-- `auth_status` — Check the local sign-in state and sign-in commands.
+- `auth_status` — Read cached client credentials, resource-token expiry and the sign-in command.
 - `list_folders` — List reachable mail folders and their counts.
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.

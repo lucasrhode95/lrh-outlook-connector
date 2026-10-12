@@ -439,7 +439,7 @@ wheels = [
 [[package]]
 name = "lrh-m365-auth"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/lucasrhode95/lrh-m365-auth.git?rev=7fe3167c8e737d2e522185e8eb3f84e08457b584#7fe3167c8e737d2e522185e8eb3f84e08457b584" }
+source = { git = "ssh://git@github.com/lucasrhode95/lrh-m365-auth.git?rev=89813b6dcc0ce48f7a315cb49b486b391e7772a4#89813b6dcc0ce48f7a315cb49b486b391e7772a4" }
 dependencies = [
     { name = "msal" },
     { name = "msal-extensions", extra = ["portalocker"] },
@@ -534,7 +534,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "lrh-m365-auth", git = "ssh://git@github.com/lucasrhode95/lrh-m365-auth.git?rev=7fe3167c8e737d2e522185e8eb3f84e08457b584" },
+    { name = "lrh-m365-auth", git = "ssh://git@github.com/lucasrhode95/lrh-m365-auth.git?rev=89813b6dcc0ce48f7a315cb49b486b391e7772a4" },
     { name = "mcp", specifier = ">=1.26,<2" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "starlette", specifier = ">=0.48" },

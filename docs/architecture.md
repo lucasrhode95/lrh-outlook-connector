@@ -32,7 +32,7 @@ and backup are one-shot CLI commands:
 | outlook-connector auth [--sign-out] [--unsecure] | Bootstrap all shared M365 profiles or sign out of the active account | You, rarely | shared auth |
 | outlook-connector status [--check] [--json] | Show shared profile/cache status; optional token acquisition | You, as needed | shared auth |
 
-`outlook-connector status` (offline) shows the shared account, five product/resource profiles, and the store location. `--check` acquires each profile's token but does not prove API authorization.
+`outlook-connector status` (offline) shows the shared account, five product/resource profiles, each OAuth client's cached credential state, resource-token expiry when cached, and the store location. Profiles that share a client can repeat the same credential state. `--check` acquires each profile's token but does not prove API authorization.
 
 Consequences of short-lived processes (see [AGENTS.md](../AGENTS.md)):
 
@@ -339,7 +339,7 @@ The domain, service, store and surface boundaries remain independent of Graph an
 
 | MCP tool | Service module | Behavior |
 |---|---|---|
-| `auth_status` | shared auth provider | Read shared sign-in status |
+| `auth_status` | shared auth provider | Read cached account/client credentials and resource-token expiry |
 | `list_folders` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List reachable folders and counts |
 | `list_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List messages in a folder or mailbox, with folder, date-window and scope filters |
 | `search_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
