@@ -129,6 +129,23 @@ With no native signature settings or default, drafts are unsigned. If Outlook re
 
 Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once; a replacement reply keeps the same `reply_to_message_id` and `reply_all` choice. Send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
 
+## Product boundaries and planned meeting support
+
+Outlook owns email and its attachments. Planned calendar support also belongs here: the Exchange
+event, schedule and recurrence, agenda, organizer, invitees, event attachments, and virtual-meeting
+join link. Calendar tools are not currently shipped; implementation is tracked in
+[roadmap X10](docs/outlook-roadmap.md#x10--meetingcalendar-search).
+
+A calendar event linked to a Teams meeting has resources in both products. Outlook supplies the
+event and verified meeting references; `lrh-teams-connector` owns the meeting chat, recordings,
+transcripts, recap, and meeting notes. An agent can find the event in Outlook, then request its
+related meeting resources from Teams. A join link for another meeting platform does not make the
+event a Teams meeting.
+
+The planned `lrh-sharepoint-connector` owns general OneDrive and SharePoint file search and selected
+file retrieval. A file can also appear as an email attachment or a Teams message link: its storage
+location does not transfer ownership of the email or message relationship to SharePoint.
+
 ## Development
 
 ```bash

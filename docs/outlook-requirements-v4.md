@@ -18,7 +18,18 @@ A local application for **one user's own Exchange Online mailbox**. It has two s
 
 **Guiding principle: remote first.** Delegate as much as possible to Outlook's server APIs (listing, filtering, search, conversation grouping). Keep locally only what is genuinely required: account binding, folder cache, export assembly.
 
-Both surfaces are thin adapters over one shared service, and neither may limit the other. The project is standalone: no shared package with the Teams exporter. How it is built is in [architecture.md](architecture.md).
+Both surfaces are thin adapters over one shared service, and neither may limit the other. Outlook
+and Teams remain separately installed products. Shared authentication is planned; product adapters
+and domain decisions remain in their owning connector. How the current application is built is in
+[architecture.md](architecture.md).
+
+**Calendar and meeting ownership (2026-10-11):** planned Exchange calendar-event support belongs to
+Outlook, including schedule/recurrence, agenda, organizer, invitees, event attachments, and the join
+link. If the event links to a Teams meeting, Teams owns the meeting chat, recordings, transcripts,
+recap, and meeting notes. Verified identifiers link the event to those resources; a virtual meeting
+hosted on another platform does not become a Teams meeting. General OneDrive/SharePoint file search
+belongs to the planned SharePoint connector, while email-attachment context remains here. Calendar
+implementation is tracked in [roadmap X10](outlook-roadmap.md#x10--meetingcalendar-search).
 
 ## 2. Use cases
 

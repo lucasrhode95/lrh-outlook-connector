@@ -2,6 +2,13 @@
 
 This is the cross-product index for the investigation. It keeps each product's UI, routes, result navigation, observations, and open questions together, then links shared Graph mechanisms across products. Detailed request/response notes remain in the canonical research files linked below. Findings describe one signed-in test profile and point-in-time captures; permission outcomes and result counts are not universal product limits.
 
+**Product ownership:** Outlook owns email/attachments and Exchange calendar events, including
+agenda, organizer, invitees, recurrence, event attachments, and the join link. Teams owns a related
+Teams meeting's chat, recordings, transcripts, recap, and meeting notes. Verified references connect
+these resources; a virtual event on another platform does not become a Teams meeting. The planned
+SharePoint connector owns general file discovery/retrieval across OneDrive and SharePoint. Storage
+overlap does not change ownership of email, message, or meeting relationships.
+
 ## Outlook
 
 **Graph link:** the Outlook connector's mail route and additional Graph entity probes are documented under [Microsoft Graph](#microsoft-graph-cross-product-api-product). Outlook top-bar Search remains a separate Substrate-backed workflow.
@@ -31,6 +38,21 @@ This is the cross-product index for the investigation. It keeps each product's U
 ### Outlook result selection and context
 
 The connector can identify the exact matching mail by message ID and its conversation by conversation ID. It can then retrieve just that message or the full conversation. We did not establish that clicking a result in OWA uses the same API or hydration sequence. Mail search does not cover calendar events, SharePoint files, Teams messages, or meeting transcripts by itself.
+
+### Standalone calendar and Teams-message replay
+
+[Outlook research §3.14](outlook-api-research.md#314-owa-search-v2-calendar-and-teams-message-replay-2026-10-10)
+records a later operation-level result that supersedes the calendar-only Graph blocker above.
+App-owned One Outlook Web credentials silently acquired the Search resource token and successfully
+called `POST https://outlook.office.com/searchservice/api/v2/query` for Event/Exchange and
+Message/Teams. Event offsets advanced to distinct results; OWS `GetItem` hydrated a selected event's
+body, attendees, and attachment. Search attachment flags and recurring-event totals were unreliable
+in the observed sample. The connector does not yet expose these calendar tools.
+
+The Teams-message replay returned paginated hits with a verified known-chat identity for one target;
+a second target's identity bridge remains unresolved. Teams owns that prospective feature despite
+the shared authentication client and Outlook-hosted search route. Transcript discovery, retrieval,
+and full-text search remain separate unresolved capabilities.
 
 Further detail: [Outlook API research](outlook-api-research.md), [investigation plan](m365-search-investigation-plan.md), and [Outlook roadmap](outlook-roadmap.md).
 
