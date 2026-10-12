@@ -734,6 +734,13 @@ one week (2026-10-12 03:00Z to 2026-10-19 03:00Z, a local UTC−3 week). Results
 - `get_calendar_event` with a Graph-listed identifier, converted to the Outlook Web form, returned the event
   with its start time.
 
+Ordering correction (2026-10-12): the checks above sorted results inside the connector, so they did not show
+Graph's own order. A cursor walk through the MCP tool then showed that a later Graph page could begin earlier
+than the previous page ended. A direct check found that Graph's calendar view, without `$orderby`, is not in
+start order even within one 100-event page; with `$orderby=start/dateTime asc`, next-link paging at page sizes 3
+and 100 returned the 16 events in start order, and the request is accepted without error. The connector now
+sends that order on the first request, and the next links keep it.
+
 Interpretation: one Graph request now answers the week that earlier needed up to 40 Search v2 pages, and the
 OWS fallback returns the same event set. Listed identifiers hydrate through the existing OWS path, so no second
 identifier scheme is needed.

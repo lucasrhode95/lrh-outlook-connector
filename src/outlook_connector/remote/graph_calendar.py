@@ -27,6 +27,9 @@ VIEW_FIELDS = (
     "responseStatus,type,seriesMasterId,onlineMeeting"
 )
 PREFER_UTC = 'outlook.timezone="UTC"'
+# Graph does not return the view in start order on its own, and its pages follow that order. Ordering on
+# the server keeps every next link in time order (live check 2026-10-12, research §3.19).
+ORDER_BY = "start/dateTime asc"
 RESPONSE_NAMES = {  # Graph's responseStatus.response -> the MyResponseType that Outlook Web reports
     "accepted": "Accept",
     "tentativelyAccepted": "Tentative",
@@ -70,6 +73,7 @@ class GraphCalendarView:
                     "endDateTime": _iso(until),
                     "$top": page_size,
                     "$select": select,
+                    "$orderby": ORDER_BY,
                 }
                 items, link = await self._graph.page(VIEW_PATH, params, prefer=prefer)
             else:

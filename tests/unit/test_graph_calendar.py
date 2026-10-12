@@ -96,6 +96,7 @@ async def test_calendar_view_request_asks_for_utc_text_and_the_listed_fields() -
     assert request.url.params["startDateTime"] == "2026-10-12T03:00:00Z"
     assert request.url.params["endDateTime"] == "2026-10-19T03:00:00Z"
     assert request.url.params["$top"] == "25"
+    assert request.url.params["$orderby"] == "start/dateTime asc"  # pages then follow start order
     fields = request.url.params["$select"].split(",")
     assert "onlineMeeting" in fields and "attendees" in fields and "body" not in fields
     prefer = request.headers["prefer"]
