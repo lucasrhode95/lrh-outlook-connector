@@ -151,8 +151,10 @@ Every search result reports coverage: whether more results follow (a cursor), wh
 Follow the cursor for another bounded page. Search v2 totals are omitted because the tested recurring
 occurrences did not agree with the reported `Total`. `get_calendar_event` uses OWS `GetItem` with the
 returned item id and requests the default event shape plus body and attachments; it returns agenda
-text, invitees and attachment metadata. The Search hit's `HasAttachments` value does not suppress
-hydration. Event attachment download is not exposed yet. This does not search Teams meeting chats,
+text, invitees and attachment metadata. Plain-text agenda content is returned verbatim, and the
+optional `body_truncated` field reports OWS's truncation flag so a capped agenda is not presented as
+complete. The Search hit's `HasAttachments` value does not suppress hydration. Event attachment
+download is not exposed yet. This does not search Teams meeting chats,
 recaps, recordings or transcripts; those remain in Teams.
 
 ## 9. Reading content (MCP)

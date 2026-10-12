@@ -570,6 +570,11 @@ and `AdditionalProperties` for `item:Body` and `item:Attachments` returned the e
 attachment, plus 10 required and one optional attendee. Only field names and counts were retained.
 The discrepancy means the Search `HasAttachments` flag should not be used to skip hydration.
 
+**Connector mapping note (2026-10-12):** OWS `BodyType="Text"` is kept verbatim; it is not HTML-
+entity-decoded. The connector maps `Body.IsTruncated` to the optional `body_truncated` result field.
+The default GetItem shape can cap the body at 2,048 characters, so callers must check that flag
+before treating a long agenda as complete. This implementation note adds no new live-response claim.
+
 The separate lower-camel `entityRequests[]` builder also returned Event rows from
 `POST /search/api/v2/query`; this aligns with the source-mapped Meet builder but does not tie that
 route to Teams global Meetings. A minimal Event `AnswerEntityRequests` attempt returned HTTP 500;

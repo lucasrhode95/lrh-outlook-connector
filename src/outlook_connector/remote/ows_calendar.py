@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import html
 import re
 from typing import Any
 
@@ -51,7 +50,7 @@ def _calendar_item(result: dict[str, Any]) -> dict[str, Any]:
 def _map_event(data: dict[str, Any], event_id: str) -> CalendarEvent:
     body_data = data.get("Body")
     body = text(body_data.get("Value")) if isinstance(body_data, dict) else text(body_data)
-    body = html.unescape(body) if body else None
+    body_truncated = boolean(body_data.get("IsTruncated")) if isinstance(body_data, dict) else None
     organizer = _ows_recipient(data.get("Organizer"))
     return CalendarEvent(
         id=event_id,
@@ -75,6 +74,7 @@ def _map_event(data: dict[str, Any], event_id: str) -> CalendarEvent:
         uid=text(data.get("UID")),
         series_master_id=text(_nested_id(data.get("SeriesMasterItemId"))) or text(data.get("SeriesMasterId")),
         body_text=body,
+        body_truncated=body_truncated,
         teams_join_url=_teams_join_url(body),
         attachments=_attachments(data.get("Attachments")),
     )
@@ -128,4 +128,4 @@ def _teams_join_url(body: str | None) -> str | None:
     if not body:
         return None
     match = _TEAMS_JOIN.search(body)
-    return html.unescape(match.group(0).rstrip(".,);]")) if match else None
+    return match.group(0).rstrip(".,);]") if match else None

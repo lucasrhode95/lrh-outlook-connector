@@ -96,6 +96,17 @@ async def test_calendar_search_keeps_incomplete_response_distinct_from_zero_hits
     assert any("zero events are not confirmed" in note for note in result.coverage.notes)
 
 
+async def test_calendar_search_enforces_query_and_page_bounds_at_service_boundary() -> None:
+    calendar = Calendar(SearchStub([]), ItemsStub())
+
+    with pytest.raises(InvalidRequest, match="non-empty"):
+        await calendar.search_events(" ")
+    with pytest.raises(InvalidRequest, match="512 characters"):
+        await calendar.search_events("x" * 513)
+    with pytest.raises(InvalidRequest, match="between 1 and 25"):
+        await calendar.search_events("synthetic query", limit=26)
+
+
 async def test_calendar_cursor_and_event_reference_validation() -> None:
     search = SearchStub(
         [

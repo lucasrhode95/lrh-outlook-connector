@@ -290,11 +290,14 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     async def search_calendar_events(
         query: Annotated[
-            str, Field(max_length=512, description="Words to search in Exchange calendar events.")
+            str,
+            Field(description="Words to search in Exchange calendar events (512-character service limit)."),
         ],
         since: Annotated[datetime | None, Field(description="Inclusive lower event-start bound.")] = None,
         until: Annotated[datetime | None, Field(description="Inclusive upper event-start bound.")] = None,
-        limit: Annotated[int, Field(ge=1, le=25, description="Events returned in this page.")] = 25,
+        limit: Annotated[
+            int, Field(description="Events returned in this page; the service enforces a range of 1 to 25.")
+        ] = 25,
         cursor: str | None = None,
     ) -> CalendarSearchResult:
         """Search Exchange calendar events online. Follow cursor only when more events are useful;
@@ -306,7 +309,10 @@ def build_server(context: AppContext) -> FastMCP:
     @mcp.tool(annotations=READ_ONLY)
     async def get_calendar_event(
         event_id: Annotated[
-            str, Field(max_length=4096, description="The event id returned by search_calendar_events.")
+            str,
+            Field(
+                description="Event reference from search_calendar_events; the service validates its length."
+            ),
         ],
     ) -> CalendarEvent:
         """Hydrate an event returned by search_calendar_events, with agenda

@@ -230,6 +230,7 @@ class CalendarEvent(Compact):
     uid: str | None = None
     series_master_id: str | None = None
     body_text: str | None = None
+    body_truncated: bool | None = None
     teams_join_url: str | None = None
     attachments: list[CalendarAttachment] = Field(default_factory=list)
 

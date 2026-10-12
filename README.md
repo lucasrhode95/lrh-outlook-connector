@@ -116,7 +116,7 @@ uv run outlook-connector ui
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
 - `search_calendar_events` — Search Exchange calendar events online, with bounded paging and optional start-date bounds.
-- `get_calendar_event` — Hydrate one event's agenda, attendees and attachment metadata from Outlook.
+- `get_calendar_event` — Hydrate one event's agenda, attendees and attachment metadata from Outlook; `body_truncated` reports OWS truncation when available.
 - `get_conversation` — Read a whole conversation across folders.
 - `get_message` — Read one message body, including quoted history by default, and its attachment metadata.
 

@@ -188,7 +188,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.9 [`service/`](../src/outlook_connector/service/)
 
 - Numeric input bounds are validated once at service entry points, shared by MCP and web. MCP schemas describe those bounds without enforcing a second range.
-- [`calendar.py`](../src/outlook_connector/service/calendar.py) provides bounded online Exchange event search, explicit continuation and selected-event hydration through separate remote ports. It does not search Teams artifacts or infer a meeting-chat id.
+- [`calendar.py`](../src/outlook_connector/service/calendar.py) provides bounded online Exchange event search, explicit continuation and selected-event hydration through separate remote ports. OWS agenda text is kept verbatim, with its truncation state exposed when the response supplies it. It does not search Teams artifacts or infer a meeting-chat id.
 - Conversation expansion for exports and read-state changes runs in groups of four, using the shared request cap from [`remote/ports.py`](../src/outlook_connector/remote/ports.py) and [`remote/transport.py`](../src/outlook_connector/remote/transport.py).
 
 **[`mailbox.py`](../src/outlook_connector/service/mailbox.py):**

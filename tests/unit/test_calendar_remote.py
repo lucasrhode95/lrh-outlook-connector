@@ -129,7 +129,11 @@ async def test_ows_event_hydration_uses_retryable_read_and_parses_item() -> None
                                         ],
                                         "Body": {
                                             "BodyType": "Text",
-                                            "Value": "Join https://teams.microsoft.com/l/meetup-join/synthetic-link.",
+                                            "IsTruncated": True,
+                                            "Value": (
+                                                "Agenda &lt;draft&gt;; AT&amp;T. Join "
+                                                "https://teams.microsoft.com/l/meetup-join/synthetic-link."
+                                            ),
                                         },
                                         "Attachments": [
                                             {
@@ -166,5 +170,9 @@ async def test_ows_event_hydration_uses_retryable_read_and_parses_item() -> None
     assert shape["BaseShape"] == "Default" and shape["BodyType"] == "Text"
     assert event.subject == "Synthetic review" and event.organizer is not None
     assert event.required_attendees[0].name == "Synthetic Attendee"
+    assert event.body_text == (
+        "Agenda &lt;draft&gt;; AT&amp;T. Join https://teams.microsoft.com/l/meetup-join/synthetic-link."
+    )
+    assert event.body_truncated is True
     assert event.teams_join_url == "https://teams.microsoft.com/l/meetup-join/synthetic-link"
     assert event.attachments[0].name == "synthetic.txt"
