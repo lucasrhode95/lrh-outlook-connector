@@ -32,8 +32,11 @@ transcript discovery/retrieval, and transcript-text keyword search are separate 
 the event to Teams resources through verified identifiers; do not mark broad search complete with
 only mail and files.
 
-**Graph limitation:** the Graph profile has no `Calendars.*` scope, so Graph `/me/calendarView` is
-not available through the current Graph sign-in. This does not block the proven OWA route.
+**Graph profiles (updated 2026-10-12):** `outlook.graph` has no `Calendars.*` scope, but the shared
+cache's existing `teams.graph` profile has calendar-read permission. A read-only probe using that
+profile returned HTTP 200 for `/me/calendarView`, Graph event Search, and event-body hydration.
+No new interactive sign-in was needed. This account's result does not establish fresh-account
+grants; see [research §3.18](outlook-api-research.md#318-calendar-range-listing-and-description-search-through-the-teams-client-graph-profile-2026-10-12).
 
 **Search API documentation (2026-10-10):** Graph also documents `event` search, scoped to the
 signed-in user's primary calendar, with a 25-result page limit. This does not resolve the current
@@ -72,6 +75,19 @@ if deploying with a new account. Search v2 totals remain intentionally omitted, 
 download is not exposed, and Graph `Calendars.Read` remains a separate alternative to reassess
 rather than an automatic fallback. Transcript and recap discovery remain in Teams and are not
 completed by calendar search.
+
+**Calendar usability follow-up (2026-10-12):** add `list_calendar_events(since, until, ...)` using
+Graph `calendarView`, with optional description text, recurrence expansion, timezone handling,
+and actual remote continuation. A weekly probe returned 16 entries and their bodies in one
+request; the existing broad Search v2 workflow returned 15 in-window matches after 40 pages and
+failed on its next page at offset 1,000. Calendar inventory must not depend on a keyword query.
+Add a purpose-named shared-auth calendar profile using the already verified Teams public
+client/Graph pair, while keeping calendar operations in Outlook. Reassess Graph event Search
+for topic discovery: a known description-term query returned 12 hits, and one hydrated hit
+confirmed a description match with no subject match. Verify body-only restrictions and date
+query semantics before exposing those promises. The Teams-source search builder sends dates
+upstream but does not establish Teams Calendar navigation; trace that UI only if needed for a
+capability the verified Graph route does not provide.
 
 ## Outlook mail-search comparison (2026-10-12)
 
