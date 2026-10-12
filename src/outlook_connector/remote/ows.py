@@ -66,6 +66,34 @@ class Ows:
         }
         return _read_items(await self._post(action, envelope, read_only=True), action)
 
+    async def call_view(self, action: str, body: dict[str, Any], *, time_zone: str) -> list[dict[str, Any]]:
+        """A read whose items sit directly in ``Body`` (GetCalendarView), not in ``ResponseMessages``.
+
+        Retried like other reads. ``time_zone`` is the Windows zone id of ``Header.TimeZoneContext``, the
+        zone that the naive times in ``body`` are read in.
+        """
+        header = {
+            "__type": "JsonRequestHeaders:#Exchange",
+            "RequestServerVersion": SERVER_VERSION,
+            "TimeZoneContext": {
+                "__type": "TimeZoneContext:#Exchange",
+                "TimeZoneDefinition": {"__type": "TimeZoneDefinitionType:#Exchange", "Id": time_zone},
+            },
+        }
+        envelope = {
+            "__type": f"{action}JsonRequest:#Exchange",
+            "Header": header,
+            "Body": {"__type": f"{action}Request:#Exchange", **body},
+        }
+        data = await self._post(action, envelope, read_only=True)
+        answer = data.get("Body") if isinstance(data, dict) else None
+        if not isinstance(answer, dict) or not isinstance(answer.get("Items"), list):
+            raise Upstream(f"Outlook returned no items for {action}.")
+        if answer.get("ResponseClass") not in SUCCESS:
+            code = str(answer.get("ResponseCode") or "no response code")
+            raise Upstream(f"Outlook refused {action} ({answer.get('ResponseClass') or 'Error'}, {code}).")
+        return [item for item in answer["Items"] if isinstance(item, dict)]
+
     async def call_request(
         self, action: str, fields: dict[str, Any], *, time_zone: str | None = None
     ) -> dict[str, Any]:

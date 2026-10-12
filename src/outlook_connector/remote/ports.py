@@ -1,7 +1,9 @@
 """The ports the service depends on (architecture §6.1).
 
 Adapters: remote/graph_mail.py implements MailReader, remote/ows_mail.py implements MailWriter,
-remote/ows_rules.py implements RuleWriter, and remote/cloud_settings.py implements SignatureStore.
+remote/ows_rules.py implements RuleWriter, remote/cloud_settings.py implements SignatureStore,
+remote/graph_calendar.py implements CalendarViewReader, and remote/ows_calendar.py implements
+CalendarWindowReader.
 Swapping an adapter (another tenant, a policy change) must not change anything above this file.
 """
 
@@ -146,6 +148,30 @@ class CalendarItemReader(Protocol):
     async def get_event(self, event_id: str) -> CalendarEvent:
         """Hydrate one event from Outlook Web Service using a Search v2 item reference."""
         ...
+
+
+@dataclass
+class CalendarViewPage:
+    """One page of the calendar view. ``next_link`` continues it; None means the window is exhausted."""
+
+    events: list[CalendarEvent]
+    next_link: str | None = None
+
+
+class CalendarViewReader(Protocol):
+    """Events overlapping [since, until) on the default calendar, occurrences expanded, in time order."""
+
+    async def list_events(
+        self, *, since: datetime, until: datetime, page_size: int, page: str | None, include_body: bool
+    ) -> CalendarViewPage:
+        """``page`` continues a previous page; ``include_body`` asks for each event's description."""
+        ...
+
+
+class CalendarWindowReader(Protocol):
+    """The same window through Outlook Web, the fallback: every event, without descriptions."""
+
+    async def list_events(self, *, since: datetime, until: datetime) -> list[CalendarEvent]: ...
 
 
 @dataclass(frozen=True)
