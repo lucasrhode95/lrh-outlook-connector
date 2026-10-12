@@ -8,13 +8,12 @@ import time
 from typing import Any
 from urllib.parse import urlencode
 
-from outlook_connector.auth.tokens import TokenProvider
 from outlook_connector.domain.errors import AccountMismatch, Upstream
 from outlook_connector.remote.ports import SignatureContents, SignatureSettings
-from outlook_connector.remote.transport import Transport, operation
+from outlook_connector.remote.transport import TokenSource, Transport, operation
 
 BASE_URL = "https://outlook.cloud.microsoft/ows/v1/OutlookCloudSettings/settings/"
-PROFILE = "outlook"
+PROFILE = "outlook.api"
 LIST_SETTING = "roaming_signature_list"
 NEW_SETTING = "roaming_new_signature"
 REPLY_SETTING = "roaming_reply_signature"
@@ -23,7 +22,7 @@ REPLY_SETTING = "roaming_reply_signature"
 class CloudSettings:
     """Native signature settings adapter. All wire names and payloads stay in this module."""
 
-    def __init__(self, transport: Transport, tokens: TokenProvider) -> None:
+    def __init__(self, transport: Transport, tokens: TokenSource) -> None:
         self._transport = transport
         self._tokens = tokens
 

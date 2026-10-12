@@ -4,7 +4,7 @@
 2026-10-04 (inbox-rule replay, H7 live check, read-only probes) · 2026-10-06 (version-bound draft sends) ·
 2026-10-07 (connector HTML/replies, inbox-rule blockers, bulk/partial failures, signature capture analysis) ·
 2026-10-10 (W8 recipient-side rendering and image save; Microsoft 365 Search documentation, capture/source and Outlook Web source audit) ·
-2026-10-11 (Graph attachment and file search endpoint comparison)
+2026-10-11 (Graph attachment and file search endpoint comparison; shared-auth profile/photo check)
 
 **Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md) · **Search investigation:** [plan](m365-search-investigation-plan.md)
 
@@ -54,6 +54,17 @@ reference alone. Probes used the `organizations` authority.
 
 - [`AADSTS65002`](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes) means the client is not preauthorized for that resource. The recorded denial applies to the tested client/resource configuration at that time. The production baseline preserves its denied pairs; portable probes skip only pairs configured locally for the current environment.
 - **Conclusion for the tested environment:** none of the tested usable clients could write mail through Graph. The Graph/OWS split in [architecture §6](architecture.md) follows from this table and must be re-derived for another tenant.
+
+**Shared profile contract (2026-10-11):** `lrh-m365-auth` now explicitly requests Graph `Mail.Read`
+and `User.Read` in `outlook.graph`. This preserves the mailbox reads and the `/me` profile and photo
+capabilities that were previously verified with the broader granted token above. Microsoft documents
+[`User.Read` as the least-privileged delegated permission for the signed-in profile](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0).
+For [reading a user's photo](https://learn.microsoft.com/en-us/graph/api/profilephoto-get?view=graph-rest-1.0),
+the permission reference lists `ProfilePhoto.Read.All` as least privileged and `User.Read` as an
+accepted higher delegated permission. On 2026-10-11, silent token acquisition through the
+consolidated profile and live `/me` profile/photo reads succeeded from the existing shared cache
+without a device-code flow. This validates the existing account's grants, not a fresh account's
+consent outcome.
 
 ## 3. Microsoft Graph: mail-data reads and verification (STANDALONE, client C)
 
@@ -457,6 +468,35 @@ and [Search API overview](https://learn.microsoft.com/en-us/graph/api/resources/
 document the request, result and permission model. The pages reviewed specify no indexing-visibility
 time guarantee: the hits show the terms were searchable by the later request, not how long indexing
 took.
+
+### 3.12.1 SharePoint connector follow-up: live file hydration and scope (2026-10-11)
+
+The later shared-auth validation completed the file checks that were open in the earlier note above.
+For a synthetic file in personal OneDrive and another in the shared company SharePoint library,
+the same POST /v1.0/search/query request with entityTypes=["driveItem"] returned one filename
+hit and one content-only hit per location. The shared-library file was initially absent from Search
+and appeared after additional indexing time; this example does not establish an indexing SLA.
+A random negative marker returned zero.
+
+For both results, the resource's parentReference.driveId and id hydrated the selected item through
+GET /v1.0/drives/{drive-id}/items/{item-id} and downloaded its 13-byte synthetic content through
+GET /v1.0/drives/{drive-id}/items/{item-id}/content. The bytes matched the local test files.
+Representative path: KQL scopes returned the known hit for both the OneDrive parent and shared
+SharePoint parent. This validates those examples for this account, not every path form or tenant.
+
+A bounded five-result query returned five distinct resources at offsets 0 and 5, with
+moreResultsAvailable=true. Sample operation timings were approximately 0.5–1.8 seconds for each
+filename/content search, metadata lookup, selected download and known-hit scoped search. One second
+page call took 24.9 seconds; an immediate direct repeat took 2.5 seconds and returned no
+Retry-After header. That isolated latency outlier does not establish throttling or a stable
+performance distribution.
+
+These live requests used the shared outlook.graph profile. The profile requests Mail.Read and
+User.Read; the current account's token grants include broader file/site permissions recorded in
+§3.1. Successful file reads therefore prove this account's current capability, not a minimum
+permission set or that either requested scope authorizes Microsoft Search files. Search remains
+limited to accessible items and non-exhaustive. No file names, markers, IDs, URLs or content were
+retained.
 
 ### 3.13 Calendar events, meeting recaps and transcripts are required search sources (2026-10-10)
 

@@ -6,7 +6,8 @@ import hashlib
 import json
 from collections.abc import Callable
 
-from outlook_connector.auth.tokens import Account
+from m365_auth import Account
+
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, WriteOutcomeUnknown
 from outlook_connector.domain.models import Folder, InboxRule, RuleChange, RuleWriteResult
 from outlook_connector.remote.ports import RuleWriter

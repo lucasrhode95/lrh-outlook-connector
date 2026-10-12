@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from m365_auth import (
+    AccountMismatch,
+    AuthenticationRequired,
+    SecureStorageUnavailable,
+)
+from m365_auth import (
+    AuthError as ConnectorError,
+)
+
 
 @dataclass(frozen=True)
 class Failure:
@@ -16,33 +25,8 @@ class Failure:
     request_id: str | None = None
 
 
-class ConnectorError(Exception):
-    """Base class for errors the surfaces know how to present.
-
-    ``failure``: the Microsoft answer behind it, when a request failed (set by remote/transport.py).
-    """
-
-    failure: Failure | None = None
-
-
 class ConfigurationError(ConnectorError):
     """The application configuration is invalid (for example a denied client/scope pair)."""
-
-
-class AuthenticationRequired(ConnectorError):
-    """No usable credentials. ``command`` is the exact command the user should run."""
-
-    def __init__(self, message: str, *, command: str) -> None:
-        super().__init__(f"{message} Run `{command}` in a terminal, then retry.")
-        self.command = command
-
-
-class AccountMismatch(ConnectorError):
-    """Credentials belong to a different Microsoft account than the one already bound."""
-
-
-class SecureStorageUnavailable(ConnectorError):
-    """Encrypted token storage cannot be used. The connector never falls back to plaintext silently."""
 
 
 class InvalidRequest(ConnectorError):
@@ -77,3 +61,19 @@ class WriteOutcomeUnknown(ConnectorError):
 
     Never retried automatically. The caller checks the mailbox (e.g. Sent Items) instead.
     """
+
+
+__all__ = [
+    "AccountMismatch",
+    "AuthenticationRequired",
+    "ConfigurationError",
+    "ConnectorError",
+    "DownloadLimitExceeded",
+    "Failure",
+    "InvalidRequest",
+    "NotFound",
+    "SecureStorageUnavailable",
+    "Throttled",
+    "Upstream",
+    "WriteOutcomeUnknown",
+]

@@ -184,7 +184,7 @@
   <rect x="80" y="1240" width="520" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <path d="M80 1314 V1254 Q80 1240 94 1240 H586 Q600 1240 600 1254 V1314 Z" fill="#183153"/>
   <text class="card-title" x="100" y="1273">SIGN-IN</text>
-  <text class="card-subtitle" x="100" y="1297"><tspan class="code">outlook-connector auth [graph|outlook]</tspan></text>
+  <text class="card-subtitle" x="100" y="1297"><tspan class="code">outlook-connector auth</tspan></text>
   <rect x="100" y="1328" width="480" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="detail" x="120" y="1362">Device code happens only here.</text>
   <text class="detail" x="120" y="1396">Surfaces never prompt; they return</text>
@@ -195,17 +195,17 @@
   <rect x="640" y="1240" width="1060" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <path d="M640 1314 V1254 Q640 1240 654 1240 H1686 Q1700 1240 1700 1254 V1314 Z" fill="#183153"/>
   <text class="card-title" x="660" y="1273">TOKENS</text>
-  <text class="card-subtitle" x="660" y="1297"><tspan class="code">auth/tokens.py</tspan> · one provider, profiles from config · MSAL · encrypted · locked</text>
+  <text class="card-subtitle" x="660" y="1297"><tspan class="code">lrh-m365-auth</tspan> · shared profiles · MSAL · encrypted · locked</text>
   <rect x="660" y="1328" width="500" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="678" y="1340" width="32" height="26" rx="5" fill="#2b6cb0"/>
   <text class="badge" x="694" y="1359" text-anchor="middle">G</text>
-  <text class="section-title" x="720" y="1361">Graph profile</text>
+  <text class="section-title" x="720" y="1361">outlook.graph</text>
   <text class="detail" x="680" y="1398">Outlook Mobile <tspan class="code">27922004…</tspan></text>
-  <text class="detail" x="680" y="1428">→ Graph <tspan class="code">Mail.Read</tspan></text>
+  <text class="detail" x="680" y="1428">→ Graph <tspan class="code">Mail.Read + User.Read</tspan></text>
   <rect x="1180" y="1328" width="500" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1198" y="1340" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1214" y="1359" text-anchor="middle">O</text>
-  <text class="section-title" x="1240" y="1361" font-size="19">Outlook profile</text>
+  <text class="section-title" x="1240" y="1361" font-size="19">outlook.api</text>
   <text class="detail" x="1200" y="1398">One Outlook Web <tspan class="code">9199bf20…</tspan></text>
   <text class="detail" x="1200" y="1428">→ <tspan class="code">outlook.office.com</tspan></text>
 

@@ -38,8 +38,14 @@ def test_index_embeds_the_session_token(client: TestClient) -> None:
 
 def test_status_reports_service_profile_names(client: TestClient) -> None:
     status = client.get("/api/status").json()
-    assert status["signed_in"] == {"graph": True, "outlook": False}
-    assert status["sign_in_command"] == "outlook-connector auth graph"
+    assert status["signed_in"] == {
+        "outlook.graph": True,
+        "outlook.api": False,
+        "teams.spaces": False,
+        "teams.csa": False,
+        "teams.graph": False,
+    }
+    assert status["sign_in_command"] == "outlook-connector auth"
 
 
 def test_profile_name_and_photo(client: TestClient, fake: FakeGraph) -> None:

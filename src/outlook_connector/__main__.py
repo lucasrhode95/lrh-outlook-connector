@@ -13,14 +13,13 @@ import json
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, cast
+from typing import cast
+
+from m365_auth import AccessToken, CacheStatus, TokenProvider
 
 from outlook_connector import config
 from outlook_connector.domain.errors import AuthenticationRequired, ConnectorError
 from outlook_connector.surfaces.ui_settings import DEFAULT_UI_IDLE_MINUTES, DEFAULT_UI_PORT
-
-if TYPE_CHECKING:
-    from outlook_connector.auth.tokens import AccessToken, CacheStatus, TokenProvider
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -32,8 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.unsecure:
         print(
-            "WARNING: --unsecure stores reusable Microsoft tokens as PLAINTEXT at "
-            f"{config.token_cache_path(unsecure=True)}. Do not share it; delete it when done.",
+            "WARNING: --unsecure stores reusable Microsoft tokens in a separate PLAINTEXT shared-auth cache. "
+            "Do not share it; delete it when done.",
             file=sys.stderr,
         )
     match args.command:
@@ -100,27 +99,24 @@ def _ui(args: argparse.Namespace) -> int:
 
 @_exit_codes
 def _auth(args: argparse.Namespace) -> int:
-    """``auth``: device-code sign-in for one profile, or sign out."""
+    """``auth``: prepare every shared Microsoft profile, or sign out of all connectors."""
     provider = _tokens(args)
     if args.sign_out:
         existed = provider.sign_out()
         print("Signed out: token cache deleted." if existed else "No token cache to delete.")
         return EXIT_OK
-    profile = config.PROFILES[args.profile]
-    if not args.force:
-        try:
-            token = provider.get_token(args.profile)
-        except AuthenticationRequired:
-            pass
+    results = provider.bootstrap(show=lambda message: print(f"\n{message}\n", flush=True))
+    for result in results:
+        purpose = provider.profiles[result.profile].purpose
+        if result.ready and result.token is not None:
+            print(f"[{result.profile}] Ready: {purpose}.")
+            _print_token_summary(result.token)
         else:
-            print(f"Already signed in for '{args.profile}' ({profile.purpose}).")
-            _print_token_summary(token)
-            return EXIT_OK
-    print(f"Signing in for '{args.profile}': {profile.purpose}.")
-    token = provider.sign_in(args.profile, show=lambda message: print(f"\n{message}\n", flush=True))
-    print(f"Signed in for '{args.profile}'.")
-    _print_token_summary(token)
-    return EXIT_OK
+            print(f"[{result.profile}] Not ready: {purpose}. {result.error}", file=sys.stderr)
+    if all(result.ready for result in results):
+        return EXIT_OK
+    first_error = next((result.error for result in results if result.error is not None), None)
+    return EXIT_AUTH_REQUIRED if isinstance(first_error, AuthenticationRequired) else EXIT_ERROR
 
 
 @_exit_codes
@@ -130,7 +126,7 @@ def _status(args: argparse.Namespace) -> int:
     status = provider.status()
     checks: dict[str, dict[str, object]] = {}
     if args.check:
-        for name in config.PROFILES:
+        for name in provider.profile_names:
             try:
                 checks[name] = {"ok": True, **_token_facts(provider.get_token(name))}
             except ConnectorError as exc:
@@ -140,14 +136,12 @@ def _status(args: argparse.Namespace) -> int:
     else:
         _print_status(status, checks)
     # Core mail data needs Graph; inbox rules, signatures and mail changes need Outlook.
-    graph_ok = checks.get("graph", {"ok": True})["ok"]
+    graph_ok = checks.get("outlook.graph", {"ok": True})["ok"]
     return EXIT_OK if graph_ok else EXIT_AUTH_REQUIRED
 
 
 def _tokens(args: argparse.Namespace) -> TokenProvider:
-    from outlook_connector.auth.tokens import TokenProvider
-
-    return TokenProvider(unsecure=args.unsecure)
+    return TokenProvider(unsecure=args.unsecure, login_command=f"{config.CLI_NAME} auth")
 
 
 # ---------------------------------------------------------------------- parser
@@ -157,23 +151,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=config.CLI_NAME, description="Local Outlook mailbox connector.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    auth = sub.add_parser("auth", help="Sign in with a device code (the only command that ever prompts).")
-    auth.add_argument(
-        "profile",
-        nargs="?",
-        default="graph",
-        choices=sorted(config.PROFILES),
-        help="Which client profile to sign in (default: graph).",
+    auth = sub.add_parser(
+        "auth", help="Prepare Microsoft 365 profiles with device codes (the only command that prompts)."
     )
-    auth.add_argument("--force", action="store_true", help="Sign in again even if a silent token works.")
-    auth.add_argument("--sign-out", action="store_true", help="Delete the token cache (all profiles).")
+    auth.add_argument("--sign-out", action="store_true", help="Sign out of the shared Microsoft account.")
     _add_unsecure(auth)
 
     status = sub.add_parser("status", help="Show the signed-in account and profiles (offline by default).")
     status.add_argument(
         "--check",
         action="store_true",
-        help="Also acquire each profile's token silently (contacts Microsoft).",
+        help="Also acquire each profile's token silently; this checks token acquisition, not API access.",
     )
     status.add_argument("--json", action="store_true", help="Machine-readable output.")
     _add_unsecure(status)
@@ -225,10 +213,10 @@ def _print_token_summary(token: AccessToken) -> None:
     facts = _token_facts(token)
     print(f"  account:     {facts['account']}")
     print(f"  audience:    {facts['audience']}")
-    print(
-        f"  mail scopes: {', '.join(cast(list[str], facts['mail_scopes'])) or '(none)'}  "
-        f"({facts['scope_count']} scopes in total)"
-    )
+    mail_scopes = cast(list[str], facts["mail_scopes"])
+    if mail_scopes:
+        print(f"  mail scopes: {', '.join(mail_scopes)}")
+    print(f"  granted scope count: {facts['scope_count']}")
     print(f"  token from:  {facts['source']}, expires {facts['expires_on']}")
 
 
@@ -265,10 +253,7 @@ def _print_status(status: CacheStatus, checks: dict[str, dict[str, object]]) -> 
         if p.profile in checks:
             check = checks[p.profile]
             if check["ok"]:
-                print(
-                    f"  check: ok ({check['source']}), "
-                    f"mail scopes {', '.join(cast(list[str], check['mail_scopes'])) or '(none)'}"
-                )
+                print(f"  check: token acquisition ok ({check['source']}); not a service-permission test")
             else:
                 print(f"  check: FAILED - {check['error']}")
 

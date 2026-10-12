@@ -693,7 +693,7 @@ class StaticTokens:
         return self._T()
 
     def sign_in_command(self, profile: str) -> str:
-        return f"outlook-connector auth {profile}"
+        return "outlook-connector auth"
 
 
 def sample_mailbox() -> FakeGraph:

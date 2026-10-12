@@ -165,7 +165,8 @@ async def test_invalid_reorder_and_combined_toggle(rules: Rules) -> None:
 
 
 async def test_account_mismatch_blocks_rule_reads_and_writes(fake: FakeGraph, tmp_path: Path) -> None:
-    from outlook_connector.auth.tokens import Account
+    from m365_auth import Account
+
     from outlook_connector.domain.errors import AccountMismatch
 
     writes = make_writes(

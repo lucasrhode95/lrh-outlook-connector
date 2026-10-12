@@ -150,8 +150,8 @@ Only after explicit human confirmation repeat the exact request with that code. 
 Never confirm on the user's behalf. \
 Each write is sent once and read back; unknown means check Outlook before repeating. \
 Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
-- Core mail-data reads use the Graph sign-in. Mail changes, inbox-rule access and native-signature \
-  access use the Outlook sign-in (`outlook-connector auth outlook`).
+- Core mail-data reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature \
+  access use `outlook.api`, prepared by `outlook-connector auth`.
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
 in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
 not the sign-in: do not ask the user to sign in again for it.
@@ -205,7 +205,7 @@ def build_server(context: AppContext) -> FastMCP:
             "profiles": {
                 p.profile: {"signed_in": p.signed_in, "purpose": p.purpose} for p in status.profiles
             },
-            "sign_in_command": context.tokens.sign_in_command("graph"),
+            "sign_in_command": context.tokens.sign_in_command("outlook.graph"),
         }
 
     @mcp.tool(annotations=READ_ONLY)
