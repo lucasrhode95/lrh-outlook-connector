@@ -266,20 +266,20 @@
 <rect x="640" y="3139" width="1180" height="346" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M640 3213 V3153 Q640 3139 654 3139 H1806 Q1820 3139 1820 3153 V3213 Z" fill="#183153"/>
 <text class="card-title" x="660" y="3172">TOKENS</text>
-<text class="card-subtitle" x="660" y="3196"><tspan class="code">auth/tokens.py</tspan> · MSAL public clients · no app registration, no secrets</text>
+<text class="card-subtitle" x="660" y="3196"><tspan class="code">lrh-m365-auth</tspan> · shared MSAL profiles · no app registration, no secrets</text>
 <rect x="660" y="3233" width="560" height="232" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="678" y="3268"><tspan class="code">TokenProvider</tspan><tspan class="detail" dx="12">tokens.py</tspan></text>
+<text class="section-title" x="678" y="3268"><tspan class="code">TokenProvider</tspan><tspan class="detail" dx="12">shared auth</tspan></text>
 <text class="group-title" x="678" y="3305">Methods</text>
 <g><title>Silent: memory, then the cache, refreshing if needed. Never prompts. Called by Transport for every request.</title><text class="detail" x="678" y="3335">• <tspan class="code">get_token(profile)</tspan></text></g>
 <g><title>Device-code sign-in; only the auth command calls it.</title><text class="detail" x="678" y="3362">• <tspan class="code">sign_in(profile)</tspan></text></g>
 <g><title>Delete the cache; or an offline view of it (no network, no token values).</title><text class="detail" x="678" y="3389">• <tspan class="code">sign_out()</tspan> · <tspan class="code">status()</tspan></text></g>
 <rect x="1240" y="3233" width="560" height="232" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1258" y="3271">Profiles</text>
-<g><title>Graph Mail.Read. Required for mail reads.</title><text class="detail" x="1258" y="3301">• graph: Outlook Mobile client</text></g>
-<g><title>→ outlook.office.com. Needed for mail changes, inbox rules and native signatures.</title><text class="detail" x="1258" y="3328">• outlook: One Outlook Web client</text></g>
+<g><title>Graph Mail.Read for mailbox data and User.Read for the signed-in profile and photo.</title><text class="detail" x="1258" y="3301">• outlook.graph: Outlook Mobile</text></g>
+<g><title>→ outlook.office.com. Needed for mail changes, inbox rules and native signatures.</title><text class="detail" x="1258" y="3328">• outlook.api: One Outlook Web</text></g>
 <text class="group-title" x="1258" y="3367">Cache</text>
-<g><title>token-cache.bin under the data folder, encrypted by Windows for your user; a lock file serialises refreshes across processes.</title><text class="detail" x="1258" y="3397">DPAPI-encrypted file · cross-process lock</text></g>
-<g><title>tenant id + object id must match, or AccountMismatch.</title><text class="detail" x="1258" y="3424">both profiles must be the same account</text></g>
+<g><title>Shared token-cache.bin under .lrh-m365-auth, encrypted by Windows for your user; a lock file serialises refreshes across processes.</title><text class="detail" x="1258" y="3397">shared DPAPI file · cross-process lock</text></g>
+<g><title>One active Microsoft account is shared across Outlook, Teams and SharePoint profiles.</title><text class="detail" x="1258" y="3424">account state shared across 3 connectors</text></g>
 <path class="call-flow" d="M1230 3069 V3135"/>
 <text class="flow-label" x="1250" y="3111" text-anchor="start"><tspan class="code">get_token(profile)</tspan> for every request</text>
 <path class="call-flow" d="M80 202 H48 V3299 H636"/>

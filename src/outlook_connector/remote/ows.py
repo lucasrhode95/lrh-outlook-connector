@@ -25,12 +25,11 @@ import uuid
 from typing import Any
 from urllib.parse import quote
 
-from outlook_connector.auth.tokens import TokenProvider
 from outlook_connector.domain.errors import NotFound, Upstream, WriteOutcomeUnknown
-from outlook_connector.remote.transport import Transport
+from outlook_connector.remote.transport import TokenSource, Transport
 
 OWS_URL = "https://outlook.cloud.microsoft/owa/service.svc"
-PROFILE = "outlook"  # Outlook Web calls use the Outlook sign-in
+PROFILE = "outlook.api"  # Outlook Web calls use the Outlook resource profile.
 SERVER_VERSION = "V2018_01_08"
 URL_POST_DATA_LIMIT = 2048
 MAX_ERROR_TEXT = 200
@@ -40,7 +39,7 @@ SUCCESS = frozenset({"Success", "Warning"})
 class Ows:
     """One OWS action call: envelope, headers, item results."""
 
-    def __init__(self, transport: Transport, tokens: TokenProvider) -> None:
+    def __init__(self, transport: Transport, tokens: TokenSource) -> None:
         self._transport = transport
         self._tokens = tokens
 

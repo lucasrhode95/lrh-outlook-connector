@@ -11,7 +11,8 @@ from html import escape, unescape
 from html.parser import HTMLParser
 from pathlib import Path
 
-from outlook_connector.auth.tokens import Account
+from m365_auth import Account
+
 from outlook_connector.domain.errors import (
     AccountMismatch,
     ConnectorError,

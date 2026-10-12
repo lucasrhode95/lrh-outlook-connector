@@ -22,12 +22,12 @@ import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextvars import ContextVar
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Protocol
 from urllib.parse import urlsplit
 
 import httpx
+from m365_auth import AccessToken
 
-from outlook_connector.auth.tokens import TokenProvider
 from outlook_connector.domain.errors import (
     AuthenticationRequired,
     ConnectorError,
@@ -52,6 +52,18 @@ MAX_ERROR_TEXT = 200
 _operation: ContextVar[str | None] = ContextVar("operation", default=None)
 
 
+class TokenSource(Protocol):
+    def get_token(
+        self,
+        profile: str,
+        *,
+        force_refresh: bool = False,
+        claims_challenge: str | None = None,
+    ) -> AccessToken: ...
+
+    def sign_in_command(self, profile: str | None = None) -> str: ...
+
+
 @contextlib.contextmanager
 def operation(name: str) -> Iterator[None]:
     """Name what the code below is doing; errors raised inside it say so ("fetching message bodies")."""
@@ -65,7 +77,7 @@ def operation(name: str) -> Iterator[None]:
 class Transport:
     def __init__(
         self,
-        tokens: TokenProvider,
+        tokens: TokenSource,
         *,
         client: httpx.AsyncClient | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,

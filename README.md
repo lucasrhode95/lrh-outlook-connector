@@ -19,16 +19,39 @@ A separate Python installation is optional: uv selects an installed Python 3.12 
 ## Setup
 
 ```bash
-uv sync
-uv run outlook-connector auth graph
-uv run outlook-connector auth outlook  # drafts, sending, rules, signatures and mailbox changes
+uv sync --locked
+uv run outlook-connector auth
+uv run outlook-connector status
 ```
 
-The `graph` and `outlook` profile names identify API families; their scopes determine permissions. Existing app sign-ins remain cached because the client IDs and scopes are unchanged.
+Any Outlook, Teams, or SharePoint connector can start the shared sign-in bootstrap. It silently reuses
+accepted profile credentials and asks Microsoft only for profiles that still need approval. The
+shared catalog includes `outlook.graph` for Graph mail reads and `outlook.api` for Outlook Web
+operations, plus the Teams profiles used by the other connectors. Microsoft may require separate
+device-code and MFA approvals for different clients or resource audiences.
 
-Core mail reads, search, exports and attachment downloads use the Graph sign-in. The Outlook sign-in is also required for inbox-rule and native-signature reads, as well as to draft, send, change mailbox state or manage signature settings.
+Core mail reads, search, exports and attachment downloads use `outlook.graph`. The `outlook.api`
+profile is also required for inbox-rule and native-signature reads, as well as to draft, send, change
+mailbox state or manage signature settings. `outlook.graph` requests Graph `Mail.Read` for mailbox
+data and `User.Read` for the signed-in profile and photo.
 
-> Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens stay in the encrypted local cache.
+The encrypted shared cache lives under `~/.lrh-m365-auth` by default; set `M365_AUTH_HOME` to use a
+different shared location. It holds one active Microsoft account for all three connectors. To switch
+accounts, sign out of the shared cache and sign in again:
+
+```bash
+uv run outlook-connector auth --sign-out
+uv run outlook-connector auth
+```
+
+`uv run outlook-connector status` reads local profile state without network requests. It reports
+cached client credentials and any matching resource access-token expiry. Profiles sharing one
+client can have the same credential state even when only one resource token is cached.
+`status --check` attempts token acquisition for every profile; it does not verify that each
+Microsoft service or mailbox operation is authorized.
+
+> Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens
+> stay in the shared encrypted cache. If encryption is unavailable, authentication fails closed.
 
 ### Configure a local MCP client
 
@@ -88,7 +111,7 @@ uv run outlook-connector ui
 
 ### Find and read
 
-- `auth_status` — Check the local sign-in state and sign-in commands.
+- `auth_status` — Read cached client credentials, resource-token expiry and the sign-in command.
 - `list_folders` — List reachable mail folders and their counts.
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.

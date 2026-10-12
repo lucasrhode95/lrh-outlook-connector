@@ -3,18 +3,17 @@ from __future__ import annotations
 import json
 
 import pytest
+from m365_auth import PROFILES, TokenProvider
 
 from outlook_connector import __main__ as cli
-from outlook_connector import config
-from outlook_connector.auth.tokens import TokenProvider
 from tests.fakes.msal_fakes import Script, msal_account, seed_cache, token_result, use_script
 
 GRAPH = "https://graph.microsoft.com"
-GRAPH_CLIENT = config.OUTLOOK_MOBILE_CLIENT_ID
+GRAPH_CLIENT = PROFILES["outlook.graph"].client_id
 
 
 def run(argv: list[str], script: Script) -> int:
-    use_script(script)  # the CLI's sign-ins go to the scripted fake MSAL (conftest)
+    use_script(script)
     return cli.main(argv)
 
 
@@ -26,64 +25,65 @@ def test_ui_defaults_use_shared_values() -> None:
     assert args.idle_minutes == DEFAULT_UI_IDLE_MINUTES
 
 
-def test_auth_signs_in_with_device_code(capsys: pytest.CaptureFixture[str]) -> None:
+def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    graph = token_result(aud=GRAPH, scp="Mail.Read", source="identity_provider")
+    outlook = token_result(aud="https://outlook.office.com", scp="Mail.ReadWrite", source="identity_provider")
+    spaces = token_result(aud="https://api.spaces.skype.com", scp="chat", source="identity_provider")
+    csa = token_result(aud="https://chatsvcagg.teams.microsoft.com", scp="chat", source="cache")
+    teams_graph = token_result(aud=GRAPH, scp="User.Read", source="cache")
     script = Script(
-        device_result=token_result(
-            aud=GRAPH, scp="Mail.Read Mail.Read.Shared User.Read", source="identity_provider"
-        )
-    )
-    assert run(["auth", "graph", "--unsecure"], script) == cli.EXIT_OK
-    out = capsys.readouterr()
-    assert "ABC123" in out.out
-    assert "Mail.Read, Mail.Read.Shared" in out.out
-    assert "PLAINTEXT" in out.err  # the --unsecure warning is always printed
-
-
-def test_auth_skips_device_code_when_already_signed_in(capsys: pytest.CaptureFixture[str]) -> None:
-    script = Script(
-        accounts=[msal_account()], silent={GRAPH_CLIENT: token_result(aud=GRAPH, scp="Mail.Read")}
+        silent_by_scopes={
+            PROFILES["teams.csa"].scopes: csa,
+            PROFILES["teams.graph"].scopes: teams_graph,
+        },
+        device_by_scopes={
+            PROFILES["outlook.graph"].scopes: graph,
+            PROFILES["outlook.api"].scopes: outlook,
+            PROFILES["teams.spaces"].scopes: spaces,
+        },
     )
     assert run(["auth", "--unsecure"], script) == cli.EXIT_OK
-    assert "Already signed in" in capsys.readouterr().out
-    assert script.shown_flows == 0
-
-
-def test_auth_force_always_runs_device_code() -> None:
-    script = Script(
-        accounts=[msal_account()],
-        silent={GRAPH_CLIENT: token_result(aud=GRAPH, scp="Mail.Read")},
-        device_result=token_result(aud=GRAPH, scp="Mail.Read"),
-    )
-    assert run(["auth", "graph", "--force", "--unsecure"], script) == cli.EXIT_OK
-    assert script.shown_flows == 1
+    out = capsys.readouterr()
+    assert "ABC123" in out.out
+    assert "[outlook.graph] Ready" in out.out
+    assert "[teams.graph] Ready" in out.out
+    assert "PLAINTEXT" in out.err
+    assert script.shown_flows == 3  # one per distinct client; the remaining Teams audiences are silent
 
 
 def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]) -> None:
-    provider = TokenProvider(unsecure=True)
+    provider = TokenProvider(unsecure=True, login_command="outlook-connector auth")
     seed_cache(provider._cache(), client_id=GRAPH_CLIENT, scope="https://graph.microsoft.com/Mail.Read")
     script = Script()
     assert run(["status", "--json", "--unsecure"], script) == cli.EXIT_OK
     data = json.loads(capsys.readouterr().out)
-    assert [p["profile"] for p in data["profiles"]] == ["graph", "outlook"]
+    assert [p["profile"] for p in data["profiles"]] == list(PROFILES)
     assert data["cache"]["mode"] == "plaintext-development"
-    assert [p["signed_in"] for p in data["profiles"]] == [True, False]
-    assert script.created == []  # no MSAL app (and so no network) for offline status
+    assert [p["client_credential_cached"] for p in data["profiles"]] == [True, False, False, False, False]
+    assert script.created == []
 
 
-def test_status_check_reports_failures_but_only_graph_is_required(capsys: pytest.CaptureFixture[str]) -> None:
+def test_status_check_reports_token_acquisition_without_claiming_api_access(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     script = Script(
-        accounts=[msal_account()], silent={GRAPH_CLIENT: token_result(aud=GRAPH, scp="Mail.Read")}
+        accounts=[msal_account()],
+        silent={GRAPH_CLIENT: token_result(aud=GRAPH, scp="Mail.Read")},
     )
     assert run(["status", "--check", "--unsecure"], script) == cli.EXIT_OK
     out = capsys.readouterr().out
-    assert "check: ok" in out
-    assert "check: FAILED" in out  # the Outlook profile has no token
+    assert "token acquisition ok" in out
+    assert "not a service-permission test" in out
+    assert "check: FAILED" in out
 
 
-def test_missing_sign_in_exit_code_and_message(capsys: pytest.CaptureFixture[str]) -> None:
+def test_declined_sign_in_stops_new_device_flows(capsys: pytest.CaptureFixture[str]) -> None:
     script = Script(device_result={"error": "authorization_declined"})
-    assert run(["auth", "outlook", "--unsecure"], script) == cli.EXIT_ERROR
+    assert run(["auth", "--unsecure"], script) == cli.EXIT_ERROR
     assert "authorization_declined" in capsys.readouterr().err
+    assert script.shown_flows == 1
 
 
 def test_sign_out(capsys: pytest.CaptureFixture[str]) -> None:
@@ -91,13 +91,12 @@ def test_sign_out(capsys: pytest.CaptureFixture[str]) -> None:
     assert "No token cache" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("profile", ["graph", "outlook"])
-def test_auth_parser_accepts_service_profiles(profile: str) -> None:
-    assert cli.build_parser().parse_args(["auth", profile]).profile == profile
-
-
-@pytest.mark.parametrize("profile", ["read", "write"])
-def test_auth_parser_rejects_old_profile_names(profile: str) -> None:
+@pytest.mark.parametrize("profile", ["graph", "outlook", "read", "write"])
+def test_auth_parser_rejects_profile_arguments(profile: str) -> None:
     with pytest.raises(SystemExit) as error:
         cli.build_parser().parse_args(["auth", profile])
     assert error.value.code == 2
+
+
+def test_status_parser_and_project_data_path_remain_available() -> None:
+    assert cli.build_parser().parse_args(["status", "--json"]).json

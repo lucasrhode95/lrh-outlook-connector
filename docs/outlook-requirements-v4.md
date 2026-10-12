@@ -66,25 +66,30 @@ These are the use cases the design must serve. "Phase" refers to §12.
 
 ## 4. Authentication (decided)
 
-No new Entra registration exists or will be made. The app runs its own MSAL `PublicClientApplication` against Microsoft first-party public clients that research proved usable:
+No new Entra registration exists or will be made. The shared private `lrh-m365-auth` package owns
+MSAL `PublicClientApplication` instances and one encrypted token cache used by Outlook, Teams, and
+SharePoint. Its global profile catalog includes these Outlook client/resource pairs:
 
 | Capability | Client / profile | Backend | Status |
 |---|---|---|---|
-| Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Proven: interactive + silent cache |
-| Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
-| Inbox rules: list, read and manage supported rules | `outlook` · One Outlook Web | OWS `GetInboxRule` and rule actions | Read and change routes proven (research §4.4) |
-| Native roaming signatures: list/read settings and contents; create, update, delete and set defaults | `outlook` · One Outlook Web | Outlook Cloud Settings | Read and change routes proven (research §§4.7–4.8) |
+| Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `outlook.graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Live profile/photo read succeeded through shared silent auth; fresh-account consent not tested |
+| Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook.api` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
+| Inbox rules: list, read and manage supported rules | `outlook.api` · One Outlook Web | OWS `GetInboxRule` and rule actions | Read and change routes proven (research §4.4) |
+| Native roaming signatures: list/read settings and contents; create, update, delete and set defaults | `outlook.api` · One Outlook Web | Outlook Cloud Settings | Read and change routes proven (research §§4.7–4.8) |
 
-Graph mail write/send scopes are denied (`AADSTS65002`) to the tested clients (research §2). The Graph profile also lacks `MailboxSettings.*`, so inbox-rule access uses OWS. Denied scope pairs are never requested again.
+Graph mail write/send scopes are denied (`AADSTS65002`) to the tested clients (research §2). The
+`outlook.graph` profile also lacks `MailboxSettings.*`, so inbox-rule access uses OWS. Denied scope
+pairs are never requested again.
 
 Authentication requirements:
 
 - Never use browser tokens, cookies, storage, canaries or profiles.
-- Encrypted persistence via `msal-extensions` by default. If secure storage is unavailable, **fail closed**.
-- `--unsecure` is an explicit development mode: a separate plaintext cache file outside the repository, a warning on every use, never implicit.
-- Interactive sign-in happens only through `outlook-connector auth [graph|outlook]`. UI and MCP calls use silent auth and return an actionable "sign-in required" error.
-- Cross-process cache locking, because several processes may run at once.
-- Sign-in is per profile. Core mail reads use the Graph profile. Mail changes, inbox-rule access and native-signature access use the Outlook profile, including their read-only operations. A token is used only if its account matches the bound account (§5).
+- Encrypted persistence through `lrh-m365-auth` by default. If secure storage is unavailable, **fail closed**.
+- `--unsecure` is an explicit development mode: the shared package uses a separate plaintext cache file outside the repository, with a warning on every use. It is never an implicit fallback.
+- Interactive sign-in happens only through `outlook-connector auth`, which bootstraps the complete Outlook/Teams/SharePoint profile catalog. UI and MCP calls use silent auth and return an actionable "sign-in required" error.
+- Cross-process cache locking and account-generation checks protect concurrent connector processes and invalidate remembered credentials after shared sign-out/account switching.
+- Offline status separates OAuth client credential presence from cached resource access-token expiry. `status --check` attempts token acquisition per profile, but does not prove service authorization.
+- Core mail reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature access use `outlook.api`, including their read-only operations. The composition root binds the store to the current account identified by the shared token (§5).
 
 ## 5. Account binding and identity
 

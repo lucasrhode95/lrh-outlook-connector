@@ -25,7 +25,7 @@ from outlook_connector.remote.urls import graph_url
 
 PREFER_IMMUTABLE = 'IdType="ImmutableId"'
 PREFER_TEXT_BODY = 'outlook.body-content-type="text"'
-PROFILE = "graph"  # Graph calls use the Graph sign-in
+PROFILE = "outlook.graph"  # Graph calls use the shared Outlook Graph profile.
 BATCH_LIMIT = 20  # Graph JSON batching maximum per request
 BATCH_CONCURRENCY = 2  # batches in flight; each sub-request counts against the mailbox's 4 concurrent
 BATCH_RETRIES = 4  # rounds of re-sending transient sub-requests
@@ -99,9 +99,16 @@ class Graph:
     ) -> tuple[list[dict[str, Any]], bool]:
         """Follow pages up to ``max_items``. Returns (items, truncated)."""
         items, link = await self.page(path, params)
+        seen_links: set[str] = set()
         while link and len(items) < max_items:
-            more, link = await self.page(link)
+            if link in seen_links:
+                raise Upstream("Graph collection repeated a continuation link; pagination stopped.")
+            seen_links.add(link)
+            more, next_link = await self.page(link)
             items.extend(more)
+            if next_link and len(items) < max_items and next_link in seen_links:
+                raise Upstream("Graph collection repeated a continuation link; pagination stopped.")
+            link = next_link
         return items[:max_items], bool(link) or len(items) > max_items
 
     async def batch(

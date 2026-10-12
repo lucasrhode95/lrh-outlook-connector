@@ -19,8 +19,12 @@ def kept_dir(name: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
     cutoff = time.time() - KEEP_SECONDS
     for old in directory.iterdir():
-        if old.is_file() and old.stat().st_mtime < cutoff:
-            old.unlink(missing_ok=True)
+        try:
+            if old.is_file() and old.stat().st_mtime < cutoff:
+                old.unlink(missing_ok=True)
+        except FileNotFoundError:
+            # Another process may remove an expired file between the type check and stat.
+            continue
     return directory
 
 

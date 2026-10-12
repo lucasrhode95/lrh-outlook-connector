@@ -12,7 +12,8 @@ from html.parser import HTMLParser
 from typing import Literal
 from urllib.parse import unquote_to_bytes
 
-from outlook_connector.auth.tokens import Account
+from m365_auth import Account
+
 from outlook_connector.domain.errors import AccountMismatch, InvalidRequest, NotFound, Upstream
 from outlook_connector.domain.models import (
     MAX_BODY_CHARS,

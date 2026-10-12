@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import msal
 import pytest
+from m365_auth import tokens
 
 from tests.fakes.msal_fakes import FAKE_MSAL, Script
 
@@ -13,6 +13,7 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Every test gets its own data directory; nothing touches the real token cache."""
     home = tmp_path / "home"
     monkeypatch.setenv("OUTLOOK_CONNECTOR_HOME", str(home))
+    monkeypatch.setenv("M365_AUTH_HOME", str(home / "shared-auth"))
     return home
 
 
@@ -20,4 +21,4 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def fake_msal(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test signs in against the scripted fake MSAL, never against Microsoft."""
     FAKE_MSAL.script = Script()
-    monkeypatch.setattr(msal, "PublicClientApplication", FAKE_MSAL)
+    monkeypatch.setattr(tokens.msal, "PublicClientApplication", FAKE_MSAL)

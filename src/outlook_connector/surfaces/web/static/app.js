@@ -968,7 +968,7 @@ setInterval(() => {
     return; // the API helper has shown the startup error
   }
   $("account-name").textContent = status.account || "";
-  if (!status.signed_in.graph) {
+  if (!status.client_credential_cached["outlook.graph"]) {
     showBanner(`Not signed in. Run \`${status.sign_in_command}\` in a terminal, then reload this page.`);
     return;
   }

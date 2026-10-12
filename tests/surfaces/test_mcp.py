@@ -7,9 +7,9 @@ from typing import Any
 
 import httpx
 import pytest
+from m365_auth import AccessToken, CacheStatus, ProfileStatus
 from mcp.server.fastmcp import FastMCP
 
-from outlook_connector.auth.tokens import AccessToken, CacheStatus, ProfileStatus
 from outlook_connector.bootstrap import AppContext
 from outlook_connector.surfaces.mcp_main import build_server
 from tests.fakes.graph_fake import FakeGraph, sample_mailbox
@@ -52,7 +52,7 @@ class FakeTokens:
         return AccessToken(profile=profile, value=jwt(claims), source="cache", expires_on=None)
 
     def sign_in_command(self, profile: str) -> str:
-        return f"outlook-connector auth {profile}"
+        return "outlook-connector auth"
 
     def status(self) -> CacheStatus:
         return CacheStatus(
@@ -61,8 +61,11 @@ class FakeTokens:
             True,
             (),
             (
-                ProfileStatus("graph", "c", (), "Microsoft Graph", True, None),
-                ProfileStatus("outlook", "c", (), "Outlook APIs", False, None),
+                ProfileStatus("outlook.graph", "c", (), "Microsoft Graph", True, None),
+                ProfileStatus("outlook.api", "c", (), "Outlook APIs", False, None),
+                ProfileStatus("teams.spaces", "c", (), "Teams chat history", False, None),
+                ProfileStatus("teams.csa", "c", (), "Teams chat catalog", False, None),
+                ProfileStatus("teams.graph", "c", (), "Teams Graph", False, None),
             ),
         )
 
@@ -240,7 +243,7 @@ async def test_errors_are_reported_as_tool_errors(server: FastMCP) -> None:
 
 async def test_auth_status_is_offline(server: FastMCP, fake: FakeGraph) -> None:
     status = await call(server, "auth_status")
-    assert status["profiles"]["graph"]["signed_in"] and fake.calls == []
+    assert status["profiles"]["outlook.graph"]["client_credential_cached"] and fake.calls == []
 
 
 def test_server_name_uses_project_brand(server: FastMCP) -> None:

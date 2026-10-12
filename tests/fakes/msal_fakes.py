@@ -56,7 +56,9 @@ class Script:
 
     accounts: list[dict[str, Any]] = field(default_factory=list)
     silent: dict[str, Any] = field(default_factory=dict)  # client_id -> result (or Exception to raise)
+    silent_by_scopes: dict[tuple[str, ...], Any] = field(default_factory=dict)
     device_result: dict[str, Any] | None = None
+    device_by_scopes: dict[tuple[str, ...], dict[str, Any] | None] = field(default_factory=dict)
     removed: list[dict[str, Any]] = field(default_factory=list)
     shown_flows: int = 0
     silent_options: list[dict[str, Any]] = field(default_factory=list)  # kwargs of each silent call
@@ -87,7 +89,7 @@ class FakeApp:
         self, scopes: list[str], account: dict[str, Any], **options: Any
     ) -> Any:
         self.script.silent_options.append(options)
-        result = self.script.silent.get(self.client_id)
+        result = self.script.silent_by_scopes.get(tuple(scopes), self.script.silent.get(self.client_id))
         if isinstance(result, list):  # sequence of outcomes, consumed in order
             result = result.pop(0)
         if isinstance(result, Exception):
@@ -96,10 +98,14 @@ class FakeApp:
 
     def initiate_device_flow(self, scopes: list[str]) -> dict[str, Any]:
         self.script.shown_flows += 1
-        return {"user_code": "ABC123", "message": "Go to https://microsoft.com/devicelogin and enter ABC123"}
+        return {
+            "user_code": "ABC123",
+            "message": "Go to https://microsoft.com/devicelogin and enter ABC123",
+            "scopes": scopes,
+        }
 
     def acquire_token_by_device_flow(self, flow: dict[str, Any]) -> dict[str, Any] | None:
-        result = self.script.device_result
+        result = self.script.device_by_scopes.get(tuple(flow.get("scopes", ())), self.script.device_result)
         if result and result.get("access_token"):
             claims = result["id_token_claims"]
             account = msal_account(claims["oid"], claims["tid"], claims["preferred_username"])

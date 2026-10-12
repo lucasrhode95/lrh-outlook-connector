@@ -22,32 +22,34 @@ This document describes how the application is built: processes, layers, modules
 
 ## 2. Process model
 
-There is no daemon. Three entry points, all short-lived:
+There is no daemon. MCP and the UI run only for their active client/session; authentication, status,
+and backup are one-shot CLI commands:
 
 | Command | Lifetime | Started by | Loads |
 |---|---|---|---|
 | outlook-connector mcp | One process per MCP client session (stdio). Exits when the session ends. | Claude Code / Codex, from its MCP config | core + MCP |
 | outlook-connector ui [--port] | Starts a localhost web server and opens the browser. Exits on Ctrl+C or after an idle timeout. | You, occasionally | core + web stack |
-| outlook-connector auth [graph\|outlook] [--unsecure] | One-shot device-code sign-in | You, rarely | core + auth |
+| outlook-connector auth [--sign-out] [--unsecure] | Bootstrap all shared M365 profiles or sign out of the active account | You, rarely | shared auth |
+| outlook-connector status [--check] [--json] | Show shared profile/cache status; optional token acquisition | You, as needed | shared auth |
 
-outlook-connector status (offline) shows the signed-in account, which clients have tokens, and the store location.
+`outlook-connector status` (offline) shows the shared account, five product/resource profiles, each OAuth client's cached credential state, resource-token expiry when cached, and the store location. Profiles that share a client can repeat the same credential state. `--check` acquires each profile's token but does not prove API authorization.
 
 Consequences of short-lived processes (see [AGENTS.md](../AGENTS.md)):
 
 - **Nothing in memory is relied on across sessions.** A continuation travels in the result: cursors carry the remote link or per-folder positions and the original options.
 - **Local caches are used only while fresh.** A process may start after days or weeks idle, so the cache it finds may be old. The folder cache is used while younger than 10 minutes and otherwise refreshed before the call continues.
 - **No background work outlives a call:** no schedulers, sync loops or warm-up tasks. The UI's idle timer only stops the process.
-- **Concurrent processes share the local files:** the store uses WAL and short transactions, the token cache a cross-process lock, output files an exclusive create.
+- **Concurrent processes share local files:** the store uses WAL and short transactions, `lrh-m365-auth` locks the shared token cache across processes, and output files use exclusive creation.
 - **Not a hosted service:** one user, localhost only (the UI binds 127.0.0.1 with a per-run session token), no multi-user auth or remote access.
 
 **Consequences:**
 
-- **Concurrency is cross-process.** Two agent sessions and the UI may run at the same time. The shared resources are the **token cache** (MSAL file cache with msal-extensions cross-process locking) and the **SQLite store** (WAL mode, busy_timeout, short write transactions, a connection per operation).
+- **Concurrency is cross-process.** Outlook, Teams, and SharePoint processes may run at the same time. Their shared resources include the **encrypted MSAL cache** in `lrh-m365-auth` (cross-process locking and account-generation invalidation) and the Outlook **SQLite store** (WAL mode, busy timeout, short write transactions, one connection per operation).
 - **Startup cost matters**, because every agent session pays it.
   - Nothing runs at startup: no sync, no folder walk, no token refresh before the first call.
   - The web stack (Starlette, uvicorn) is imported only by ui, never by mcp.
   - Folders come from the cache while it is younger than 10 minutes; an older cache waits for a refresh (under a second). Messages are always listed from the server (no local message cache).
-  - Each process builds its MSAL clients once and keeps access tokens in memory until shortly before expiry (rebuilding the client costs a network round trip).
+  - MCP and UI startup do not prompt or refresh credentials. A service call requests the product-specific profile from `lrh-m365-auth`; explicit `auth` performs the full interactive bootstrap.
 - **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote nextLink or offset plus the original selection). They survive a client restart.
 - **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue and no progress reporting. An export holds at most 2,000 messages; it fetches bodies in bounded $batch rounds and finishes with per-message gaps marked rather than failing as a whole (§5.8).
 
@@ -58,7 +60,7 @@ The diagram at the top shows the layers, top to bottom:
 1. **Surfaces** ([`surfaces/mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py), [`surfaces/web/`](../src/outlook_connector/surfaces/web/)) are thin adapters: parse, call, shape output.
 2. The **service** ([`service/`](../src/outlook_connector/service/)) makes all domain decisions, using the models in [`domain/`](../src/outlook_connector/domain/).
 3. The **remote** layer ([`remote/`](../src/outlook_connector/remote/)) and the **store** ([`store/`](../src/outlook_connector/store/)) sit underneath. Remote adapters implement the MailReader, MailWriter, RuleWriter and SignatureStore ports. The store is SQLite.
-4. **Transport and tokens** ([`remote/transport.py`](../src/outlook_connector/remote/transport.py), [`auth/tokens.py`](../src/outlook_connector/auth/tokens.py)) are at the bottom.
+4. **Transport** ([`remote/transport.py`](../src/outlook_connector/remote/transport.py)) sits at the remote edge. The adjacent `lrh-m365-auth` package supplies encrypted, account-bound credentials to Outlook adapters and to the Teams and SharePoint connectors.
 
 **Rules:**
 
@@ -71,23 +73,21 @@ The diagram at the top shows the layers, top to bottom:
 
 ![Repository code map](code-map.svg)
 
-The application package is under [src/outlook_connector/](../src/outlook_connector/). Its entry points and composition live in [__main__.py](../src/outlook_connector/__main__.py), [`bootstrap.py`](../src/outlook_connector/bootstrap.py) and [`config.py`](../src/outlook_connector/config.py). Authentication is in [`auth/tokens.py`](../src/outlook_connector/auth/tokens.py); the remote adapters and ports are in [`remote/`](../src/outlook_connector/remote/); domain models are in [`domain/`](../src/outlook_connector/domain/); persistence is in [`store/`](../src/outlook_connector/store/); and domain operations are in [`service/`](../src/outlook_connector/service/).
+The application package is under [src/outlook_connector/](../src/outlook_connector/). Its entry points and composition live in [__main__.py](../src/outlook_connector/__main__.py), [`bootstrap.py`](../src/outlook_connector/bootstrap.py) and [`config.py`](../src/outlook_connector/config.py). Shared MSAL authentication lives in the private [`lrh-m365-auth` repository](https://github.com/lucasrhode95/lrh-m365-auth); this repository contains no second token provider. Remote adapters and ports are in [`remote/`](../src/outlook_connector/remote/); domain models are in [`domain/`](../src/outlook_connector/domain/); persistence is in [`store/`](../src/outlook_connector/store/); and domain operations are in [`service/`](../src/outlook_connector/service/).
 
 The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py), while the local browser UI is in [`surfaces/web/`](../src/outlook_connector/surfaces/web/) with its static files under [`surfaces/web/static/`](../src/outlook_connector/surfaces/web/static/). Synthetic test fixtures and tests are under [`tests/`](../tests/), with the fake mailbox in [`tests/fakes/graph_fake.py`](../tests/fakes/graph_fake.py). Dependencies and command entry points are declared in [`pyproject.toml`](../pyproject.toml).
 
 ## 5. Module responsibilities
 
-### 5.1 [`auth/tokens.py`](../src/outlook_connector/auth/tokens.py)
+### 5.1 Shared authentication (`lrh-m365-auth`)
 
-- **One centralized provider** serving any number of named profiles (client_id + resource scope), all defined in [`config.py`](../src/outlook_connector/config.py). Cache, locking, fail-closed handling and the account check are shared. Profiles today (research §2):
-  - graph: Outlook Mobile 27922004-… → https://graph.microsoft.com/Mail.Read.
-  - outlook: One Outlook Web 9199bf20-… → https://outlook.office.com/.default.
-- One MSAL PublicClientApplication per profile per process; the access token is kept in memory until 5 minutes before expiry. Silent acquisition first. Device code only from the auth command, so surfaces never start an interactive sign-in. They raise AuthenticationRequired with the exact command to run.
-- Encrypted cache via msal-extensions by default, **fail-closed** when unavailable. --unsecure selects a separate, clearly named plaintext cache file in the same data directory, with a warning on every use. Every process finds it at the same path, wherever it was started.
-- Cross-process lock around cache reads and writes.
-- The account fingerprint (tid+oid) must match the store owner (§7).
-- The Outlook profile is optional for core mail reading, search and attachment downloads. Inbox-rule and native-signature reads also use this profile, as do mail and settings changes; tools report "Outlook sign-in required" when it is missing.
-- The recorded AADSTS65002 client/scope pairs (config.DENIED_PAIRS) are never requested; a unit test checks the profiles against them.
+- `lrh-m365-auth` owns one encrypted, cross-process-safe MSAL cache and the named Outlook/Teams profiles. Outlook's profiles are `outlook.graph` (Outlook Mobile client, Graph `Mail.Read` and `User.Read`) and `outlook.api` (One Outlook Web client, `https://outlook.office.com/.default`).
+- The shared explicit `auth` command silently reuses cached credentials and requests device-code approval only for profiles that need it. Normal MCP and UI calls never start interactive login. They report the common `outlook-connector auth` command when authentication is required.
+- The shared cache defaults to `~/.lrh-m365-auth/token-cache.bin`; `M365_AUTH_HOME` changes its location. Encrypted storage is mandatory by default. `--unsecure` selects a separate plaintext development cache and prints a warning.
+- Cross-process locking protects cache reads and writes. The shared account-generation marker causes already-running processes to discard memoized tokens after sign-out or account switching.
+- The Outlook composition root derives the current account from `outlook.graph` and rebuilds its services and account-bound store if the identity changes. The store owner fingerprint (tid + oid) is checked before account data is served (§7).
+- Core mail reading, search and attachment access use `outlook.graph`; OWS changes, rules, and native signatures use `outlook.api`. A cached profile does not prove that every operation is authorized.
+- Refused client/scope pairs remain excluded in the shared package's profile catalog and tests.
 
 ### 5.2 [`remote/transport.py`](../src/outlook_connector/remote/transport.py)
 
@@ -306,16 +306,16 @@ The adapters below describe the current tenant's routing, not a universal divisi
 
 | Capability | Adapter | Token profile |
 |---|---|---|
-| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | graph |
-| Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | outlook |
-| List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | outlook |
-| List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | outlook |
+| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
+| Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
+| List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
+| List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
 
 ### 6.1 How the code stays swappable
 
 - **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete backend.
 - **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
-- **Wiring.** [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port, and one token profile per adapter, from [`config.py`](../src/outlook_connector/config.py). There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
+- **Wiring.** [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port and each adapter requests its named profile from `lrh-m365-auth`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change
 
@@ -325,12 +325,12 @@ The domain, service, store and surface boundaries remain independent of Graph an
 
 ## 7. Data and identity
 
-- **Account fingerprint:** a hash of tid + oid. It selects the database and must match both token profiles.
+- **Account fingerprint:** a hash of tid + oid. It selects the database and must match the active account returned by `outlook.graph`.
 - **Item key:** the Graph immutable id, within the account's own store. Immutable ids survive moves within the mailbox.
 - **Conversation key:** Graph conversationId.
 - **Locations:**
-  - data directory: %USERPROFILE%/.lrh-outlook-connector on Windows, $XDG_DATA_HOME/lrh-outlook-connector (or ~/.local/share/...) elsewhere. The Windows default is under the user profile so packaged desktop clients, local MCP servers and terminal-launched commands share the same tokens, store and exports;
-  - token cache: <data directory>/token-cache.bin (encrypted), or token-cache.plaintext-dev.json with --unsecure;
+  - Outlook data directory: %USERPROFILE%/.lrh-outlook-connector on Windows, $XDG_DATA_HOME/lrh-outlook-connector (or ~/.local/share/...) elsewhere. It holds the mailbox store and exports;
+  - shared token cache: %USERPROFILE%/.lrh-m365-auth/token-cache.bin by default on Windows, or ~/.lrh-m365-auth/token-cache.bin elsewhere. `M365_AUTH_HOME` overrides it. `--unsecure` selects a separate plaintext development cache;
   - OUTLOOK_CONNECTOR_HOME overrides the data directory (tests, portability);
   - store: <data directory>/accounts/<fingerprint>/mail.sqlite3 (account binding and folder cache only);
   - exports and downloaded attachments: <data directory>/exports/, removed after 7 days. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
@@ -339,7 +339,7 @@ The domain, service, store and surface boundaries remain independent of Graph an
 
 | MCP tool | Service module | Behavior |
 |---|---|---|
-| `auth_status` | [`auth/tokens.py`](../src/outlook_connector/auth/tokens.py) | Read local sign-in status |
+| `auth_status` | shared auth provider | Read cached account/client credentials and resource-token expiry |
 | `list_folders` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List reachable folders and counts |
 | `list_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List messages in a folder or mailbox, with folder, date-window and scope filters |
 | `search_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
@@ -378,5 +378,5 @@ Web endpoints expose the same read operations through the local UI, plus attachm
 
 | Area | Current choice |
 |---|---|
-| Authentication | MSAL with an encrypted, fail-closed token cache. --unsecure uses a separate plaintext development cache. |
+| Authentication | Shared `lrh-m365-auth` MSAL cache, encrypted and fail-closed by default. `--unsecure` selects a separate plaintext development cache. |
 | Package and CLI | Python package outlook_connector; command outlook-connector. |

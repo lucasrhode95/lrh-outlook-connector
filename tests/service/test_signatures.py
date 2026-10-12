@@ -5,8 +5,8 @@ from pathlib import Path
 
 import httpx
 import pytest
+from m365_auth import Account
 
-from outlook_connector.auth.tokens import Account
 from outlook_connector.domain.errors import AccountMismatch, InvalidRequest, NotFound, Upstream
 from outlook_connector.domain.models import OutgoingMessage
 from outlook_connector.remote.cloud_settings import CloudSettings
