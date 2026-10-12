@@ -629,6 +629,33 @@ conversation-size lookup and immutable-ID translation, which support response an
 contracts. The [cross-product findings](m365-search-findings.md#measurement-and-provenance) summarize
 how these results compare with Teams and file-search measurements.
 
+### 3.17 Live Outlook connector MCP calendar check (2026-10-12)
+
+**Evidence: live, read-only MCP calls** through the current signed-in Outlook connector. `auth_status`
+reported `client_credential_cached=true` for the `m365.search` profile. No sign-in, consent, or
+mailbox write was performed.
+
+`search_calendar_events(query="meeting", limit=5)` returned five event references at offset 0 and
+an opaque continuation cursor. Following it returned five more at offset 5. The call remained
+incomplete (`more_results_available=true`). `get_calendar_event` succeeded for one returned id and
+provided structured agenda text, attendee fields, and a `teams_join_url`. The structured event
+fields did not include a Teams chat or conversation id, so the join URL does not yet establish the
+identifier required for automatic handoff to the Teams connector. No event title, attendee identity,
+URL, or item identifier is retained here.
+
+Date bounds are currently applied to each fetched page's event start times after the Search v2
+request. For `query="meeting"`, `limit=25`, and the inclusive UTC range 2026-09-12 through
+2026-11-12, the first two bounded pages (offsets 0 and 25) returned zero visible events while both
+reported more results and exposed a cursor. The first unbounded 25-result page had no event start in
+that range. This confirms an empty page is not a complete negative search; continue through empty
+pages while a cursor is available. If paging stops before coverage is complete, report incomplete
+results rather than no matches. The observed walk stopped after offset 25, so it makes no claim
+about whether later pages contain matches.
+
+This closes the live connector-path check for the current account. Fresh-account consent remains
+unverified. The Graph calendar scope remains a separate unresolved alternative; transcript and
+recap search remain outside this Outlook workflow.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract

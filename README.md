@@ -115,7 +115,10 @@ uv run outlook-connector ui
 - `list_folders` — List reachable mail folders and their counts.
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
-- `search_calendar_events` — Search Exchange calendar events online, with bounded paging and optional start-date bounds.
+- `search_calendar_events` — Search Exchange calendar events online, with bounded paging and optional
+  start-date bounds. Bounds filter each fetched page after Search v2; an empty page may still have a
+  cursor. Continue while a cursor is available, and report incomplete coverage if paging stops
+  without matches.
 - `get_calendar_event` — Hydrate one event's agenda, attendees and attachment metadata from Outlook; `body_truncated` reports OWS truncation when available.
 - `get_conversation` — Read a whole conversation across folders.
 - `get_message` — Read one message body, including quoted history by default, and its attachment metadata.

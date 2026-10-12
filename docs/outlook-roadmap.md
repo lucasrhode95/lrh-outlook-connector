@@ -15,10 +15,10 @@ Snapshot **2026-10-12**.
 ## X10 — Meeting/calendar search
 
 **Status:** Partial — bounded Search v2 event discovery and OWS event hydration are implemented in
-the Outlook connector (2026-10-12). The adapter has synthetic regression coverage; a live call
-through the connector and fresh-account `m365.search` consent have not been verified. Standalone
-OWA Search v2 discovery and OWS event hydration succeeded; the current Graph profile still lacks
-the tested `Calendars.*` permission.
+the Outlook connector (2026-10-12). Synthetic regression coverage and a live connector MCP check
+passed for the current signed-in account. Fresh-account `m365.search` consent has not been verified.
+Standalone OWA Search v2 discovery and OWS event hydration succeeded; the current Graph profile
+still lacks the tested `Calendars.*` permission.
 
 **Goal:** search Exchange calendar events (subject, time, organizer, attendees, agenda and Teams join link) and hand a Teams meeting's chat id to `lrh-teams-connector` when useful.
 
@@ -57,11 +57,19 @@ occurrences; OWS `GetItem` retrieved a selected event's agenda, attendees, and a
 reported `HasAttachments=false` for that event, and recurring-result totals did not describe the
 number of returned occurrences. See [research §3.14](outlook-api-research.md#314-owa-search-v2-calendar-and-teams-message-replay-2026-10-10).
 
-**Next:** verify the wired path with the connector's shared-auth profile when safe authorization is
-available; establish a verified event-to-Teams reference before offering automatic cross-product
-handoff. Search v2 totals remain intentionally omitted, event attachment download is not exposed,
-and Graph `Calendars.Read` remains a separate alternative to reassess rather than an automatic
-fallback. Transcript and recap discovery remain in Teams and are not completed by calendar search.
+**Live connector MCP check (2026-10-12):** the current account's `m365.search` profile completed
+calendar search and event hydration. A five-event page continued at offset 5; one hydrated result
+included agenda text, attendees, and a Teams join URL. Date-bounded searches also produced empty
+pages with `more_results_available=true`, so an empty page is not proof that the full search is
+empty. The event fields expose no Teams chat id. Details are in
+[research §3.17](outlook-api-research.md#317-live-outlook-connector-mcp-calendar-check-2026-10-12).
+
+**Next:** establish and verify an event-to-Teams-chat reference through a supported Teams-side
+lookup before offering automatic cross-product handoff. Verify fresh-account `m365.search` consent
+if deploying with a new account. Search v2 totals remain intentionally omitted, event attachment
+download is not exposed, and Graph `Calendars.Read` remains a separate alternative to reassess
+rather than an automatic fallback. Transcript and recap discovery remain in Teams and are not
+completed by calendar search.
 
 ## Outlook mail-search comparison (2026-10-12)
 
