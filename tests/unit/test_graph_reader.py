@@ -22,7 +22,7 @@ from outlook_connector.remote.graph import BATCH_CONCURRENCY, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.transport import Transport
 from outlook_connector.remote.transport import _path as transport_path
-from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
+from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 
 async def _no_sleep(_s: float) -> None:
@@ -158,6 +158,39 @@ async def test_get_message_text_and_html_with_attachments(fake: FakeGraph) -> No
     assert [(a.name, a.kind, a.is_inline) for a in html.attachments][:2] == [
         ("numbers.xlsx", "file", False),
         ("image001.png", "file", True),
+    ]
+
+
+async def test_get_message_lists_inline_attachments_when_graph_flag_is_false(fake: FakeGraph) -> None:
+    fake.add(
+        FakeMessage(
+            "m-inline-only",
+            "Inline image",
+            "f-inbox",
+            "2026-09-30T13:00:00Z",
+            attachments=[
+                FakeAttachment(
+                    "inline-image",
+                    "image001.png",
+                    "png-bytes",
+                    "image/png",
+                    inline=True,
+                    content_id="image001",
+                )
+            ],
+            html='<p>See image</p><img src="cid:image001">',
+        )
+    )
+
+    message = await reader_for(fake).get_message("m-inline-only", body_format="html")
+
+    assert message.has_attachments is False
+    assert [
+        (attachment.name, attachment.is_inline, attachment.content_id) for attachment in message.attachments
+    ] == [("image001.png", True, "image001")]
+    assert fake.calls[-2:] == [
+        "GET /v1.0/me/messages/m-inline-only",
+        "GET /v1.0/me/messages/m-inline-only/attachments",
     ]
 
 

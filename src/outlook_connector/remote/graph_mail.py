@@ -252,8 +252,8 @@ class GraphMailReader(MailReader):
             f"/me/messages/{message_id}", {"$select": mapping.MESSAGE_FIELDS}, prefer=prefer
         )
         result = mapping.message(data, html=body_format == "html")
-        if result.has_attachments:
-            result.attachments = await self.list_attachments(message_id)
+        # Graph's hasAttachments excludes inline-only attachments, so it cannot guard this lookup.
+        result.attachments = await self.list_attachments(message_id)
         return result
 
     @_named("fetching message bodies")

@@ -159,7 +159,7 @@ recaps, recordings or transcripts; those remain in Teams.
 
 ## 9. Reading content (MCP)
 
-- `get_message` returns metadata plus a bounded full body, including quoted history, by default, with an `offset`/`max_chars` continuation. HTML and `uniqueBody` are available on request; `body=unique` omits quoted history.
+- `get_message` returns metadata plus a bounded full body, including quoted history, by default, with an `offset`/`max_chars` continuation. HTML and `uniqueBody` are available on request; `body=unique` omits quoted history. It also returns attachment metadata, including inline-only attachments even when Graph reports `hasAttachments=false`.
 - The local UI reader shows the whole chosen body, however long, from one request (one server read); a failure says the complete message could not be loaded and never shows part of it as complete.
 - **Attachments are returned as raw files** (an MCP resource or file artifact) for the agent's client to read. No server-side text extraction. Attachment types: file, inline, item and reference. Item and reference attachments are listed with their metadata. Fetching them is best effort. Attachment and message MIME downloads have a local 150 MB limit; larger attachments must be downloaded directly from Outlook.
 - MIME (`$value`) is delivered as a file or resource, never inside JSON.
