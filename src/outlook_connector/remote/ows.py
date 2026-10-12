@@ -57,6 +57,15 @@ class Ows:
         }
         return _items(await self._post(action, envelope), action, strict=strict)
 
+    async def call_read(self, action: str, body: dict[str, Any]) -> list[dict[str, Any]]:
+        """Send a read-only OWS action with bounded transport retries and read-specific errors."""
+        envelope = {
+            "__type": f"{action}JsonRequest:#Exchange",
+            "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": SERVER_VERSION},
+            "Body": {"__type": f"{action}Request:#Exchange", **body},
+        }
+        return _read_items(await self._post(action, envelope, read_only=True), action)
+
     async def call_request(
         self, action: str, fields: dict[str, Any], *, time_zone: str | None = None
     ) -> dict[str, Any]:
@@ -88,8 +97,8 @@ class Ows:
             )
         return data
 
-    async def _post(self, action: str, payload: dict[str, Any]) -> Any:
-        """POST one payload to the action, with Outlook Web's headers. Sent once, never retried."""
+    async def _post(self, action: str, payload: dict[str, Any], *, read_only: bool = False) -> Any:
+        """POST one payload with Outlook Web's headers; only explicitly read-only calls are retried."""
         encoded = quote(json.dumps(payload, separators=(",", ":"), ensure_ascii=False), safe="-_.!~*'()")
         claims = self.account()
         upn = claims.get("upn") or claims.get("preferred_username")
@@ -112,8 +121,25 @@ class Ows:
             profile=PROFILE,
             headers=headers,
             json_body=None if in_header else payload,
-            write=True,
+            retry=read_only,
+            write=not read_only,
         )
+
+
+def _read_items(data: Any, action: str) -> list[dict[str, Any]]:
+    body = data.get("Body") if isinstance(data, dict) else None
+    messages = body.get("ResponseMessages") if isinstance(body, dict) else None
+    items = messages.get("Items") if isinstance(messages, dict) else None
+    if not isinstance(items, list) or not items:
+        raise Upstream(f"Outlook returned no item results for {action}.")
+    results: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise Upstream(f"Outlook returned an invalid item result for {action}.")
+        if item.get("ResponseClass") not in SUCCESS:
+            raise item_error(item, action)
+        results.append(item)
+    return results
 
 
 def _items(data: Any, action: str, *, strict: bool) -> list[dict[str, Any]]:

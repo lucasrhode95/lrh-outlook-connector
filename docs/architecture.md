@@ -148,6 +148,13 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 - Mutations return an outcome per message (None, or Outlook's ResponseCode). Never retries.
 
+#### Calendar event search and hydration
+
+- [`substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) uses the Outlook-hosted Search v2 route with the shared `m365.search` profile, `EntityType="Event"`, and `ContentSources=["Exchange"]`. It preserves `Cvid` and `LogicalId` across bounded pages and maps only observed event fields.
+- [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) hydrates a selected Search result with OWS `GetItem` under the `outlook.api` profile, requesting the default event shape plus body and attachment metadata. It uses the retryable read path in `Ows.call_read`; it does not download event attachment bytes.
+- [`service/calendar.py`](../src/outlook_connector/service/calendar.py) validates query, date bounds and cursors, filters event start times, and omits Search v2 totals because recurring-occurrence totals were inconsistent in the standalone replay. The MCP surface exposes the tools; the web UI does not.
+- No Graph fallback or automatic event-to-Teams mapping is performed. Outlook owns the Exchange event and join URL; Teams owns linked meeting chats, recordings, recaps, transcripts and notes. Only a verified reference can connect them.
+
 ### 5.6 [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py)
 
 - CloudSettings implements the SignatureStore port for Outlook native roaming signatures. It uses
@@ -163,7 +170,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 ### 5.7 [`domain/models.py`](../src/outlook_connector/domain/models.py) and [`domain/errors.py`](../src/outlook_connector/domain/errors.py)
 
-- Pydantic models: Folder, Recipient, MessageSummary (with also_in for merged copies, and meeting on meeting mail: kind, start, end, location, out of date; read from Graph's eventMessage fields in the same listing, so no extra requests), Message, Attachment, Coverage (with excluded counts per ExclusionReason: deleted_or_junk, outgoing), MessagePage (with cursor), ConversationHit (with message_count) + SearchResult, MessageContent, ConversationMessage + Conversation, ConversationSize, ExportRequest, ExportArtifact. Drafts add OutgoingMessage (explicit text/HTML, reply context and signature selection), private DraftMessage (including inline images), DraftResult and SendResult. Signature tools return SignatureList, SignatureDetails and SignatureWriteResult; mutations add ItemResult and MutationResult.
+- Pydantic models: Folder, Recipient, MessageSummary (with also_in for merged copies, and meeting on meeting mail: kind, start, end, location, out of date; read from Graph's eventMessage fields in the same listing, so no extra requests), Message, Attachment, Coverage (with excluded counts per ExclusionReason: deleted_or_junk, outgoing), MessagePage (with cursor), ConversationHit (with message_count) + SearchResult, CalendarEvent, CalendarAttachment, CalendarSearchCoverage and CalendarSearchResult, MessageContent, ConversationMessage + Conversation, ConversationSize, ExportRequest, ExportArtifact. Drafts add OutgoingMessage (explicit text/HTML, reply context and signature selection), private DraftMessage (including inline images), DraftResult and SendResult. Signature tools return SignatureList, SignatureDetails and SignatureWriteResult; mutations add ItemResult and MutationResult.
 - MessageSummary exposes one received_at value: Graph receive time, with send time as fallback. It has no parallel sent-time field.
 - Failure is the structured per-item failure value for batch reads.
 - Output models serialize optional fields only when set (no nulls, no empty lists): MCP results stay small, and a missing field means its default. Required fields are always present.
@@ -181,6 +188,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.9 [`service/`](../src/outlook_connector/service/)
 
 - Numeric input bounds are validated once at service entry points, shared by MCP and web. MCP schemas describe those bounds without enforcing a second range.
+- [`calendar.py`](../src/outlook_connector/service/calendar.py) provides bounded online Exchange event search, explicit continuation and selected-event hydration through separate remote ports. It does not search Teams artifacts or infer a meeting-chat id.
 - Conversation expansion for exports and read-state changes runs in groups of four, using the shared request cap from [`remote/ports.py`](../src/outlook_connector/remote/ports.py) and [`remote/transport.py`](../src/outlook_connector/remote/transport.py).
 
 **[`mailbox.py`](../src/outlook_connector/service/mailbox.py):**
@@ -307,14 +315,16 @@ The adapters below describe the current tenant's routing, not a universal divisi
 | Capability | Adapter | Token profile |
 |---|---|---|
 | Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
+| Exchange event search | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
+| Selected event hydration and attachment metadata | [OwsCalendarItems](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
 | Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
 | List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
 | List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete backend.
-- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
+- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), CalendarSearchReader, CalendarItemReader, RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete adapter.
+- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) implements CalendarSearchReader; [`remote/ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) implements CalendarItemReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
 - **Wiring.** [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port and each adapter requests its named profile from `lrh-m365-auth`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change
@@ -343,6 +353,8 @@ The domain, service, store and surface boundaries remain independent of Graph an
 | `list_folders` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List reachable folders and counts |
 | `list_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List messages in a folder or mailbox, with folder, date-window and scope filters |
 | `search_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
+| `search_calendar_events` | [`service/calendar.py`](../src/outlook_connector/service/calendar.py) | Search Exchange events online with bounded continuation and optional start-date bounds |
+| `get_calendar_event` | [`service/calendar.py`](../src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, join URL and attachment metadata |
 | `get_conversation` | [`service/conversations.py`](../src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
 | `get_message` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | Read a message body |
 | `list_attachments` | [`service/files.py`](../src/outlook_connector/service/files.py) | List attachment metadata, including inline image IDs |

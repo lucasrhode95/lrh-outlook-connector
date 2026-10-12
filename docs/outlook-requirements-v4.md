@@ -23,13 +23,14 @@ and Teams remain separately installed products. Shared authentication is planned
 and domain decisions remain in their owning connector. How the current application is built is in
 [architecture.md](architecture.md).
 
-**Calendar and meeting ownership (2026-10-11):** planned Exchange calendar-event support belongs to
-Outlook, including schedule/recurrence, agenda, organizer, invitees, event attachments, and the join
-link. If the event links to a Teams meeting, Teams owns the meeting chat, recordings, transcripts,
-recap, and meeting notes. Verified identifiers link the event to those resources; a virtual meeting
-hosted on another platform does not become a Teams meeting. General OneDrive/SharePoint file search
-belongs to the planned SharePoint connector, while email-attachment context remains here. Calendar
-implementation is tracked in [roadmap X10](outlook-roadmap.md#x10--meetingcalendar-search).
+**Calendar and meeting ownership (2026-10-12):** Exchange event discovery and hydration belong to
+Outlook, including schedule/recurrence, agenda, organizer, invitees, event attachment metadata, and a
+Teams join link when present in the event body. If the event links to a Teams meeting, Teams owns the
+meeting chat, recordings, transcripts, recap, and meeting notes. Verified identifiers link the event
+to those resources; the current Search v2 response does not establish an event-to-chat mapping. A
+virtual meeting hosted on another platform does not become a Teams meeting. General OneDrive/SharePoint
+file search belongs to the SharePoint connector, while email-attachment context remains here. Calendar
+behavior and remaining limits are tracked in [roadmap X10](outlook-roadmap.md#x10--meetingcalendar-search).
 
 ## 2. Use cases
 
@@ -46,6 +47,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 | A5 | "Move inbound items to their project folders (Project Alpha, Project Beta, Project Gamma…). If unsure, don't move; list them for me." | `list_folders`, `list_messages`, `get_message`; the agent classifies, then calls `move_messages` per target and reports the unsure items in chat | Mutations |
 | A6 | Agent marks messages read/unread or flags them as part of triage. | `set_read_state`, `set_flag` | Mutations |
 | A7 | Agent sends an email on explicit request. | `send_draft` | Send |
+| A8 | "Find the Exchange event for a meeting, inspect its agenda and invitees, then decide whether to look up its related Teams resources." | `search_calendar_events` → `get_calendar_event`; then Teams MCP if a verified link is available | Calendar |
 
 ### Manual (local UI)
 
@@ -73,6 +75,7 @@ SharePoint. Its global profile catalog includes these Outlook client/resource pa
 | Capability | Client / profile | Backend | Status |
 |---|---|---|---|
 | Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `outlook.graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Live profile/photo read succeeded through shared silent auth; fresh-account consent not tested |
+| Calendar event discovery and hydration | `m365.search` · One Outlook Web; `outlook.api` · One Outlook Web | Search v2 `Event` / `Exchange`; OWS `GetItem` | Standalone search and OWS hydration contracts were replayed; connector calls and fresh-account consent not tested |
 | Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook.api` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
 | Inbox rules: list, read and manage supported rules | `outlook.api` · One Outlook Web | OWS `GetInboxRule` and rule actions | Read and change routes proven (research §4.4) |
 | Native roaming signatures: list/read settings and contents; create, update, delete and set defaults | `outlook.api` · One Outlook Web | Outlook Cloud Settings | Read and change routes proven (research §§4.7–4.8) |
@@ -141,6 +144,16 @@ Mailbox-wide listings are newest first. Folder counts guide chunk sizes but thei
 **Search backend: Graph `$search`**, which has the same recall as Outlook's own top-bar search, folds accents and supports field scoping (research §3.3). Results are messages, grouped into conversations locally. No search total is reported: Microsoft Search (`/search/query`) counts with a different engine and without the connector's folder rules, so its number cannot be compared with the results.
 
 Every search result reports coverage: whether more results follow (a cursor), what the folder rules left out, and partial flags.
+
+**Calendar events are a separate search domain.** `search_calendar_events` uses the shared
+`m365.search` profile against Outlook-host Search v2 with `EntityType=Event` and
+`ContentSources=[Exchange]`. Optional `since`/`until` bounds apply inclusively to event start time.
+Follow the cursor for another bounded page. Search v2 totals are omitted because the tested recurring
+occurrences did not agree with the reported `Total`. `get_calendar_event` uses OWS `GetItem` with the
+returned item id and requests the default event shape plus body and attachments; it returns agenda
+text, invitees and attachment metadata. The Search hit's `HasAttachments` value does not suppress
+hydration. Event attachment download is not exposed yet. This does not search Teams meeting chats,
+recaps, recordings or transcripts; those remain in Teams.
 
 ## 9. Reading content (MCP)
 
@@ -291,7 +304,7 @@ which must never be rewritten. Unknown outcomes must be checked in Outlook befor
 
 | Phase | Content |
 |---|---|
-| **MVP (read)** | Auth (Graph client), folders, `list_messages`, `get_conversation`, `get_message`, attachment resources, online search, export (§10), local UI, MCP read surface |
+| **MVP (read)** | Shared auth, folders, `list_messages`, `get_conversation`, `get_message`, attachment resources, online mail search, Exchange calendar search/hydration, export (§10), local UI, MCP read surface |
 | **Send** | Write-client sign-in, `send_draft` with safeguards |
 | **Mutations** | move → delete → read state → flag |
 | **Parked** | Branch-aware conversations (§10.3): rely on Exchange conversations for now |

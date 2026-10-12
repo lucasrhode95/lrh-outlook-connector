@@ -15,6 +15,7 @@ from typing import Any, Literal, Protocol
 from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import (
     Attachment,
+    CalendarEvent,
     DraftMessage,
     Folder,
     InboxRule,
@@ -43,6 +44,16 @@ class FolderCount:
 
     count: int
     newest_received_at: datetime | None
+
+
+@dataclass
+class CalendarSearchPage:
+    """Normalized one-page Exchange event discovery response."""
+
+    events: list[CalendarEvent]
+    rows_received: int
+    more_results_available: bool | None
+    result_set_found: bool
 
 
 class MailReader(Protocol):
@@ -114,6 +125,26 @@ class MailReader(Protocol):
 
     async def get_summaries(self, message_ids: list[str]) -> FetchedSummaries:
         """Batch lookup of message summaries (folder, read state, flag)."""
+        ...
+
+
+class CalendarSearchReader(Protocol):
+    async def search_events(
+        self,
+        query: str,
+        *,
+        offset: int,
+        page_size: int,
+        cvid: str,
+        logical_id: str,
+    ) -> CalendarSearchPage:
+        """Search Exchange events through the standalone-proven Search v2 route."""
+        ...
+
+
+class CalendarItemReader(Protocol):
+    async def get_event(self, event_id: str) -> CalendarEvent:
+        """Hydrate one event from Outlook Web Service using a Search v2 item reference."""
         ...
 
 

@@ -50,4 +50,4 @@ include = ["src"]
 exclude = ["research"]
 
 [tool.uv.sources]
-lrh-m365-auth = { git = "ssh://git@github.com/lucasrhode95/lrh-m365-auth.git", rev = "89813b6dcc0ce48f7a315cb49b486b391e7772a4" }
+lrh-m365-auth = { git = "ssh://git@github.com/lucasrhode95/lrh-m365-auth.git", rev = "9f2e4f4935cdc555dfc50f583f9c9e9290ca883e" }

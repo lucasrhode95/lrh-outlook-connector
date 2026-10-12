@@ -16,7 +16,8 @@ from tests.fakes.graph_fake import FakeGraph, sample_mailbox
 from tests.fakes.msal_fakes import jwt
 
 READ_TOOLS = {
-    "auth_status", "list_folders", "list_messages", "search_messages", "get_conversation",
+    "auth_status", "list_folders", "list_messages", "search_messages", "search_calendar_events",
+    "get_calendar_event", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
     "list_rules", "list_signatures", "get_signature",
 }  # fmt: skip
@@ -62,6 +63,7 @@ class FakeTokens:
             (),
             (
                 ProfileStatus("outlook.graph", "c", (), "Microsoft Graph", True, None),
+                ProfileStatus("m365.search", "c", (), "Microsoft Search", False, None),
                 ProfileStatus("outlook.api", "c", (), "Outlook APIs", False, None),
                 ProfileStatus("teams.spaces", "c", (), "Teams chat history", False, None),
                 ProfileStatus("teams.csa", "c", (), "Teams chat catalog", False, None),

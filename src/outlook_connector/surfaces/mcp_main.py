@@ -23,6 +23,8 @@ from outlook_connector.domain.models import (
     EXPORT_MAX_MESSAGES,
     Attachment,
     BodyKind,
+    CalendarEvent,
+    CalendarSearchResult,
     CombineMode,
     Conversation,
     Detail,
@@ -57,6 +59,11 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
+- Calendar: search_calendar_events discovers Exchange events, not Teams recaps or transcripts. \
+Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
+owns the event, schedule and any join link; related Teams chats, recaps, recordings and transcripts \
+belong to the Teams connector. Event-to-Teams linkage is not inferred when Search v2 omits a verified \
+identifier.
 - Scope is one object with independent keys: `scope.sent_items` (default true) includes Sent Items, \
 Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; \
 `scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is \
@@ -279,6 +286,32 @@ def build_server(context: AppContext) -> FastMCP:
             scope=scope,
             detail=detail,
         )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def search_calendar_events(
+        query: Annotated[
+            str, Field(max_length=512, description="Words to search in Exchange calendar events.")
+        ],
+        since: Annotated[datetime | None, Field(description="Inclusive lower event-start bound.")] = None,
+        until: Annotated[datetime | None, Field(description="Inclusive upper event-start bound.")] = None,
+        limit: Annotated[int, Field(ge=1, le=25, description="Events returned in this page.")] = 25,
+        cursor: str | None = None,
+    ) -> CalendarSearchResult:
+        """Search Exchange calendar events online. Follow cursor only when more events are useful;
+        recurring occurrence totals are intentionally not reported."""
+        return await (await services()).calendar.search_events(
+            query, since=_utc(since), until=_utc(until), limit=limit, cursor=cursor
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def get_calendar_event(
+        event_id: Annotated[
+            str, Field(max_length=4096, description="The event id returned by search_calendar_events.")
+        ],
+    ) -> CalendarEvent:
+        """Hydrate an event returned by search_calendar_events, with agenda
+        and attachment metadata."""
+        return await (await services()).calendar.get_event(event_id)
 
     @mcp.tool(annotations=READ_ONLY)
     async def get_conversation(

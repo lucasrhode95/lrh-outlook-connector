@@ -41,6 +41,7 @@ def test_status_reports_service_profile_names(client: TestClient) -> None:
     assert status["client_credential_cached"] == {
         "outlook.graph": True,
         "outlook.api": False,
+        "m365.search": False,
         "teams.spaces": False,
         "teams.csa": False,
         "teams.graph": False,

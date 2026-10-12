@@ -600,6 +600,13 @@ resource tokens for `api.spaces.skype.com` and `chatsvcagg.teams.microsoft.com`;
 session token. No transcript artifact URL was followed. Recap retrieval and transcript content
 search remain separate unresolved capabilities.
 
+**Connector implementation note (2026-10-12):** the Outlook connector now wires the standalone
+Event/Exchange request and OWS `GetItem` shape through the shared `m365.search` profile and calendar
+service. Search mapping, page continuation, recurring-total handling and event hydration have
+synthetic tests. No live call through the connector or fresh-account consent was performed for this
+change; the endpoint evidence above remains the standalone replay, and transcript/recap routes remain
+unresolved.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract
