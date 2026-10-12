@@ -14,6 +14,11 @@ from pathlib import Path
 APP_NAME = "lrh-outlook-connector"
 CLI_NAME = "outlook-connector"
 
+# Shared-cache profile whose Graph token carries calendar read scopes (Calendars.Read). The Outlook
+# Graph profile has none. Calendar reads still belong to Outlook; this only chooses the token.
+# Verified live 2026-10-12 (docs/outlook-api-research.md §3.18).
+CALENDAR_PROFILE = "teams.graph"
+
 
 def data_dir() -> Path:
     """Per-user application data directory. ``OUTLOOK_CONNECTOR_HOME`` overrides it (tests, portability).
