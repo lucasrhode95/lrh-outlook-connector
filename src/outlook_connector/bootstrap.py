@@ -14,14 +14,16 @@ from m365_auth import Account, AccountBoundTokenSource, AuthenticationRequired, 
 from outlook_connector import config
 from outlook_connector.remote.cloud_settings import CloudSettings
 from outlook_connector.remote.graph import Graph
+from outlook_connector.remote.graph_calendar import GraphCalendarView
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
-from outlook_connector.remote.ows_calendar import OwsCalendarItems
+from outlook_connector.remote.ows_calendar import OwsCalendarItems, OwsCalendarWindow
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.ows_rules import OwsRules
 from outlook_connector.remote.substrate_events import SubstrateEventSearch
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.calendar import Calendar
+from outlook_connector.service.calendar_listing import CalendarListing
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
@@ -45,6 +47,7 @@ class Services:
     mutations: Mutations  # likewise
     rules: Rules  # OWS reads/writes use the bound Outlook sign-in
     signatures: Signatures  # native Cloud Settings use the bound Outlook sign-in
+    calendar_listing: CalendarListing  # Graph first; Outlook Web only when a Graph read fails
 
 
 class AppContext:
@@ -101,6 +104,10 @@ class AppContext:
             ),
             OwsCalendarItems(ows),
         )
+        calendar_listing = CalendarListing(
+            graph_view=GraphCalendarView(Graph(self._transport, profile=config.CALENDAR_PROFILE)),
+            outlook_view=OwsCalendarWindow(ows),
+        )
         writer = OwsMailWriter(ows)
         signatures = Signatures(CloudSettings(self._transport, account_tokens), account)
         writes = Writes(mailbox, writer, account, signatures)
@@ -116,6 +123,7 @@ class AppContext:
             mutations,
             Rules(mailbox, OwsRules(ows), account, writes.check_account),
             signatures,
+            calendar_listing,
         )
 
     async def aclose(self) -> None:
