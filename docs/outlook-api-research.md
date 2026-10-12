@@ -652,6 +652,18 @@ pages while a cursor is available. If paging stops before coverage is complete, 
 results rather than no matches. The observed walk stopped after offset 25, so it makes no claim
 about whether later pages contain matches.
 
+**Event attachment metadata and search totals:** a separate read-only pass hydrated five Search v2
+event results; all five succeeded, and one event returned one attachment metadata entry. The mapped
+metadata fields were `id`, `name`, `content_type`, `size`, and `is_inline`; no values or event
+identifiers were retained. This confirms metadata is available through `get_calendar_event`, but the
+MCP surface has no event-attachment content download operation. The existing `download_attachment`
+tool requires a mail `message_id`, and its Graph route is message-scoped, so it does not download an
+event attachment. The calendar search result contract has no `total`; it exposes the event page,
+cursor, and coverage (`complete`, `offset`, `page_size`, `more_results_available`, and `notes`).
+Totals remain omitted because the standalone recurring-event replay showed Search v2 `Total` values
+that did not match the returned occurrence rows. Treat this as the current contract, not a universal
+claim about every account or Search v2 query.
+
 This closes the live connector-path check for the current account. Fresh-account consent remains
 unverified. The Graph calendar scope remains a separate unresolved alternative; transcript and
 recap search remain outside this Outlook workflow.

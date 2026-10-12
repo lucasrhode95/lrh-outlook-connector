@@ -61,7 +61,9 @@ number of returned occurrences. See [research §3.14](outlook-api-research.md#31
 calendar search and event hydration. A five-event page continued at offset 5; one hydrated result
 included agenda text, attendees, and a Teams join URL. Date-bounded searches also produced empty
 pages with `more_results_available=true`, so an empty page is not proof that the full search is
-empty. The event fields expose no Teams chat id. Details are in
+empty. The event fields expose no Teams chat id. A separate five-event hydration sample succeeded
+for all five; one event returned one attachment metadata record. Event attachment content download
+is not exposed by the MCP surface. Details are in
 [research §3.17](outlook-api-research.md#317-live-outlook-connector-mcp-calendar-check-2026-10-12).
 
 **Next:** establish and verify an event-to-Teams-chat reference through a supported Teams-side
