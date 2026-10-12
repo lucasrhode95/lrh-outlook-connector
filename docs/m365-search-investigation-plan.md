@@ -183,11 +183,14 @@ or not recommended. Do not implement a code change during this research phase.
   Outlook research §3.12.
 - **Required calendar/meeting sources, still open:** Graph `event` Search is a required path, but
   the tested Outlook token was denied because it lacks `Calendars.Read`; the documented search is
-  limited to the signed-in user's primary calendar. The configured Graph profile requests only
-  `Mail.Read`, and `auth graph --force` repeats that configured scope list. Delegated
-  `Calendars.Read` is user-consentable in Microsoft's permission table, but preauthorization for
-  this Microsoft first-party client/scope pair is untested. A future bounded check would add that
-  scope, force sign-in, inspect the granted scope claim, and repeat event search. Delegated
+  limited to the signed-in user's primary calendar. The shared `lrh-m365-auth`
+  `src/m365_auth/profiles.py` `outlook.graph` profile currently requests delegated `Mail.Read` and
+  `User.Read`; there is no per-profile
+  `auth graph --force` command. A future bounded check would add delegated `Calendars.Read` to the
+  shared profile, run `outlook-connector auth`, complete any requested device-code/MFA approval,
+  verify that the granted `scp` claim includes `Calendars.Read`, and repeat event search.
+  Preauthorization for this Microsoft first-party client/resource/scope pair remains untested, so
+  `AADSTS65002` is still possible. Delegated
   transcript access separately requires admin-consented `OnlineMeetingTranscript.Read.All` and
   the tenant transcript API setting. Teams recap `MeetingInsights` and transcript retrieval remain
   separate captured/source-mapped paths without standalone authentication proof.

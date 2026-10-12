@@ -507,15 +507,18 @@ sorting is unsupported. The Outlook Graph profile lacks `Calendars.Read`; the pr
 query returned HTTP 403. This is an account/profile blocker, not evidence that event search is
 unsupported. [Event Search documentation](https://learn.microsoft.com/en-us/graph/search-concept-events).
 
-**Fresh-login feasibility (2026-10-10):** The configured Graph profile requests only
-`https://graph.microsoft.com/Mail.Read`. `outlook-connector auth graph --force` starts a new
-device-code login with the same configured scope list, so forcing a login alone cannot request
-calendar access. Microsoft lists delegated `Calendars.Read` as not requiring admin consent, but
-this profile uses a Microsoft first-party client and its `Calendars.Read` preauthorization pair
-has not been tested. Microsoft documents `AADSTS65002` when a first-party client/resource pair
-lacks API-owner preauthorization. If pursued, add `Calendars.Read` to the profile, force sign-in,
-inspect the granted `scp` claim, then repeat the bounded event query; this remains a possible path,
-not an established grant. [Permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference?view=graph-rest-1.0),
+**Shared-auth permission follow-up (reviewed 2026-10-12):** The shared `lrh-m365-auth`
+`outlook.graph` profile in `src/m365_auth/profiles.py` currently requests delegated Graph
+`Mail.Read` and `User.Read`; there is no
+per-profile `auth graph --force` command. The public `outlook-connector auth` command bootstraps
+the configured profiles. The earlier event-search 403 establishes that the tested token lacked
+`Calendars.Read`, not that the permission cannot be requested. A bounded retry would add delegated
+`Calendars.Read` to the shared profile, run `outlook-connector auth`, complete any requested
+device-code/MFA approval, and inspect the resulting token's granted `scp` claim before repeating
+the event query. Preauthorization for this Microsoft first-party client/resource/scope combination
+remains untested; Microsoft documents `AADSTS65002` when a first-party client/resource pair lacks
+API-owner preauthorization. This is a candidate procedure, not an established grant.
+[Permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference?view=graph-rest-1.0),
 [AADSTS65002](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes).
 
 **Meeting recaps (CAPTURED + SOURCE):** Teams web returned `MeetingInsights` in recap responses,
