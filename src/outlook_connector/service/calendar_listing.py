@@ -217,7 +217,8 @@ def _contains(value: str | None) -> str | None:
 
 
 def _decode(cursor: str) -> dict[str, Any]:
-    """The listing state a cursor carries. A malformed or tampered cursor is an InvalidRequest."""
+    """The listing state a cursor carries. Cursors are not signed, so every value gets the same checks as
+    the entry point again: a malformed or tampered cursor is an InvalidRequest."""
     state = cursors.decode(cursor, CURSOR_KIND)
     since, until = _cursor_time(state.get("since")), _cursor_time(state.get("until"))
     contains, include_body, source = state.get("contains"), state.get("include_body"), state.get("source")
@@ -233,7 +234,14 @@ def _decode(cursor: str) -> dict[str, Any]:
     )
     if not (graph_ok and (contains is None or isinstance(contains, str)) or outlook_ok):
         raise InvalidRequest(INVALID_CURSOR)
-    return {**state, "since": since, "until": until, "contains": contains, "include_body": include_body}
+    start, end = _window(since, until)
+    return {
+        **state,
+        "since": start,
+        "until": end,
+        "contains": _contains(contains),
+        "include_body": include_body,
+    }
 
 
 def _cursor_time(value: object) -> datetime | None:
@@ -257,9 +265,10 @@ def _fold(value: str) -> str:
 
 
 def _matches(event: CalendarEvent, needle: str | None) -> bool:
+    """Each field is matched on its own, so a phrase cannot span the subject and description boundary."""
     if needle is None:
         return True
-    return needle in _fold("\n".join(part for part in (event.subject, event.body_text) if part))
+    return any(needle in _fold(part) for part in (event.subject, event.body_text) if part)
 
 
 def _listed(events: list[CalendarEvent], *, include_body: bool) -> list[CalendarEvent]:

@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from outlook_connector.domain.errors import InvalidRequest, Upstream
 from outlook_connector.domain.models import CalendarEvent, Recipient
@@ -22,6 +23,7 @@ from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
 
 VIEW_PATH = "/me/calendarView"
+MAX_PAGE_SIZE = 100  # the largest page this module asks for; a continuation link may not ask for more
 VIEW_FIELDS = (
     "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
     "responseStatus,type,seriesMasterId,onlineMeeting"
@@ -61,9 +63,9 @@ class GraphCalendarView:
         page: str | None,
         include_body: bool,
     ) -> CalendarViewPage:
-        """Entry point: a continuation must be this view's own link, since a cursor could carry any link."""
-        if page is not None and not page.startswith(f"{GRAPH_ROOT}{VIEW_PATH}?"):
-            raise InvalidRequest("This cursor does not belong to calendar events.")
+        """Entry point: a continuation link must be this view for this window; cursors can carry any link."""
+        if page is not None and not _continues_window(page, since, until):
+            raise InvalidRequest("This cursor does not belong to this calendar window.")
         prefer = (PREFER_UTC, PREFER_TEXT_BODY)
         with operation("listing calendar events"):
             if page is None:
@@ -83,6 +85,29 @@ class GraphCalendarView:
 
 def _iso(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _continues_window(link: str, since: datetime, until: datetime) -> bool:
+    """Whether a next link is this view, for this window, with a page size this module would ask for.
+
+    Cursors are not signed, so the link is checked against the window the caller passes in.
+    """
+    parts = urlsplit(link)
+    if f"{parts.scheme}://{parts.netloc}{parts.path}" != f"{GRAPH_ROOT}{VIEW_PATH}":
+        return False
+    query = parse_qs(parts.query)
+    try:
+        starts = _query_time(query, "startDateTime")
+        ends = _query_time(query, "endDateTime")
+        top = int(query.get("$top", [""])[0])
+    except ValueError:
+        return False
+    return starts == since and ends == until and 1 <= top <= MAX_PAGE_SIZE
+
+
+def _query_time(query: dict[str, list[str]], key: str) -> datetime:
+    """A time in a link's query; a missing or unreadable one raises ValueError."""
+    return datetime.fromisoformat(query.get(key, [""])[0].replace("Z", "+00:00"))
 
 
 def _dict(value: Any) -> dict[str, Any]:

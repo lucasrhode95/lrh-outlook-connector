@@ -336,3 +336,60 @@ async def test_malformed_and_tampered_calendar_cursors_are_refused() -> None:
     for cursor in ("not-a-cursor", unknown_source, outlook_with_filter, graph_without_link):
         with pytest.raises(InvalidRequest):
             await listing.list_events(since=SINCE, until=UNTIL, cursor=cursor)
+
+
+async def test_contains_matches_each_field_on_its_own() -> None:
+    split = _event("split", 9, subject="Project", body="Alpha")
+    listing = CalendarListing(
+        graph_view=GraphStub([CalendarViewPage(events=[split])]), outlook_view=OutlookStub()
+    )
+
+    across = await listing.list_events(since=SINCE, until=UNTIL, contains="project alpha")
+    assert across.events == []  # neither field contains the phrase, so the join must not create one
+
+    whole = _event("whole", 9, subject="Project alpha", body="Other text")
+    listing = CalendarListing(
+        graph_view=GraphStub([CalendarViewPage(events=[whole])]), outlook_view=OutlookStub()
+    )
+
+    within = await listing.list_events(since=SINCE, until=UNTIL, contains="project alpha")
+    assert [event.id for event in within.events] == ["whole"]
+
+
+async def test_a_cursor_cannot_widen_the_window_or_the_filter() -> None:
+    listing = CalendarListing(graph_view=GraphStub([]), outlook_view=OutlookStub())
+    too_wide = cursors.encode(
+        CURSOR_KIND,
+        source="outlook",
+        offset=0,
+        since=datetime(2025, 1, 1, tzinfo=UTC).isoformat(),
+        until=UNTIL.isoformat(),
+        contains=None,
+        include_body=False,
+    )
+    long_filter = cursors.encode(
+        CURSOR_KIND,
+        source="graph",
+        link=LINK_2,
+        since=SINCE.isoformat(),
+        until=UNTIL.isoformat(),
+        contains="x" * 201,
+        include_body=False,
+    )
+    blank_filter = cursors.encode(
+        CURSOR_KIND,
+        source="graph",
+        link=LINK_2,
+        since=SINCE.isoformat(),
+        until=UNTIL.isoformat(),
+        contains="   ",
+        include_body=False,
+    )
+
+    for cursor, message in (
+        (too_wide, "at most 366 days"),
+        (long_filter, "at most 200 characters"),
+        (blank_filter, "must not be empty"),
+    ):
+        with pytest.raises(InvalidRequest, match=message):
+            await listing.list_events(since=SINCE, until=UNTIL, cursor=cursor)

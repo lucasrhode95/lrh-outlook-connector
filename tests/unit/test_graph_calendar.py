@@ -16,7 +16,10 @@ from tests.fakes.graph_fake import StaticTokens
 
 SINCE = datetime(2026, 10, 12, 3, tzinfo=UTC)
 UNTIL = datetime(2026, 10, 19, 3, tzinfo=UTC)
-NEXT_LINK = "https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=2026-10-12T03%3A00%3A00Z&$skiptoken=synthetic"
+NEXT_LINK = (
+    "https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=2026-10-12T03%3A00%3A00Z"
+    "&endDateTime=2026-10-19T03%3A00%3A00Z&$top=10&$skiptoken=synthetic"
+)
 
 
 class RecordingTokens(StaticTokens):
@@ -190,6 +193,27 @@ async def test_a_continuation_link_must_be_this_calendar_view() -> None:
             page="https://graph.microsoft.com/v1.0/me/messages?$skiptoken=synthetic",
             include_body=False,
         )
+
+
+async def test_a_continuation_link_must_be_for_this_window_and_a_bounded_page() -> None:
+    reads: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        reads.append(request)
+        return _json_page([])
+
+    view, _ = _view(handler)
+    base = "https://graph.microsoft.com/v1.0/me/calendarView?"
+    other_window = (
+        base + "startDateTime=2026-01-01T00%3A00%3A00Z&endDateTime=2026-10-19T03%3A00%3A00Z&$top=10"
+    )
+    too_big = base + "startDateTime=2026-10-12T03%3A00%3A00Z&endDateTime=2026-10-19T03%3A00%3A00Z&$top=1000"
+    unbounded = base + "startDateTime=2026-10-12T03%3A00%3A00Z&endDateTime=2026-10-19T03%3A00%3A00Z"
+
+    for link in (other_window, too_big, unbounded):
+        with pytest.raises(InvalidRequest):
+            await view.list_events(since=SINCE, until=UNTIL, page_size=5, page=link, include_body=False)
+    assert reads == []  # a refused link is never sent to Graph
 
 
 async def test_a_time_outside_utc_is_refused_rather_than_guessed() -> None:
