@@ -715,6 +715,34 @@ calendar-capable client, followed by event hydration. The shared auth package sh
 purpose-named calendar profile using that client/resource pair; Outlook need not depend on
 Teams connector code. Fresh-account grants and other-calendar access remain unverified.
 
+### 3.19 `list_calendar_events` live check (2026-10-12)
+
+**LIVE, read-only, counts only.** The Graph-first calendar listing was run against the signed-in account for
+one week (2026-10-12 03:00Z to 2026-10-19 03:00Z, a local UTC−3 week). Results:
+
+- Graph calendar view (`teams.graph` profile): complete in one call with 16 events, in time order, with
+  UTC-aware times. Item types were 11 occurrences, 4 single events and 1 exception, so recurrence expansion is
+  visible. 15 events carried a Teams join link. Attendee lists were longer than the 15-name cap for 11 events;
+  each reported its total.
+- A cursor walk at `limit=3` returned the same 16 identifiers as one call.
+- A forced fallback to OWS `GetCalendarView` for the same window returned 16 events, complete. After the
+  standard id mapping, the Graph immutable identifiers and the OWS identifiers agree exactly, with no event on
+  only one side. The fallback carries no descriptions, as designed.
+- `include_body=true` returned a description for all 16 events; some were cut at 4,000 characters
+  (`body_truncated`).
+- `contains` with a common word matched 15 of 16 events, in subjects and descriptions combined.
+- `get_calendar_event` with a Graph-listed identifier, converted to the Outlook Web form, returned the event
+  with its start time.
+
+Interpretation: one Graph request now answers the week that earlier needed up to 40 Search v2 pages, and the
+OWS fallback returns the same event set. Listed identifiers hydrate through the existing OWS path, so no second
+identifier scheme is needed.
+
+Not proven: consent for the calendar scopes on a fresh account; shared or delegated calendars; time zones other
+than UTC (the request asks for UTC and refuses other zones); and the MCP tool through a restarted server, since
+the running server still held the previous tool list when this check ran. No subjects, attendees, identifiers,
+descriptions or tokens are retained here.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract

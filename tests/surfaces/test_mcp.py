@@ -17,7 +17,7 @@ from tests.fakes.msal_fakes import jwt
 
 READ_TOOLS = {
     "auth_status", "list_folders", "list_messages", "search_messages", "search_calendar_events",
-    "get_calendar_event", "get_conversation",
+    "list_calendar_events", "get_calendar_event", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
     "list_rules", "list_signatures", "get_signature",
 }  # fmt: skip

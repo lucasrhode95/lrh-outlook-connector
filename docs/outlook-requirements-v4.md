@@ -32,6 +32,11 @@ virtual meeting hosted on another platform does not become a Teams meeting. Gene
 file search belongs to the SharePoint connector, while email-attachment context remains here. Calendar
 behavior and remaining limits are tracked in [roadmap X10](outlook-roadmap.md#x10--meetingcalendar-search).
 
+**Calendar windows (2026-10-12):** an agent can list the events that overlap a date window in time order, with
+recurring meetings expanded and times in UTC, and find literal text in their subjects or descriptions within that
+window. Graph's calendar view answers first; Outlook Web's calendar view answers only when that Graph read fails,
+and then descriptions are unavailable. Search by words across the calendar's history stays a separate Search v2 task.
+
 ## 2. Use cases
 
 These are the use cases the design must serve. "Phase" refers to §12.
@@ -48,6 +53,7 @@ These are the use cases the design must serve. "Phase" refers to §12.
 | A6 | Agent marks messages read/unread or flags them as part of triage. | `set_read_state`, `set_flag` | Mutations |
 | A7 | Agent sends an email on explicit request. | `send_draft` | Send |
 | A8 | "Find the Exchange event for a meeting, inspect its agenda and invitees, then decide whether to look up its related Teams resources." | `search_calendar_events` → `get_calendar_event`; then Teams MCP if a verified link is available | Calendar |
+| A9 | "What do I have between these dates, and which of those meetings mention this topic in their description?" | `list_calendar_events` (`since`, `until`, `contains`, `include_body`) | Calendar |
 
 ### Manual (local UI)
 
@@ -76,6 +82,7 @@ SharePoint. Its global profile catalog includes these Outlook client/resource pa
 |---|---|---|---|
 | Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `outlook.graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Live profile/photo read succeeded through shared silent auth; fresh-account consent not tested |
 | Calendar event discovery and hydration | `m365.search` · One Outlook Web; `outlook.api` · One Outlook Web | Search v2 `Event` / `Exchange`; OWS `GetItem` | Standalone search and OWS hydration contracts were replayed; connector calls and fresh-account consent not tested |
+| Calendar windows | `teams.graph` (shared cache; carries `Calendars.Read`) · One Teams client; `outlook.api` · One Outlook Web | Graph `/me/calendarView`; OWS `GetCalendarView` (fallback) | Live 2026-10-12: Graph and the fallback returned the same 16 events for a week; fresh-account consent not tested (research §3.19) |
 | Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook.api` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
 | Inbox rules: list, read and manage supported rules | `outlook.api` · One Outlook Web | OWS `GetInboxRule` and rule actions | Read and change routes proven (research §4.4) |
 | Native roaming signatures: list/read settings and contents; create, update, delete and set defaults | `outlook.api` · One Outlook Web | Outlook Cloud Settings | Read and change routes proven (research §§4.7–4.8) |

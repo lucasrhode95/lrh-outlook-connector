@@ -24,6 +24,7 @@ from outlook_connector.domain.models import (
     Attachment,
     BodyKind,
     CalendarEvent,
+    CalendarListResult,
     CalendarSearchResult,
     CombineMode,
     Conversation,
@@ -59,8 +60,15 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
-- Calendar: search_calendar_events discovers Exchange events, not Teams recaps or transcripts. \
-Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
+- Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
+order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
+between these dates", and for text in subjects or descriptions within those dates (contains; \
+include_body returns the description). Graph answers first; Outlook Web answers only when the Graph \
+read fails, and then it has no descriptions, so contains and include_body fail. coverage.source says \
+which service answered. Follow the cursor while coverage.complete is false.
+- Calendar: search_calendar_events discovers Exchange events by words across the calendar, not Teams \
+recaps or transcripts; its date bounds apply after each page, so use list_calendar_events for a date \
+range. Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
 owns the event, schedule and any join link; related Teams chats, recaps, recordings and transcripts \
 belong to the Teams connector. Event-to-Teams linkage is not inferred when Search v2 omits a verified \
 identifier.
@@ -301,9 +309,44 @@ def build_server(context: AppContext) -> FastMCP:
         cursor: str | None = None,
     ) -> CalendarSearchResult:
         """Search Exchange calendar events online. Follow cursor only when more events are useful;
-        recurring occurrence totals are intentionally not reported."""
+        recurring occurrence totals are intentionally not reported. For a date range, use
+        list_calendar_events."""
         return await (await services()).calendar.search_events(
             query, since=_utc(since), until=_utc(until), limit=limit, cursor=cursor
+        )
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def list_calendar_events(
+        since: Annotated[datetime, Field(description="Window start (ISO 8601); a naive time is UTC.")],
+        until: Annotated[
+            datetime, Field(description="Window end (ISO 8601), after since; at most 366 days after it.")
+        ],
+        contains: Annotated[
+            str | None,
+            Field(
+                description="Literal text to find in each event's subject or description, case- and "
+                "accent-insensitive."
+            ),
+        ] = None,
+        include_body: Annotated[
+            bool, Field(description="Return each event's description, cut to 4,000 characters.")
+        ] = False,
+        limit: Annotated[
+            int, Field(description="Matching events to collect before stopping: 1 to 200.")
+        ] = 50,
+        cursor: str | None = None,
+    ) -> CalendarListResult:
+        """Calendar events overlapping a window, in time order, with recurring meetings expanded per
+        occurrence. Graph answers first; Outlook Web answers only if Graph fails, and then contains and
+        include_body fail, since it has no descriptions. Times are UTC. With a cursor, the window and
+        filters come from the cursor."""
+        return await (await services()).calendar_listing.list_events(
+            since=since,
+            until=until,
+            contains=contains,
+            include_body=include_body,
+            limit=limit,
+            cursor=cursor,
         )
 
     @mcp.tool(annotations=READ_ONLY)
