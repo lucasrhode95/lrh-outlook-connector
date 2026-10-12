@@ -8,46 +8,9 @@ Snapshot **2026-10-12**.
 - Product requirements: [Requirements v4](outlook-requirements-v4.md)
 - Build/module map: [architecture §4 Repository layout](architecture.md#4-repository-layout)
 - API evidence: [API research](outlook-api-research.md)
-- Search investigation and checkpoint: [Microsoft 365 search plan](m365-search-investigation-plan.md)
+- Cross-product search routes and workflows: [Microsoft 365 search findings](m365-search-findings.md)
 
 # Later
-
-## X11 — SharePoint file search and download
-
-**Status:** Implemented in the separate read-only `lrh-sharepoint-connector`. Outlook retains
-email-attachment handling and the historical file-access evidence recorded here. The SharePoint
-connector's own roadmap records its shipped search, selected metadata hydration, bounded download,
-and deployment-specific live checks. General files shared as links remain discoverable through
-SharePoint; email attachments stay in Outlook and Teams message attachments stay in Teams.
-
-**Evidence:** the existing Graph sign-in can search for and begin downloading a known SharePoint
-file; unrestricted file search and known-person search also worked. Limits and unproven cases
-are recorded once in [research §3.7](outlook-api-research.md#37-file-and-cross-category-search-feasibility-2026-10-07).
-
-**Search API documentation (2026-10-10):** Graph documents `driveItem` search over content the
-signed-in user can read. Content-only matching and exhaustive scope coverage still need known-hit
-probes; see [research §3.8](outlook-api-research.md#38-microsoft-365-search-api-coverage-review-2026-10-10).
-
-**Capture/source review (2026-10-10):** the personal SharePoint web client submitted a separate
-browser search request with `EntityType=File`; suggestions use another route. This does not change
-the Graph implementation decision or establish a standalone private API. Initial route evidence
-and the next bounded questions are in [research §3.9](outlook-api-research.md#39-microsoft-365-search-capture-and-source-route-map-2026-10-10).
-
-**Known-hit validation (2026-10-10):** direct Graph `/search/query` returned two hits for each
-controlled subject-only and body-only mail term; the connector's `$search` grouped each into one
-conversation at a one-result limit, with incomplete coverage. After the user confirmed OneDrive
-upload, bounded Graph `driveItem` searches returned one hit each for filename-only and content-only
-terms. This establishes two narrow known hits for the tested account and location; broad recall
-and the effective permission basis remain unverified. Details are in
-[research §3.12](outlook-api-research.md#312-controlled-microsoft-search-known-hit-checks-2026-10-10).
-
-**Scope boundary:** the connector uses the returned drive/item reference for hydration and download;
-it does not fetch arbitrary caller-supplied URLs. Its access grants and known-hit results are
-deployment-specific, and broad sharing-link resolution remains a separate design question.
-
-Keep each category's coverage and permissions explicit if a future broad discovery surface
-orchestrates these providers. Graph calendar authentication remains a separate limitation (X10);
-the standalone OWA calendar-search path below is proven.
 
 ## X10 — Meeting/calendar search
 
@@ -79,7 +42,8 @@ signed-in user's primary calendar, with a 25-result page limit. This does not re
 **Capture/source review (2026-10-10):** Teams recap returns `MeetingInsights`, while transcript
 routes retrieve separate artifacts. Neither observation proves global transcript-text search or
 resolves the calendar-scope blocker. See [research §3.9](outlook-api-research.md#39-microsoft-365-search-capture-and-source-route-map-2026-10-10)
-and the [Microsoft 365 search plan](m365-search-investigation-plan.md).
+and the [cross-product search findings](m365-search-findings.md). Transcript discovery and retrieval
+are Teams-owned work and remain in the [Teams roadmap](../../lrh-teams-connector/docs/teams-connector-roadmap.md).
 
 **Live Recaps UI check (2026-10-10):** both user-provided known recaps opened in the Teams Meeting
 Recaps app with a loaded Transcript tab; in-page transcript search returned matches in one. The
@@ -99,20 +63,15 @@ handoff. Search v2 totals remain intentionally omitted, event attachment downloa
 and Graph `Calendars.Read` remains a separate alternative to reassess rather than an automatic
 fallback. Transcript and recap discovery remain in Teams and are not completed by calendar search.
 
-## Microsoft 365 search follow-up (2026-10-10)
+## Outlook mail-search comparison (2026-10-12)
 
-- The two known transcript-bearing Teams chat histories each include one embedded transcript URI
-  reference with sanitized route shape `/drives/{drive}/items/{item}/{segment}/{segment}/media/transcripts/{transcript}/content`.
-  This does not establish an HTTP request, standalone authorization, or transcript retrieval. Next:
-  inspect a sanitized DevTools/Resource Saver capture from the loaded transcript viewer and map the
-  two extra path segments.
-- Secondary investigation work: review existing search/list/get paths for redundant calls,
-  over-fetch, paging/retry fragility, and latency opportunities. Keep code simplification distinct
-  from Graph migration and measure candidates before recommending implementation.
-# Microsoft 365 search investigation — 2026-10-10
-
-The cross-connector search investigation is in progress. Dated evidence, measurements, design requirements, open questions, and next steps are recorded in [the investigation log](m365-search-investigation-log-2026-10-10.md) and the [product-separated endpoint and workflow ledger](m365-search-findings-2026-10-10.md). The ledger separates Outlook, Teams, SharePoint/OneDrive, and Microsoft Graph, and links shared mechanisms. No product code changed in this research update.
-
+Three one-hit `search_messages` calls took 3.409 seconds cold, then 0.760 and 0.784 seconds warm.
+They returned one conversation and one message each and were incomplete at the one-hit limit; these
+end-to-end times include connector/tool overhead and do not isolate Graph latency. An equivalent
+same-query comparison with Graph Search API has not been measured, so the results do not establish a
+faster replacement or justify changing the current Graph mail `$search` route. If a route change is
+considered later, compare identical controlled terms, result limits, hydration, request counts, and
+latency. Full measurements and their limits are in [API research §3.16](outlook-api-research.md#316-outlook-mail-search-timing-and-route-comparison-2026-10-10).
 ## Small reliability follow-ups — completed 2026-10-11
 
 Both synthetic, offline reproductions now have bounded fixes and regression coverage; no live

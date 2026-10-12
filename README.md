@@ -168,8 +168,8 @@ transcripts, recap, and meeting notes. An agent can find the event in Outlook, t
 related meeting resources from Teams. A join link for another meeting platform does not make the
 event a Teams meeting.
 
-The planned `lrh-sharepoint-connector` owns general OneDrive and SharePoint file search and selected
-file retrieval. A file can also appear as an email attachment or a Teams message link: its storage
+The separate read-only `lrh-sharepoint-connector` owns general OneDrive and SharePoint file search
+and selected file retrieval. A file can also appear as an email attachment or a Teams message link: its storage
 location does not transfer ownership of the email or message relationship to SharePoint.
 
 ## Development

@@ -4,9 +4,10 @@
 2026-10-04 (inbox-rule replay, H7 live check, read-only probes) · 2026-10-06 (version-bound draft sends) ·
 2026-10-07 (connector HTML/replies, inbox-rule blockers, bulk/partial failures, signature capture analysis) ·
 2026-10-10 (W8 recipient-side rendering and image save; Microsoft 365 Search documentation, capture/source and Outlook Web source audit) ·
-2026-10-11 (Graph attachment and file search endpoint comparison; shared-auth profile/photo check)
+2026-10-11 (Graph attachment and file search endpoint comparison; shared-auth profile/photo check) ·
+2026-10-12 (calendar adapter implementation record and search measurement consolidation)
 
-**Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md) · **Search investigation:** [plan](m365-search-investigation-plan.md)
+**Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md) · **Cross-product search routes:** [findings](m365-search-findings.md)
 
 This records tenant-specific access, live observations, unresolved questions and private API
 contracts for the tested environment's single-user connector. Microsoft's official documentation is the
@@ -238,7 +239,8 @@ retained in Git.
 `driveItem` search on 2026-10-01 (`lrh-teams-connector/docs/teams-connector-roadmap.md`, G1).
 This is evidence from that repo, not a repeated Teams sign-in test. Its heterogeneous private
 Substrate Search v2 discovery remains pending; Graph results do not validate that contract.
-Product scope and implementation decisions belong in roadmap X11.
+Product scope and implementation decisions for general OneDrive/SharePoint files belong in the
+[SharePoint connector roadmap](../../lrh-sharepoint-connector/docs/roadmap.md).
 
 ### 3.8 Microsoft 365 Search API coverage review (2026-10-10)
 
@@ -261,7 +263,7 @@ and [organizer transcript listing](https://learn.microsoft.com/en-us/graph/api/o
 
 **Shared bounds.** Microsoft Search requests run in the signed-in user's delegated context and enforce source access controls. The documented default page size is 25; message and event requests cannot exceed 25 per page, while SharePoint/OneDrive allow up to 1,000. Use `moreResultsAvailable` for continuation and never present message, event or Teams page totals as complete result totals.
 
-**Next bounded investigation.** The initial supplied-capture and targeted-source reviews are recorded in §§3.9 and 3.11. Continue by comparing a known-title match, a controlled content-only match and a negative control for each usable Graph source. Keep each query to 25 results and at most three pages. For mail and Teams, retain the distinction between a parent-message match and an identified matching attachment. For transcripts, separately test meeting discovery, content retrieval/paging and keyword discovery. Do not treat an empty result as proof of unsupported search.
+**Status after bounded checks (2026-10-12).** Later sections record synthetic mail known hits (§3.12), OneDrive/SharePoint file search, selected-item hydration and paging (§3.12.1), the browser route map (§3.9), and standalone calendar/Teams-message replay (§3.14). The tested Graph `chatMessage` request was denied, while the Teams connector now uses a separate captured Search v2 route. Remaining questions include attachment-only match attribution, broad recall and minimum permissions, a same-query Outlook mail-route timing comparison, and transcript/recap discovery or full-text search. A prior mail-route timing attempt stopped before sending HTTP because the research probe lacked a configured client/scope pair; this was a probe-configuration failure, not an endpoint denial. Product-owned follow-ups are in the [Outlook](outlook-roadmap.md), [Teams](../../lrh-teams-connector/docs/teams-connector-roadmap.md), and [SharePoint](../../lrh-sharepoint-connector/docs/roadmap.md) roadmaps; cross-product route relationships are in [Microsoft 365 search findings](m365-search-findings.md).
 
 ### 3.15 Attachment and file discovery endpoint confirmation (2026-10-11)
 
@@ -276,7 +278,7 @@ and [organizer transcript listing](https://learn.microsoft.com/en-us/graph/api/o
 
 **Other file route, narrower scope.** Microsoft also documents DriveItem search routes such as `GET /me/drive/root/search(q='...')` for a drive hierarchy and `GET /me/drive/search(q='...')` to search more broadly for items accessible to the user. These are separate GET routes from Microsoft Search `POST /search/query`; they are useful when an explicitly drive-scoped search is desired, but were not benchmarked here.
 
-**Implementation readiness.** No additional endpoint discovery is needed to begin a read-only `driveItem` search adapter. Before calling its coverage complete, verify: (1) the exact delegated read scopes/consent used by the app-owned token—the prior scope inventory included file/site read-write grants, but the live token claims were not paired with the search probes; (2) paging and `moreResultsAvailable` with more than one page; (3) that a returned `resource`'s drive/item identifiers and `webUrl` can hydrate metadata and read one selected file without a path lookup; and (4) separate known filename/content hits plus a negative control on a personal OneDrive item and a company SharePoint file. The prior SharePoint folder/site-filter zero was not a known-hit test. Microsoft documents up to 1,000 file results per page but recommends a smaller page for latency; no indexing-time guarantee was found. Keep file download opt-in and user-selected rather than fetching a corpus during search.
+**Implementation and validation status (2026-10-12).** The separate read-only SharePoint connector now implements `driveItem` search, explicit offset paging, returned drive/item identity mapping, selected metadata hydration, and bounded user-selected downloads. Live checks covered filename-only and content-only hits in personal OneDrive and a shared SharePoint library, selected-item metadata/download, a negative marker, and two distinct result pages. This does not establish exhaustive recall or minimum permissions: the account's existing file/site grants exceed the connector's requested Graph scopes. The connector's deployment-specific results and remaining limits are in the [SharePoint roadmap](../../lrh-sharepoint-connector/docs/roadmap.md). Microsoft documents up to 1,000 file results per page and recommends smaller pages for latency; no indexing-time guarantee was found. Keep downloads user-selected rather than fetching a corpus during search.
 
 **Primary references:** [Outlook message Search API](https://learn.microsoft.com/en-us/graph/search-concept-messages), [Teams message Search API](https://learn.microsoft.com/en-us/graph/search-concept-chat-messages), [OneDrive and SharePoint Search API](https://learn.microsoft.com/en-us/graph/search-concept-files), [Search API permissions and paging](https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview?view=graph-rest-1.0), [`$search` mail properties](https://learn.microsoft.com/en-us/graph/search-query-parameter), and [drive-scoped DriveItem search](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
 
@@ -395,8 +397,8 @@ describe continuation as exercised. Some successful responses contained only `Ap
 route and usable app-owned authentication exist. The captured browser routes are private and
 service-specific; keep them as investigation evidence rather than adopting them as product APIs.
 The Teams-specific route and field notes are maintained in
-`lrh-teams-connector/docs/teams-api-research.md` and its roadmap. The investigation checklist is
-in [the search plan](m365-search-investigation-plan.md).
+`lrh-teams-connector/docs/teams-api-research.md` and its roadmap. Cross-product endpoint and
+workflow relationships are summarized in [Microsoft 365 search findings](m365-search-findings.md).
 
 ### 3.10 Bounded Graph message-search probe (2026-10-10)
 
@@ -611,6 +613,21 @@ service. Search mapping, page continuation, recurring-total handling and event h
 synthetic tests. No live call through the connector or fresh-account consent was performed for this
 change; the endpoint evidence above remains the standalone replay, and transcript/recap routes remain
 unresolved.
+
+### 3.16 Outlook mail-search timing and route comparison (2026-10-10)
+
+Three sequential one-hit calls to the connector's `search_messages` operation returned one
+conversation and one message each. End-to-end times were 3,409 ms, 760 ms, and 784 ms. Every call
+was incomplete at the one-hit limit. These timings include connector/tool round trips and warm-up;
+they do not isolate Graph latency or the conversation-count batch.
+
+The timed calls used the existing Graph `GET /v1.0/me/messages?$search=...` route. Earlier
+controlled subject/body checks showed that Graph Search API `POST /v1.0/search/query` can return
+mail hits, but the same terms, limits, hydration, and elapsed-time boundaries were not compared.
+There is no evidence from these measurements to replace the connector's current route or remove its
+conversation-size lookup and immutable-ID translation, which support response and identity
+contracts. The [cross-product findings](m365-search-findings.md#measurement-and-provenance) summarize
+how these results compare with Teams and file-search measurements.
 
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
