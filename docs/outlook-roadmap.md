@@ -3,7 +3,7 @@
 Outstanding decisions, implementation, fixes and validation only. Completed behavior belongs in
 the requirements and architecture; completed live evidence belongs in the research record.
 
-Snapshot **2026-10-11**.
+Snapshot **2026-10-12**.
 
 - Product requirements: [Requirements v4](outlook-requirements-v4.md)
 - Build/module map: [architecture §4 Repository layout](architecture.md#4-repository-layout)
@@ -14,9 +14,11 @@ Snapshot **2026-10-11**.
 
 ## X11 — SharePoint file search and download
 
-**Status:** Read-only feasibility proven; no product tool implemented. Planned implementation owner:
-the separate `lrh-sharepoint-connector`. Outlook retains email-attachment handling and the historical
-file-access evidence recorded here.
+**Status:** Implemented in the separate read-only `lrh-sharepoint-connector`. Outlook retains
+email-attachment handling and the historical file-access evidence recorded here. The SharePoint
+connector's own roadmap records its shipped search, selected metadata hydration, bounded download,
+and deployment-specific live checks. General files shared as links remain discoverable through
+SharePoint; email attachments stay in Outlook and Teams message attachments stay in Teams.
 
 **Evidence:** the existing Graph sign-in can search for and begin downloading a known SharePoint
 file; unrestricted file search and known-person search also worked. Limits and unproven cases
@@ -39,12 +41,9 @@ terms. This establishes two narrow known hits for the tested account and locatio
 and the effective permission basis remain unverified. Details are in
 [research §3.12](outlook-api-research.md#312-controlled-microsoft-search-known-hit-checks-2026-10-10).
 
-**Next in the SharePoint connector:** a separate Graph files adapter and service port, exposing bounded file search with
-continuation and read-only download by URL or a returned file reference. Validate input once,
-preserve account ownership, bound downloads, use exclusive output creation and handle
-preauthenticated redirects without leaking credentials. Keep mail
-attachment downloads distinct. Broader sharing-link support and a capability reusable by the
-Teams connector remain design decisions; the Teams sign-in was not repeated in these probes.
+**Scope boundary:** the connector uses the returned drive/item reference for hydration and download;
+it does not fetch arbitrary caller-supplied URLs. Its access grants and known-hit results are
+deployment-specific, and broad sharing-link resolution remains a separate design question.
 
 Keep each category's coverage and permissions explicit if a future broad discovery surface
 orchestrates these providers. Graph calendar authentication remains a separate limitation (X10);
@@ -52,8 +51,11 @@ the standalone OWA calendar-search path below is proven.
 
 ## X10 — Meeting/calendar search
 
-**Status:** Required calendar capability, not implemented. Standalone OWA Search v2 discovery and
-OWS event hydration succeeded; Graph calendar access remains limited by the current profile.
+**Status:** Partial — bounded Search v2 event discovery and OWS event hydration are implemented in
+the Outlook connector (2026-10-12). The adapter has synthetic regression coverage; a live call
+through the connector and fresh-account `m365.search` consent have not been verified. Standalone
+OWA Search v2 discovery and OWS event hydration succeeded; the current Graph profile still lacks
+the tested `Calendars.*` permission.
 
 **Goal:** search Exchange calendar events (subject, time, organizer, attendees, agenda and Teams join link) and hand a Teams meeting's chat id to `lrh-teams-connector` when useful.
 
@@ -91,9 +93,11 @@ occurrences; OWS `GetItem` retrieved a selected event's agenda, attendees, and a
 reported `HasAttachments=false` for that event, and recurring-result totals did not describe the
 number of returned occurrences. See [research §3.14](outlook-api-research.md#314-owa-search-v2-calendar-and-teams-message-replay-2026-10-10).
 
-**Next:** implement the proven Search v2/OWS path with shared auth, conservative counts, occurrence
-identity, explicit hydration, and a verified event-to-Teams reference. Reassess a Graph
-`Calendars.Read` client/scope pair as a separate alternative.
+**Next:** verify the wired path with the connector's shared-auth profile when safe authorization is
+available; establish a verified event-to-Teams reference before offering automatic cross-product
+handoff. Search v2 totals remain intentionally omitted, event attachment download is not exposed,
+and Graph `Calendars.Read` remains a separate alternative to reassess rather than an automatic
+fallback. Transcript and recap discovery remain in Teams and are not completed by calendar search.
 
 ## Microsoft 365 search follow-up (2026-10-10)
 
@@ -109,16 +113,14 @@ identity, explicit hydration, and a verified event-to-Teams reference. Reassess 
 
 The cross-connector search investigation is in progress. Dated evidence, measurements, design requirements, open questions, and next steps are recorded in [the investigation log](m365-search-investigation-log-2026-10-10.md) and the [product-separated endpoint and workflow ledger](m365-search-findings-2026-10-10.md). The ledger separates Outlook, Teams, SharePoint/OneDrive, and Microsoft Graph, and links shared mechanisms. No product code changed in this research update.
 
-## Small reliability follow-ups — 2026-10-11
+## Small reliability follow-ups — completed 2026-10-11
 
-Synthetic, offline reproductions established two bounded fixes; no live mailbox operation was made:
+Both synthetic, offline reproductions now have bounded fixes and regression coverage; no live
+mailbox operation was made:
 
-- `remote/graph.py` collection follows repeated continuation URLs. A repeated empty page has no
-  item-count progress, so `max_items` does not terminate it. Repeated empty pages were requested
-  until the synthetic harness stopped on the fourth call. Reject repeated links rather
-  than collecting duplicates or looping indefinitely.
+- `remote/graph.py` collection rejects repeated continuation URLs, including a cycle that returns
+  to a previously visited page. A repeated empty page has no item-count progress, so `max_items`
+  does not terminate it. Regression coverage is in `tests/unit/test_graph_collection.py`.
 - `service/localfiles.py` can raise `FileNotFoundError` if another process removes an old output
-  between `is_file()` and `stat()`. A synthetic deletion at that boundary reproduced the failure.
-  Ignore disappearance during cleanup while preserving other filesystem errors.
-
-Both changes need focused synthetic regression coverage and the normal checks before a code PR.
+  between `is_file()` and `stat()`. Cleanup now tolerates disappearance while preserving other
+  filesystem errors; coverage is in `tests/unit/test_localfiles.py`.

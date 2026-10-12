@@ -16,9 +16,12 @@ from outlook_connector.remote.cloud_settings import CloudSettings
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
+from outlook_connector.remote.ows_calendar import OwsCalendarItems
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.ows_rules import OwsRules
+from outlook_connector.remote.substrate_events import SubstrateEventSearch
 from outlook_connector.remote.transport import Transport
+from outlook_connector.service.calendar import Calendar
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
@@ -34,6 +37,7 @@ from outlook_connector.store.db import Store, store_path
 class Services:
     account: Account
     mailbox: Mailbox
+    calendar: Calendar
     conversations: Conversations
     exports: Exports
     files: Files
@@ -90,6 +94,13 @@ class AppContext:
         mailbox = Mailbox(reader, store)
         conversations = Conversations(mailbox)
         ows = Ows(self._transport, account_tokens)
+        calendar = Calendar(
+            SubstrateEventSearch(
+                self._transport,
+                anchor_mailbox=f"Oid:{account.object_id}@{account.tenant_id}",
+            ),
+            OwsCalendarItems(ows),
+        )
         writer = OwsMailWriter(ows)
         signatures = Signatures(CloudSettings(self._transport, account_tokens), account)
         writes = Writes(mailbox, writer, account, signatures)
@@ -97,6 +108,7 @@ class AppContext:
         return Services(
             account,
             mailbox,
+            calendar,
             conversations,
             Exports(conversations),
             Files(mailbox),

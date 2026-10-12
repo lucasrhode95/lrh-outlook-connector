@@ -115,6 +115,8 @@ uv run outlook-connector ui
 - `list_folders` — List reachable mail folders and their counts.
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
+- `search_calendar_events` — Search Exchange calendar events online, with bounded paging and optional start-date bounds.
+- `get_calendar_event` — Hydrate one event's agenda, attendees and attachment metadata from Outlook; `body_truncated` reports OWS truncation when available.
 - `get_conversation` — Read a whole conversation across folders.
 - `get_message` — Read one message body, including quoted history by default, and its attachment metadata.
 
@@ -152,12 +154,13 @@ With no native signature settings or default, drafts are unsigned. If Outlook re
 
 Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once; a replacement reply keeps the same `reply_to_message_id` and `reply_all` choice. Send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
 
-## Product boundaries and planned meeting support
+## Product boundaries and calendar support
 
-Outlook owns email and its attachments. Planned calendar support also belongs here: the Exchange
-event, schedule and recurrence, agenda, organizer, invitees, event attachments, and virtual-meeting
-join link. Calendar tools are not currently shipped; implementation is tracked in
-[roadmap X10](docs/outlook-roadmap.md#x10--meetingcalendar-search).
+Outlook owns email and its attachments. It also owns Exchange calendar-event discovery and
+hydration: schedule and recurrence, agenda, organizer, invitees, event attachment metadata, and a
+Teams join URL when present in the event body. Event attachments are listed, but direct event-
+attachment download is not currently exposed. Search result totals are omitted because recurring
+occurrence totals were inconsistent in the tested Search v2 responses.
 
 A calendar event linked to a Teams meeting has resources in both products. Outlook supplies the
 event and verified meeting references; `lrh-teams-connector` owns the meeting chat, recordings,

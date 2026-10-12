@@ -198,6 +198,58 @@ class SearchResult(Compact):
     coverage: Coverage
 
 
+class CalendarAttachment(Compact):
+    id: str | None = None
+    name: str | None = None
+    content_type: str | None = None
+    size: int | None = None
+    is_inline: bool = False
+
+
+class CalendarEvent(Compact):
+    """Exchange event; id is the Search v2/OWS item reference when the service supplies it."""
+
+    id: str | None = None
+    immutable_id: str | None = None
+    subject: str | None = None
+    start: datetime | None = None
+    end: datetime | None = None
+    organizer: Recipient | None = None
+    display_to: str | None = None
+    required_attendees: list[Recipient] = Field(default_factory=list)
+    optional_attendees: list[Recipient] = Field(default_factory=list)
+    location: str | None = None
+    is_meeting: bool | None = None
+    is_cancelled: bool | None = None
+    is_all_day: bool | None = None
+    is_organizer: bool | None = None
+    is_response_requested: bool | None = None
+    my_response_type: str | None = None
+    sensitivity: str | None = None
+    calendar_item_type: str | None = None
+    uid: str | None = None
+    series_master_id: str | None = None
+    body_text: str | None = None
+    body_truncated: bool | None = None
+    teams_join_url: str | None = None
+    attachments: list[CalendarAttachment] = Field(default_factory=list)
+
+
+class CalendarSearchCoverage(Compact):
+    complete: bool
+    offset: int
+    page_size: int
+    more_results_available: bool | None = None
+    notes: list[str] = Field(default_factory=list)
+
+
+class CalendarSearchResult(Compact):
+    query: str
+    events: list[CalendarEvent]
+    cursor: str | None = None
+    coverage: CalendarSearchCoverage
+
+
 class MessageContent(Compact):
     message: MessageSummary
     body_kind: BodyKind

@@ -570,6 +570,11 @@ and `AdditionalProperties` for `item:Body` and `item:Attachments` returned the e
 attachment, plus 10 required and one optional attendee. Only field names and counts were retained.
 The discrepancy means the Search `HasAttachments` flag should not be used to skip hydration.
 
+**Connector mapping note (2026-10-12):** OWS `BodyType="Text"` is kept verbatim; it is not HTML-
+entity-decoded. The connector maps `Body.IsTruncated` to the optional `body_truncated` result field.
+The default GetItem shape can cap the body at 2,048 characters, so callers must check that flag
+before treating a long agenda as complete. This implementation note adds no new live-response claim.
+
 The separate lower-camel `entityRequests[]` builder also returned Event rows from
 `POST /search/api/v2/query`; this aligns with the source-mapped Meet builder but does not tie that
 route to Teams global Meetings. A minimal Event `AnswerEntityRequests` attempt returned HTTP 500;
@@ -599,6 +604,13 @@ resource tokens for `api.spaces.skype.com` and `chatsvcagg.teams.microsoft.com`;
 `/v1.0/authz` returned HTTP 410, while both `authzcore` aliases returned HTTP 200 without a Skype
 session token. No transcript artifact URL was followed. Recap retrieval and transcript content
 search remain separate unresolved capabilities.
+
+**Connector implementation note (2026-10-12):** the Outlook connector now wires the standalone
+Event/Exchange request and OWS `GetItem` shape through the shared `m365.search` profile and calendar
+service. Search mapping, page continuation, recurring-total handling and event hydration have
+synthetic tests. No live call through the connector or fresh-account consent was performed for this
+change; the endpoint evidence above remains the standalone replay, and transcript/recap routes remain
+unresolved.
 
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 

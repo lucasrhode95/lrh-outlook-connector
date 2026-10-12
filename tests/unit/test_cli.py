@@ -30,6 +30,9 @@ def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
 ) -> None:
     graph = token_result(aud=GRAPH, scp="Mail.Read", source="identity_provider")
     outlook = token_result(aud="https://outlook.office.com", scp="Mail.ReadWrite", source="identity_provider")
+    search = token_result(
+        aud="https://outlook.office.com", scp="SubstrateSearch-Internal.ReadWrite", source="identity_provider"
+    )
     spaces = token_result(aud="https://api.spaces.skype.com", scp="chat", source="identity_provider")
     csa = token_result(aud="https://chatsvcagg.teams.microsoft.com", scp="chat", source="cache")
     teams_graph = token_result(aud=GRAPH, scp="User.Read", source="cache")
@@ -41,6 +44,7 @@ def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
         device_by_scopes={
             PROFILES["outlook.graph"].scopes: graph,
             PROFILES["outlook.api"].scopes: outlook,
+            PROFILES["m365.search"].scopes: search,
             PROFILES["teams.spaces"].scopes: spaces,
         },
     )
@@ -48,9 +52,10 @@ def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
     out = capsys.readouterr()
     assert "ABC123" in out.out
     assert "[outlook.graph] Ready" in out.out
+    assert "[m365.search] Ready" in out.out
     assert "[teams.graph] Ready" in out.out
     assert "PLAINTEXT" in out.err
-    assert script.shown_flows == 3  # one per distinct client; the remaining Teams audiences are silent
+    assert script.shown_flows == 4  # uncached resources need separate device flows
 
 
 def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]) -> None:
@@ -61,7 +66,14 @@ def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]
     data = json.loads(capsys.readouterr().out)
     assert [p["profile"] for p in data["profiles"]] == list(PROFILES)
     assert data["cache"]["mode"] == "plaintext-development"
-    assert [p["client_credential_cached"] for p in data["profiles"]] == [True, False, False, False, False]
+    assert [p["client_credential_cached"] for p in data["profiles"]] == [
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+    ]
     assert script.created == []
 
 
