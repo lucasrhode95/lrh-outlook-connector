@@ -107,7 +107,7 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `create_draft`, `send_draft` | [`service/writes.py`](src/outlook_connector/service/writes.py) | Create drafts and send an existing draft |
 | `set_read_state`, `set_flag`, `move_messages`, `delete_messages` | [`service/mutations.py`](src/outlook_connector/service/mutations.py) | Change read state, flags and message locations |
 
-## Product boundaries
+## Microsoft 365 connectors
 
 This repository is part of the `lrh-*` Microsoft 365 connectors: local tools that give MCP agents
 access to a common corporate environment, its mail and calendar, chats and meetings, and files. Each
@@ -126,14 +126,6 @@ chat and artifacts. A file linked from an email or a Teams message stays part of
 the stored file itself is retrieved through SharePoint. Only verified identifiers connect records
 across products.
 
-> [!WARNING]
-> These tools sign in as Microsoft's own apps and use undocumented Outlook and Teams services.
-> Giving an AI agent access to your work mail, chats or files may break your organization's policies
-> on AI use and data handling, so check with your IT or security team first. The tools are provided
-> as is, without warranty, and the authors are not responsible for any misuse or its consequences.
-> Microsoft, Outlook, Teams, SharePoint and Entra are trademarks of Microsoft; this project is not
-> affiliated with or endorsed by Microsoft.
-
 ## Development
 
 ```bash
@@ -145,6 +137,16 @@ node --test tests/surfaces/message_reader.test.cjs
 ```
 
 Project references: [requirements](docs/outlook-requirements-v4.md) · [architecture](docs/architecture.md) · [API research](docs/outlook-api-research.md) · [open roadmap](docs/outlook-roadmap.md).
+
+## Disclaimer
+
+> [!WARNING]
+> These tools sign in as Microsoft's own apps and use undocumented Outlook and Teams services.
+> Giving an AI agent access to your work mail, chats or files may break your organization's policies
+> on AI use and data handling, so check with your IT or security team first. The tools are provided
+> as is, without warranty, and the authors are not responsible for any misuse or its consequences.
+> Microsoft, Outlook, Teams, SharePoint and Entra are trademarks of Microsoft; this project is not
+> affiliated with or endorsed by Microsoft.
 
 ## License
 
