@@ -14,6 +14,7 @@ from typing import Any
 
 from outlook_connector.domain.errors import AuthenticationRequired, InvalidRequest, Throttled, Upstream
 from outlook_connector.domain.models import CalendarEvent, CalendarListCoverage, CalendarListResult
+from outlook_connector.domain.time import as_utc
 from outlook_connector.remote.ports import CalendarViewPage, CalendarViewReader, CalendarWindowReader
 from outlook_connector.service import cursors
 
@@ -197,7 +198,7 @@ class CalendarListing:
 
 
 def _window(since: datetime, until: datetime) -> tuple[datetime, datetime]:
-    start, end = _utc(since), _utc(until)
+    start, end = as_utc(since), as_utc(until)
     if start >= end:
         raise InvalidRequest("since must be earlier than until.")
     if end - start > MAX_WINDOW:
@@ -248,13 +249,9 @@ def _cursor_time(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
     try:
-        return _utc(datetime.fromisoformat(value))
+        return as_utc(datetime.fromisoformat(value))
     except ValueError:
         return None
-
-
-def _utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _fold(value: str) -> str:

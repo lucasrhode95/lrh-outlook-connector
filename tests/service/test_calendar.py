@@ -8,7 +8,7 @@ from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarEvent
 from outlook_connector.remote.ports import CalendarSearchPage
 from outlook_connector.service import cursors
-from outlook_connector.service.calendar import MAX_EVENT_OFFSET, Calendar
+from outlook_connector.service.calendar import EVENT_SEARCH_OFFSET_LIMIT, Calendar
 
 
 class SearchStub:
@@ -147,7 +147,7 @@ async def test_calendar_search_does_not_emit_cursor_past_offset_limit() -> None:
     cursor = cursors.encode(
         "calendar_event_search",
         query="synthetic query",
-        offset=MAX_EVENT_OFFSET,
+        offset=EVENT_SEARCH_OFFSET_LIMIT - 1,
         page_size=25,
         cvid="00000000-0000-0000-0000-000000000001",
         logical_id="00000000-0000-0000-0000-000000000002",
@@ -159,4 +159,20 @@ async def test_calendar_search_does_not_emit_cursor_past_offset_limit() -> None:
 
     assert result.cursor is None
     assert not result.coverage.complete
-    assert any("maximum event-search offset" in note for note in result.coverage.notes)
+    assert any("no results past the first" in note for note in result.coverage.notes)
+
+
+async def test_calendar_search_refuses_a_cursor_at_the_offset_limit() -> None:
+    cursor = cursors.encode(
+        "calendar_event_search",
+        query="synthetic query",
+        offset=EVENT_SEARCH_OFFSET_LIMIT,
+        page_size=25,
+        cvid="00000000-0000-0000-0000-000000000001",
+        logical_id="00000000-0000-0000-0000-000000000002",
+        since=None,
+        until=None,
+    )
+    calendar = Calendar(SearchStub([]), ItemsStub())
+    with pytest.raises(InvalidRequest, match="invalid offset"):
+        await calendar.search_events("synthetic query", cursor=cursor)

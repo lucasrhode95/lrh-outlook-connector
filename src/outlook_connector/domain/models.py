@@ -15,8 +15,11 @@ from pydantic import (
     Field,
     SerializerFunctionWrapHandler,
     field_serializer,
+    field_validator,
     model_serializer,
 )
+
+from outlook_connector.domain.time import optional_utc
 
 BodyKind = Literal["unique", "full", "html"]
 CombineMode = Literal["per_conversation", "all", "none"]
@@ -346,6 +349,12 @@ class ExportRequest(BaseModel):
     include_attachments: bool = True
     combine: CombineMode = "per_conversation"
     body: Literal["unique", "full"] = "full"
+
+    @field_validator("since", "until")
+    @classmethod
+    def normalize_utc(cls, value: datetime | None) -> datetime | None:
+        """A time without a zone is UTC, so every caller's window compares like with like."""
+        return optional_utc(value)
 
     @property
     def selects_folder_or_dates(self) -> bool:

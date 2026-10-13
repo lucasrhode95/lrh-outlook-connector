@@ -24,6 +24,7 @@ from outlook_connector.domain.models import (
     SignatureWriteResult,
 )
 from outlook_connector.remote.ports import SignatureContents, SignatureSettings, SignatureStore
+from outlook_connector.service.passive_html import StartTag, passive_start_tags
 
 _DATA_IMAGE = re.compile(
     r"""(?P<prefix>\bsrc\s*=\s*)(?P<quote>["'])(?P<uri>data:image/[^"'<> \t\r\n]+)(?P=quote)""",
@@ -119,9 +120,7 @@ class Signatures:
     async def set_default_signature(
         self, name: str | None, which: Literal["new", "reply", "both"]
     ) -> SignatureWriteResult:
-        """Entry point: validate the requested default and write the selected setting once."""
-        if which not in {"new", "reply", "both"}:
-            raise InvalidRequest("for must be new, reply or both.")
+        """Entry point: validate the name, then write the selected setting once."""
         if name is not None:
             validate_name(name)
         self._check_account()
@@ -208,13 +207,13 @@ def _readable_contents(contents: SignatureContents | None) -> tuple[str, str]:
 
 
 def _validate_html(value: str) -> str:
+    """Entry point for signature HTML, from the caller or read back from Outlook: size, passive markup,
+    and the image sources that inline conversion needs."""
     if not value.strip():
         raise InvalidRequest("A native signature cannot be empty.")
     if len(value) > MAX_BODY_CHARS:
         raise InvalidRequest(f"A native signature must be at most {MAX_BODY_CHARS} characters.")
-    parser = _PassiveSignatureHtml()
-    parser.feed(value)
-    parser.close()
+    _check_image_sources(passive_start_tags(value))
     return value
 
 
@@ -272,17 +271,11 @@ def _inline_images(value: str) -> tuple[str, list[InlineImage]]:
     return converted, images
 
 
-class _PassiveSignatureHtml(HTMLParser):
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in {"script", "iframe", "object", "embed", "form", "input", "button", "textarea", "select"}:
-            raise InvalidRequest(f"Active HTML content is not allowed in a signature: {tag}.")
-        for name, value in attrs:
-            compact = re.sub(r"[\s\x00-\x1f]+", "", unescape(value or "")).lower()
-            if name.startswith("on") or compact.startswith(("javascript:", "vbscript:")):
-                raise InvalidRequest("Active HTML URLs and event handlers are not allowed in a signature.")
-        # HTMLParser accepts unquoted attributes, but inline conversion requires a quoted data URI.
-        # Match whole attribute values so text inside another quoted attribute is not treated as src.
-        for attribute in _HTML_ATTRIBUTE.finditer(self.get_starttag_text() or ""):
+def _check_image_sources(tags: list[StartTag]) -> None:
+    """Inline conversion needs a quoted data URI. HTMLParser accepts unquoted ones, so the source text
+    is read; whole attribute values are matched, so text inside another quoted attribute is not a src."""
+    for tag in tags:
+        for attribute in _HTML_ATTRIBUTE.finditer(tag.source):
             if attribute.group("name").lower() != "src":
                 continue
             source = attribute.group("value")
@@ -294,8 +287,6 @@ class _PassiveSignatureHtml(HTMLParser):
                 raise InvalidRequest(
                     "Signature image data URIs must use a quoted src attribute without whitespace."
                 )
-
-    handle_startendtag = handle_starttag
 
 
 class _TextFromHtml(HTMLParser):

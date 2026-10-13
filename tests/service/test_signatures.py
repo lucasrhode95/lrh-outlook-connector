@@ -309,3 +309,24 @@ async def test_native_settings_appearing_during_empty_read_require_rereading(
     with pytest.raises(Upstream, match="changed while"):
         await signatures.list_signatures()
     assert not fake.ows_calls
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "draft"])
+async def test_unfinished_html_is_refused_before_writing(
+    services: tuple[Signatures, Writes], fake: FakeGraph, operation: str
+) -> None:
+    signatures, writes = services
+    html = "<p>Logo</p><img src=x onerror=alert(1)"
+    fake.signature_contents["Logo"] = {"htm": "<p>Logo</p>", "txt": "Logo"}
+    fake.signature_new_default = "Logo"
+    with pytest.raises(InvalidRequest, match="ends inside"):
+        if operation == "create":
+            await signatures.create_signature("New", html)
+        elif operation == "update":
+            await signatures.update_signature("Logo", html)
+        else:
+            await writes.create_draft(
+                OutgoingMessage(to=["bob@example.com"], subject="Synthetic", html_body=html)
+            )
+    assert "New" not in fake.signature_contents
+    assert fake.signature_contents["Logo"]["htm"] == "<p>Logo</p>"

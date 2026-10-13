@@ -27,7 +27,7 @@ import asyncio
 import hashlib
 import time
 from collections.abc import Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from math import ceil
 from typing import Any
 
@@ -50,6 +50,7 @@ from outlook_connector.domain.models import (
     SearchResult,
     UserProfile,
 )
+from outlook_connector.domain.time import optional_utc
 from outlook_connector.remote.ports import FolderCount, MailReader
 from outlook_connector.service import cursors
 from outlook_connector.service.concurrency import gather_cancel_on_error
@@ -248,11 +249,13 @@ class Mailbox:
         that merges every page at the end (the export) turns it off to keep each copy's folder.
 
         Entry point: the authoritative check of its arguments (scope, limit, window, folder, cursor); the web
-        routes validate the scope and pass other inputs through, and the helpers below trust them.
+        routes validate the scope and pass other inputs through, and the helpers below trust them. A time
+        without a zone is UTC.
         """
         if not 1 <= limit <= 200:
             raise InvalidRequest("limit must be between 1 and 200.")
         validate_scope(scope)
+        since, until = optional_utc(since), optional_utc(until)
         if since and until and since > until:
             raise InvalidRequest("since must not be after until.")
         state = cursors.decode(cursor, "list_messages") if cursor else None
@@ -627,7 +630,7 @@ class Mailbox:
         if not 1 <= limit <= 100:
             raise InvalidRequest("limit must be between 1 and 100.")
         validate_scope(scope)
-        since, until = _search_date(since), _search_date(until)
+        since, until = optional_utc(since), optional_utc(until)
         state = cursors.decode(cursor, "search") if cursor else None
         if state:
             folder_id, kql = state["folder_id"], state["query"]
@@ -862,10 +865,3 @@ def _with_paths(folders: list[Folder]) -> list[Folder]:
             current = by_id.get(current.parent_id or "")
         folder.path = "/".join(reversed(parts))
     return folders
-
-
-def _search_date(value: datetime | None) -> datetime | None:
-    """Assumes (not re-checked here): optional datetime passed to the search entry point."""
-    if value is None:
-        return None
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)

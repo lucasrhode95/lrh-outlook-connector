@@ -7,8 +7,7 @@ import hashlib
 import re
 import tempfile
 from collections import Counter
-from html import escape, unescape
-from html.parser import HTMLParser
+from html import escape
 from pathlib import Path
 
 from m365_auth import Account
@@ -36,6 +35,7 @@ from outlook_connector.domain.models import (
 from outlook_connector.remote.ports import MailWriter
 from outlook_connector.service.conversations import base_subject
 from outlook_connector.service.mailbox import Mailbox
+from outlook_connector.service.passive_html import passive_start_tags
 from outlook_connector.service.signatures import Signatures
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
@@ -361,8 +361,7 @@ def _body(text: str | None, page: str | None) -> str:
     if text is not None:
         lines = escape(text).replace("\u00a0", "&nbsp;").replace("\r\n", "\n").replace("\r", "\n").split("\n")
         return "<div>" + "<br>".join(_keep_spaces(line) for line in lines) + "</div>"
-    parser = _PassiveHtml()
-    parser.feed(value)
+    passive_start_tags(value)
     return value
 
 
@@ -370,15 +369,3 @@ def _keep_spaces(line: str) -> str:
     line = line.replace("\t", "&nbsp;" * 4)
     line = re.sub(r" {2,}", lambda run: "&nbsp;" * (len(run.group()) - 1) + " ", line)
     return "&nbsp;" + line[1:] if line.startswith(" ") else line
-
-
-class _PassiveHtml(HTMLParser):
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag in {"script", "iframe", "object", "embed", "form", "input", "button", "textarea", "select"}:
-            raise InvalidRequest(f"Active HTML content is not allowed: {tag}.")
-        for name, value in attrs:
-            compact = re.sub(r"[\s\x00-\x1f]+", "", unescape(value or "")).lower()
-            if name.startswith("on") or compact.startswith(("javascript:", "vbscript:")):
-                raise InvalidRequest("Active HTML URLs and event handlers are not allowed.")
-
-    handle_startendtag = handle_starttag
