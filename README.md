@@ -151,8 +151,8 @@ Project references: [requirements](docs/outlook-requirements-v4.md) · [architec
 ## License
 
 Copyright 2026 Lucas Rhode. This is source-available software, not open source: the code is public
-so anyone can read and audit it. The [PolyForm Strict License 1.0.0](LICENSE.md) allows use for
-noncommercial purposes only, such as personal study, research, hobby projects, or work at a
-charitable, educational or government organization. It does not allow commercial use, including use
-for your job at a company, and it does not allow distributing, changing, or building on the
-software.
+so anyone can read and audit it. The [PolyForm Internal Use License 1.0.0](LICENSE.md) lets you and
+your company use and adapt the software for your own internal operations, including at work. The
+licensor also permits personal, noncommercial use. Serving other companies with it is not internal
+use: you may not sell it, ship it in a product, or offer it as a service, and you may not distribute
+the software or a modified copy of it.
