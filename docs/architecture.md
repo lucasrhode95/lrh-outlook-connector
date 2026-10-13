@@ -494,7 +494,7 @@ Outlook owns the event, its schedule, its invitees and any join link. `lrh-teams
 
 Searches Exchange calendar events online through Microsoft Search v2, for words up to 512 characters. Each page holds `limit` events (1–25, default 25). `since` and `until` bound the event start time. They are applied to each page as it arrives, so an empty page can still have a `cursor`. `coverage` gives `complete`, `offset`, `page_size`, `more_results_available` and `notes`.
 
-- Follow `cursor` only while more matches help. Search v2 refuses a page that starts at offset 1,000 or later, so a query reaches at most its first 1,000 results here; `notes` says when no cursor is left (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)).
+- Follow `cursor` only while more matches help. Search v2 refuses a page that starts at offset 1,000 or later. A page that starts earlier can return results past 1,000, and no cursor follows it; `notes` says so (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)).
 - Totals for recurring events are not reported, because Search v2 totals were inconsistent in testing.
 - Events with no start time are dropped when a bound is set. `notes` counts them.
 - Results without an Outlook item id cannot be hydrated by `get_calendar_event`. `notes` says so.

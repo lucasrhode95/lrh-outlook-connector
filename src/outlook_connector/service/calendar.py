@@ -98,8 +98,8 @@ class Calendar:
             notes.append("Search reported more events but returned no rows to advance the offset.")
         elif notes_at_offset_limit:
             notes.append(
-                f"Search returns no results past the first {EVENT_SEARCH_OFFSET_LIMIT} for this query; "
-                "no cursor is available."
+                f"Search v2 refuses a page that starts at offset {EVENT_SEARCH_OFFSET_LIMIT} or later, "
+                "so no cursor is available."
             )
         elif page.more_results_available:
             notes.append("Follow the cursor only if additional event matches are useful.")
