@@ -765,6 +765,16 @@ Read-only checks against the signed-in account, run through the connector's serv
 
 A fresh Cvid/LogicalId for every request returned HTTP 400 after the first page, as the reuse rule in §5 already records.
 
+### 3.21 Unfinished markup on save (2026-10-13)
+
+One authorized test, with one synthetic draft. It was written through the mail writer directly, because the connector's checker now refuses unfinished markup. The draft was never sent. Its HTML was a synthetic body ending in an unfinished `img` tag with an `onerror` attribute, followed by a synthetic signature block, which is what the pre-fix composition produced. The draft was read back as HTML through Graph, then moved to Deleted Items once with the connector's delete path (result: one item, done). Nothing was retried.
+
+- The body text was kept.
+- The `onerror` attribute and the `alert(1)` text were not in the saved HTML.
+- The unfinished `img` absorbed the signature block's opening `div` tag. The signature's `id` and `data-signature-name` attributes moved onto an `img` element, the signature text became a paragraph, and the signature's closing tag became an empty `div`.
+
+In this test Outlook removed the event handler on save, so the join did not keep an active handler. It did damage the signature structure. The connector's refusal remains the contract, and the refusal also prevents the structural damage. One account and one client were tested; other attributes and other clients were not. The draft remains in Deleted Items until Outlook empties that folder.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract

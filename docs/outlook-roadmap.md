@@ -80,13 +80,12 @@ completed by calendar search.
 
 ## Review follow-ups: open after the live checks (2026-10-13)
 
-The live checks on 2026-10-13 ([research §3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)) confirmed the Search v2 offset limit, now corrected in the service. They did not reproduce the concerns about detail-view times or fallback order. These items remain open:
+The live checks ([research §3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)) and the unfinished-markup save test ([research §3.21](outlook-api-research.md#321-unfinished-markup-on-save-2026-10-13)) are recorded. These items remain open:
 
-- **Decision: hidden folders by id.** `get_message` and explicit export ids read items in hidden folders, which lists and search never show, while the change tools report them as `failed`. Choose one rule; the by-id requirement in requirements v4 and architecture §8.1 and §8.5 would change with it. This mailbox has no messages in hidden folders, so the question cannot be tested here.
+- **Decision: one message-listing tool.** Merging `list_messages` and `search_messages` needs one response shape. A list returns flat messages in date order; search returns conversation groups in rank order. Options: one tool whose result carries a `mode` field, or one flat shape for both (search would lose conversation grouping and `message_count`). Routing is simple: an empty query lists, and a query searches. Folder, date and scope apply to both. Renaming the tools would break existing agent configurations.
 - **Decision: `search_calendar_events` date bounds.** Date terms in the query returned no result set, so `since` and `until` only filter the pages fetched. Keep the bounds with the documented limit, or remove them so window questions go to `list_calendar_events`.
-- **Live check, needs permission: unfinished HTML on save.** The checker refuses markup left open at the end. What Outlook keeps on save for such markup is unverified. The check needs a test draft that is never sent and then deleted, which changes the mailbox, so it waits for an explicit request.
 - **Enhancement: calendar fallback paging.** The Outlook Web fallback pages by offset over a window it re-reads. If events change between calls, a page can skip or repeat an event. Not reproduced on an unchanged window. Candidate: a keyset cursor on (start, id), tested with a change between pages.
-- **Enhancement: passive HTML is a deny-list.** It relies on Python's HTML parser, so markup that tokenizes differently in a browser could pass. Candidates: an allow-list, or evidence of Outlook-side sanitization checked against browser parsing.
+- **Enhancement: passive HTML is a deny-list.** It relies on Python's HTML parser, so markup that tokenizes differently in a browser could pass. The one save test showed Outlook dropping an event handler, but that is one account and one client. Candidates: an allow-list, or wider sanitization evidence checked against browser parsing.
 - **Limit: one conversation lists at most 1,000 messages.** `notes` reports the cap. Whether Graph pages past it is unverified.
 
 ## Outlook mail-search comparison (2026-10-12)
