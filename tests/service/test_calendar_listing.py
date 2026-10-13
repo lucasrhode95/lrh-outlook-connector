@@ -296,7 +296,7 @@ async def test_an_outlook_sign_in_need_is_raised_so_the_sign_in_command_reaches_
         await listing.list_events(since=SINCE, until=UNTIL)
 
 
-async def test_the_outlook_fallback_pages_by_offset_and_reads_the_window_each_time() -> None:
+async def test_the_outlook_fallback_pages_by_key_and_reads_the_window_each_time() -> None:
     outlook = OutlookStub([_event("a", 9), _event("b", 10), _event("c", 11)])
     listing = CalendarListing(graph_view=GraphStub(error=Upstream("synthetic outage")), outlook_view=outlook)
 
@@ -330,10 +330,15 @@ async def test_malformed_and_tampered_calendar_cursors_are_refused() -> None:
     base = {"since": SINCE.isoformat(), "until": UNTIL.isoformat(), "include_body": False}
 
     unknown_source = cursors.encode(CURSOR_KIND, source="elsewhere", contains=None, **base)
-    outlook_with_filter = cursors.encode(CURSOR_KIND, source="outlook", offset=1, contains="keyword", **base)
+    outlook_with_filter = cursors.encode(
+        CURSOR_KIND, source="outlook", after_start=SINCE.isoformat(), after_id="a", contains="keyword", **base
+    )
+    bad_key = cursors.encode(
+        CURSOR_KIND, source="outlook", after_start="not a time", after_id="a", contains=None, **base
+    )
     graph_without_link = cursors.encode(CURSOR_KIND, source="graph", contains=None, **base)
 
-    for cursor in ("not-a-cursor", unknown_source, outlook_with_filter, graph_without_link):
+    for cursor in ("not-a-cursor", unknown_source, outlook_with_filter, bad_key, graph_without_link):
         with pytest.raises(InvalidRequest):
             await listing.list_events(since=SINCE, until=UNTIL, cursor=cursor)
 
@@ -361,7 +366,8 @@ async def test_a_cursor_cannot_widen_the_window_or_the_filter() -> None:
     too_wide = cursors.encode(
         CURSOR_KIND,
         source="outlook",
-        offset=0,
+        after_start=SINCE.isoformat(),
+        after_id="a",
         since=datetime(2025, 1, 1, tzinfo=UTC).isoformat(),
         until=UNTIL.isoformat(),
         contains=None,
@@ -393,3 +399,26 @@ async def test_a_cursor_cannot_widen_the_window_or_the_filter() -> None:
     ):
         with pytest.raises(InvalidRequest, match=message):
             await listing.list_events(since=SINCE, until=UNTIL, cursor=cursor)
+
+
+async def test_the_outlook_fallback_resumes_after_the_last_event_when_an_earlier_event_appears() -> None:
+    outlook = OutlookStub([_event("a", 9), _event("b", 10), _event("c", 11)])
+    listing = CalendarListing(graph_view=GraphStub(error=Upstream("synthetic outage")), outlook_view=outlook)
+
+    first = await listing.list_events(since=SINCE, until=UNTIL, limit=2)
+    outlook.events.insert(0, _event("early", 8))  # appears before the first page's last event
+    second = await listing.list_events(since=SINCE, until=UNTIL, limit=2, cursor=first.cursor)
+
+    assert [event.id for event in second.events] == ["c"]
+    assert second.coverage.complete
+
+
+async def test_the_outlook_fallback_orders_events_with_equal_starts_by_id() -> None:
+    outlook = OutlookStub([_event("y", 9), _event("x", 9)])
+    listing = CalendarListing(graph_view=GraphStub(error=Upstream("synthetic outage")), outlook_view=outlook)
+
+    first = await listing.list_events(since=SINCE, until=UNTIL, limit=1)
+    second = await listing.list_events(since=SINCE, until=UNTIL, limit=1, cursor=first.cursor)
+
+    assert [event.id for event in first.events] == ["x"]
+    assert [event.id for event in second.events] == ["y"] and second.coverage.complete

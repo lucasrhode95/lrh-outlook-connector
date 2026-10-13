@@ -166,6 +166,12 @@ async def test_active_html_rejected(writes: Writes, fake: FakeGraph, page: str) 
     assert not fake.ows_calls
 
 
+async def test_unfinished_html_is_refused_before_anything_is_sent(writes: Writes, fake: FakeGraph) -> None:
+    with pytest.raises(InvalidRequest, match="ends inside"):
+        await writes.create_draft(message(text_body=None, html_body="<p>hi</p><img src=x onerror=alert(1)//"))
+    assert not fake.ows_calls
+
+
 async def test_send_uses_only_the_stored_draft(writes: Writes, fake: FakeGraph) -> None:
     draft = await writes.create_draft(reply())
     saved = fake.messages[draft.id]

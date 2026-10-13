@@ -3,7 +3,7 @@
 Outstanding decisions, implementation, fixes and validation only. Completed behavior belongs in
 the requirements and architecture; completed live evidence belongs in the research record.
 
-Snapshot **2026-10-12**.
+Snapshot **2026-10-13**.
 
 - Product requirements: [Requirements v4](outlook-requirements-v4.md)
 - Build/module map: [architecture §4 Repository layout](architecture.md#4-repository-layout)
@@ -77,6 +77,15 @@ rather than an automatic fallback. Transcript and recap discovery remain in Team
 completed by calendar search.
 
 **Calendar usability (2026-10-12, implemented):** `list_calendar_events(since, until, contains, include_body, limit, cursor)` lists the default calendar's occurrences that overlap a window, in time order and in UTC, through Graph's calendar view under the shared `teams.graph` profile (`config.CALENDAR_PROFILE`), with next links followed. Outlook Web's `GetCalendarView` answers a first page only when that Graph read fails for a service reason; it has no descriptions, so `contains` and `include_body` fail on that path. A live check on the signed-in account returned the same 16 events from both routes for a week, hydrated a listed id with `get_calendar_event`, and matched description text (research [§3.19](outlook-api-research.md#319-list_calendar_events-live-check-2026-10-12)). Still open: (a) confirm the Teams-profile calendar scopes on a fresh account before relying on them; (b) decide whether a purpose-named calendar profile in `lrh-m365-auth` should replace reusing `teams.graph` (that repository is outside this change); (c) topic search across the calendar's history: Graph event search returned 12 hits for a known description term, but its date and body-only semantics are unverified, so Search v2 remains the tool for that; (d) `get_calendar_event` still uses OWS only, and Graph-first hydration needs its own check; (e) shared and other people's calendars are not listed.
+
+## Review follow-ups: open after the live checks (2026-10-13)
+
+The live checks ([research §3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)) and the unfinished-markup save test ([research §3.21](outlook-api-research.md#321-unfinished-markup-on-save-2026-10-13)) are recorded. These items remain open:
+
+- **Decision: one message-listing tool.** Merging `list_messages` and `search_messages` needs one response shape. A list returns flat messages in date order; search returns conversation groups in rank order. Options: one tool whose result carries a `mode` field, or one flat shape for both (search would lose conversation grouping and `message_count`). Routing is simple: an empty query lists, and a query searches. Folder, date and scope apply to both. Renaming the tools would break existing agent configurations.
+- **Decision: `search_calendar_events` date bounds.** Date terms in the query returned no result set, so `since` and `until` only filter the pages fetched. Keep the bounds with the documented limit, or remove them so window questions go to `list_calendar_events`.
+- **Enhancement: passive HTML is a deny-list.** It relies on Python's HTML parser, so markup that tokenizes differently in a browser could pass. The one save test showed Outlook dropping an event handler, but that is one account and one client. Candidates: an allow-list, or wider sanitization evidence checked against browser parsing.
+- **Decision: conversation read budget.** `get_conversation` reads at most 1,000 messages of a conversation, and `notes` reports the cap. Graph pages conversation listings (research [§3.22](outlook-api-research.md#322-conversation-listing-paging-check-2026-10-13)), so the cap is the connector's own budget. Keep it, or raise it?
 
 ## Outlook mail-search comparison (2026-10-12)
 

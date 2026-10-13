@@ -24,11 +24,7 @@ uv run outlook-connector auth
 uv run outlook-connector status
 ```
 
-Any Outlook, Teams, or SharePoint connector can start the shared sign-in bootstrap. It silently reuses
-accepted profile credentials and asks Microsoft only for profiles that still need approval. The
-shared catalog includes `outlook.graph` for Graph mail reads and `outlook.api` for Outlook Web
-operations, plus the Teams profiles used by the other connectors. Microsoft may require separate
-device-code and MFA approvals for different clients or resource audiences.
+Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 connectors share one login engine (`lrh-m365-auth`), so one login covers them all.
 
 Core mail reads, search, exports and attachment downloads use `outlook.graph`. The `outlook.api`
 profile is also required for inbox-rule and native-signature reads, as well as to draft, send, change
@@ -109,83 +105,38 @@ uv run outlook-connector ui
 
 ## MCP tools
 
-### Find and read
+The MCP server exposes the tools below. Each one's inputs, results and caveats are in [architecture §8](docs/architecture.md#8-surfaces-tools-and-endpoints).
 
-- `auth_status` — Read cached client credentials, resource-token expiry and the sign-in command.
-- `list_folders` — List reachable mail folders and their counts.
-- `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
-- `search_messages` — Search mail and group hits by conversation.
-- `list_calendar_events` — List the events that overlap a `since`/`until` window (at most 366 days) in
-  time order, with recurring meetings expanded per occurrence and times in UTC. `contains` finds
-  literal text in each subject or description within the window (case- and accent-insensitive);
-  `include_body` returns descriptions, cut to 4,000 characters. Graph's calendar view answers first;
-  Outlook Web's `GetCalendarView` answers only when that Graph read fails, and it has no descriptions,
-  so `contains` and `include_body` then fail. `coverage.source` says which service answered. Follow
-  the cursor while `coverage.complete` is false.
-- `search_calendar_events` — Search Exchange calendar events online, with bounded paging and optional
-  start-date bounds. Bounds filter each fetched page after Search v2; an empty page may still have a
-  cursor. Continue while a cursor is available, and report incomplete coverage if paging stops
-  without matches. For a date range, use `list_calendar_events`.
-- `get_calendar_event` — Hydrate one event's agenda, attendees and attachment metadata from Outlook; `body_truncated` reports OWS truncation when available.
-- `get_conversation` — Read a whole conversation across folders.
-- `get_message` — Read one message body, including quoted history by default, and its attachment metadata.
+| MCP tool | Service module | Behavior |
+|---|---|---|
+| `auth_status` | shared auth provider | Read cached account/client credentials and resource-token expiry |
+| `list_folders` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | List reachable folders and counts |
+| `list_messages` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | List messages in a folder or mailbox, with folder, date-window and scope filters |
+| `search_messages` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
+| `search_calendar_events` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Search Exchange events online with bounded continuation and optional start-date bounds |
+| `list_calendar_events` | [`service/calendar_listing.py`](src/outlook_connector/service/calendar_listing.py) | List the events overlapping a window in time order, Graph first; `contains` and descriptions need Graph |
+| `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, join URL and attachment metadata |
+| `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
+| `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
+| `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List attachment metadata, including inline image IDs |
+| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save an attachment locally |
+| `save_message_mime` | [`service/files.py`](src/outlook_connector/service/files.py) | Save the original message as an .eml file |
+| `export_messages` | [`service/export/`](src/outlook_connector/service/export/) | Export conversations, messages or a folder/date window |
+| `list_rules`, `create_rule`, `update_rule`, `reorder_rules`, `delete_rule` | [`service/rules.py`](src/outlook_connector/service/rules.py) | Read rules or propose and confirm supported changes |
+| `list_signatures`, `get_signature`, `create_signature`, `update_signature`, `delete_signature`, `set_default_signature` | [`service/signatures.py`](src/outlook_connector/service/signatures.py) | Read and manage native Outlook signatures |
+| `create_draft`, `send_draft` | [`service/writes.py`](src/outlook_connector/service/writes.py) | Create drafts and send an existing draft |
+| `set_read_state`, `set_flag`, `move_messages`, `delete_messages` | [`service/mutations.py`](src/outlook_connector/service/mutations.py) | Change read state, flags and message locations |
 
-### Attachments and exports
+## Product boundaries
 
-- `list_attachments` — List a message's attachment metadata, including inline image IDs.
-- `download_attachment` — Save an attachment locally; downloads are limited to 150 MB.
-- `save_message_mime` — Save the original message as an `.eml` file.
-- `export_messages` — Export conversations, messages, or a folder/date window as TXT or JSONL. Quoted history and attachment files are included by default; use `body="unique"` to omit quoted history or `include_attachments=false` to omit attachment files. Conversations follow `scope.deleted_items`; sent/meeting filters only narrow folder/date windows. Explicit message ids are authoritative.
+| Repository | Responsible for |
+|---|---|
+| [lrh-m365-auth](../lrh-m365-auth/README.md) | Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses |
+| [lrh-outlook-connector](../lrh-outlook-connector/README.md) | Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link) |
+| [lrh-teams-connector](../lrh-teams-connector/README.md) | Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes |
+| [lrh-sharepoint-connector](../lrh-sharepoint-connector/README.md) | General OneDrive and SharePoint file search and selected file retrieval (read-only) |
 
-### Rules and signatures
-
-- `list_rules` — Read inbox rules, including unsupported rules marked read-only.
-- `create_rule` — Propose or confirm a supported inbox rule.
-- `update_rule` — Propose or confirm edits to a supported inbox rule.
-- `reorder_rules` — Propose or confirm the order of supported inbox rules.
-- `delete_rule` — Propose or confirm deletion of a supported inbox rule.
-- `list_signatures` — List native Outlook signatures and defaults.
-- `get_signature` — Read one native signature's HTML and text.
-- `create_signature` — Create a native Outlook signature from passive HTML; quote data-image `src` attributes.
-- `update_signature` — Replace a native signature's contents.
-- `delete_signature` — Delete a native Outlook signature.
-- `set_default_signature` — Set or clear the new-message and reply defaults.
-
-### Drafts and mailbox changes
-
-- `create_draft` — Save a new message or reply as a draft.
-- `send_draft` — Send an existing draft after an explicit user request.
-- `set_read_state` — Mark selected messages or conversations read or unread.
-- `set_flag` — Flag or unflag selected messages.
-- `move_messages` — Move selected messages to a folder.
-- `delete_messages` — Move selected messages to Deleted Items.
-
-With no native signature settings or default, drafts are unsigned. If Outlook returns no account scope, configure a native signature in Outlook before using signature-write tools.
-
-Rule writes first return a proposal; repeat the exact change only after a person approves it. Drafts are composed once; a replacement reply keeps the same `reply_to_message_id` and `reply_all` choice. Send or mailbox writes are sent once. Deletes move items to Deleted Items; nothing is permanently deleted.
-
-## Product boundaries and calendar support
-
-Outlook owns email and its attachments. It also owns Exchange calendar-event discovery and
-hydration: schedule and recurrence, agenda, organizer, invitees, event attachment metadata, and a
-Teams join URL when present in the event body. Event attachments are listed, but direct event-
-attachment download is not currently exposed. Search result totals are omitted because recurring
-occurrence totals were inconsistent in the tested Search v2 responses.
-
-Calendar listing reads the default calendar. Its Graph read uses the shared `teams.graph` profile, whose
-token carries calendar read scope (`config.CALENDAR_PROFILE`); the Outlook Graph profile has none. The
-Outlook Web fallback uses the `outlook.api` profile. Both are prepared by `outlook-connector auth`.
-Shared calendars and other people's calendars are not listed.
-
-A calendar event linked to a Teams meeting has resources in both products. Outlook supplies the
-event and verified meeting references; `lrh-teams-connector` owns the meeting chat, recordings,
-transcripts, recap, and meeting notes. An agent can find the event in Outlook, then request its
-related meeting resources from Teams. A join link for another meeting platform does not make the
-event a Teams meeting.
-
-The separate read-only `lrh-sharepoint-connector` owns general OneDrive and SharePoint file search
-and selected file retrieval. A file can also appear as an email attachment or a Teams message link: its storage
-location does not transfer ownership of the email or message relationship to SharePoint.
+A calendar event stays with Outlook even when it links to a Teams meeting.
 
 ## Development
 

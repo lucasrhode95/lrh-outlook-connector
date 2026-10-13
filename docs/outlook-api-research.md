@@ -750,6 +750,37 @@ than UTC (the request asks for UTC and refuses other zones); and the MCP tool th
 the running server still held the previous tool list when this check ran. No subjects, attendees, identifiers,
 descriptions or tokens are retained here.
 
+### 3.20 Review gap live checks (2026-10-13)
+
+Read-only checks against the signed-in account, run through the connector's service layer. The outputs were counts, minute differences and HTTP status codes; no subjects, addresses, identifiers, descriptions or bodies were kept. The test machine's local clock was not on UTC.
+
+- **Event detail times.** `get_calendar_event` start and end matched the UTC listing for the four timed events checked (0 minutes of difference). The Outlook Web listing matched the Graph listing for all 16 events in the test week (0 minutes). The answers already denote the same instants, so no change was needed.
+- **Calendar paging.** The Graph listing returned the same event set at page limits 1, 2 and 3, with no duplicates. Two start times were each shared by two events. The Outlook Web listing returned the same order on two reads. Changes between pages were not tested, because that needs writes to the calendar.
+- **Search v2 date terms.** `start:`, `meeting start:` and `meeting received:` with the test week returned no result set; the query `meeting` as a control returned rows. The server does not restrict event dates for these forms.
+- **Search v2 date bounds in the connector.** A bounded `search_calendar_events` walk of 12 calls returned no events from the window within its first 300 results, and every page carried a cursor. Bounds therefore filter pages after they arrive.
+- **Search v2 offset limit.** One search session (one Cvid/LogicalId pair) answered page starts up to 975 with 25 rows per page, and refused a page starting at 1,000 with HTTP 400. A page starting at 990 with 25 rows was answered, so the rule concerns where a page starts. The connector assumed a limit of 100,000, so a cursor for offset 1,000 failed with HTTP 400. After the fix, a full walk ended after 40 calls with 1,000 results and no cursor, and the coverage note said why.
+- **Naive window times.** A message listing with a naive `since` and an aware `until` succeeded after the fix. Before it, the service compared the two directly; Python raises `TypeError` for that comparison (from the code, not run live).
+- **Hidden folders.** The mailbox has one hidden folder, with no messages in its first page, so get-by-id reads of hidden items could not be tested.
+- **Not tested.** What Outlook keeps for a draft that contains unfinished markup (this needs a test draft, which changes the mailbox); calendar fallback paging while the calendar changes; conversations longer than 1,000 messages.
+
+A fresh Cvid/LogicalId for every request returned HTTP 400 after the first page, as the reuse rule in §5 already records.
+
+### 3.21 Unfinished markup on save (2026-10-13)
+
+One authorized test, with one synthetic draft. It was written through the mail writer directly, because the connector's checker now refuses unfinished markup. The draft was never sent. Its HTML was a synthetic body ending in an unfinished `img` tag with an `onerror` attribute, followed by a synthetic signature block, which is what the pre-fix composition produced. The draft was read back as HTML through Graph, then moved to Deleted Items once with the connector's delete path (result: one item, done). Nothing was retried.
+
+- The body text was kept.
+- The `onerror` attribute and the `alert(1)` text were not in the saved HTML.
+- The unfinished `img` absorbed the signature block's opening `div` tag. The signature's `id` and `data-signature-name` attributes moved onto an `img` element, the signature text became a paragraph, and the signature's closing tag became an empty `div`.
+
+In this test Outlook removed the event handler on save, so the join did not keep an active handler. It did damage the signature structure. The connector's refusal remains the contract, and the refusal also prevents the structural damage. One account and one client were tested; other attributes and other clients were not. The draft remains in Deleted Items until Outlook empties that folder.
+
+### 3.22 Conversation listing paging check (2026-10-13)
+
+A read-only check on the signed-in account. It took the most-populated conversation among the first 100 messages of the mailbox (five messages across folders) and read it through the connector's conversation read. It then requested the same conversation with one-message pages, following next links to the end. Both reads returned all five messages with no truncation.
+
+Graph pages conversation listings. The check does not reach the 1,000-message cap, because this account has no conversation that long. The cap in `get_conversation` is therefore the connector's own read budget (`MAX_CONVERSATION` in `remote/graph_mail.py`), not a Graph limit.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract

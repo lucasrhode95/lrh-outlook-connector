@@ -954,3 +954,27 @@ async def test_eventual_count_dates_do_not_hide_newest_message_on_the_first_page
     assert page.cursor
     next_page = await mailbox.list_messages(limit=3, cursor=page.cursor)
     assert "newest" not in {m.id for m in next_page.items}
+
+
+@pytest.mark.parametrize(
+    ("since", "until"),
+    [
+        (datetime(2026, 9, 28, 9, 30), datetime(2026, 9, 29, 7, tzinfo=UTC)),
+        (
+            datetime(2026, 9, 28, 6, 30, tzinfo=timezone(timedelta(hours=-3))),
+            datetime(2026, 9, 29, 9, tzinfo=timezone(timedelta(hours=2))),
+        ),
+    ],
+)
+async def test_list_messages_normalizes_naive_and_aware_at_service_entry(
+    mailbox: Mailbox, since: datetime, until: datetime
+) -> None:
+    listed = await mailbox.list_messages(folder=None, since=since, until=until, limit=50)
+    utc = await mailbox.list_messages(
+        folder=None,
+        since=datetime(2026, 9, 28, 9, 30, tzinfo=UTC),
+        until=datetime(2026, 9, 29, 7, tzinfo=UTC),
+        limit=50,
+    )
+    assert utc.items
+    assert [m.id for m in listed.items] == [m.id for m in utc.items]

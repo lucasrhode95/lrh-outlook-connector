@@ -8,7 +8,7 @@ from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarEvent
 from outlook_connector.remote.ports import CalendarSearchPage
 from outlook_connector.service import cursors
-from outlook_connector.service.calendar import MAX_EVENT_OFFSET, Calendar
+from outlook_connector.service.calendar import EVENT_SEARCH_OFFSET_LIMIT, Calendar
 
 
 class SearchStub:
@@ -147,7 +147,7 @@ async def test_calendar_search_does_not_emit_cursor_past_offset_limit() -> None:
     cursor = cursors.encode(
         "calendar_event_search",
         query="synthetic query",
-        offset=MAX_EVENT_OFFSET,
+        offset=EVENT_SEARCH_OFFSET_LIMIT - 1,
         page_size=25,
         cvid="00000000-0000-0000-0000-000000000001",
         logical_id="00000000-0000-0000-0000-000000000002",
@@ -159,4 +159,50 @@ async def test_calendar_search_does_not_emit_cursor_past_offset_limit() -> None:
 
     assert result.cursor is None
     assert not result.coverage.complete
-    assert any("maximum event-search offset" in note for note in result.coverage.notes)
+    assert any("refuses a page that starts at offset" in note for note in result.coverage.notes)
+
+
+async def test_calendar_search_refuses_a_cursor_at_the_offset_limit() -> None:
+    cursor = cursors.encode(
+        "calendar_event_search",
+        query="synthetic query",
+        offset=EVENT_SEARCH_OFFSET_LIMIT,
+        page_size=25,
+        cvid="00000000-0000-0000-0000-000000000001",
+        logical_id="00000000-0000-0000-0000-000000000002",
+        since=None,
+        until=None,
+    )
+    calendar = Calendar(SearchStub([]), ItemsStub())
+    with pytest.raises(InvalidRequest, match="invalid offset"):
+        await calendar.search_events("synthetic query", cursor=cursor)
+
+
+async def test_calendar_search_keeps_a_last_page_that_runs_past_the_limit() -> None:
+    rows = [_event(f"synthetic-{index}", "2026-10-10T12:00:00Z") for index in range(24)]
+    search = SearchStub(
+        [
+            CalendarSearchPage(
+                events=rows,
+                rows_received=24,
+                more_results_available=True,
+                result_set_found=True,
+            )
+        ]
+    )
+    calendar = Calendar(search, ItemsStub())
+    cursor = cursors.encode(
+        "calendar_event_search",
+        query="synthetic query",
+        offset=984,
+        page_size=24,
+        cvid="00000000-0000-0000-0000-000000000001",
+        logical_id="00000000-0000-0000-0000-000000000002",
+        since=None,
+        until=None,
+    )
+
+    result = await calendar.search_events("synthetic query", limit=24, cursor=cursor)
+
+    assert len(result.events) == 24 and result.cursor is None
+    assert any("refuses a page that starts at offset 1000" in note for note in result.coverage.notes)

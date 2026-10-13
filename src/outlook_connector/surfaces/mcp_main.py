@@ -8,7 +8,7 @@ messages named by id (§11.2), each with a result per message.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from inspect import Parameter
 from inspect import Signature as FunctionSignature
 from typing import Annotated, Any, Literal
@@ -199,12 +199,6 @@ DetailLevel = Annotated[
 ]
 
 
-def _utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value
-
-
 def build_server(context: AppContext) -> FastMCP:
     mcp = FastMCP("lrh-outlook-connector", instructions=INSTRUCTIONS, log_level="WARNING")
 
@@ -259,8 +253,8 @@ def build_server(context: AppContext) -> FastMCP:
         With folder exclusions a page can hold fewer than limit messages; follow cursor."""
         return await (await services()).mailbox.list_messages(
             folder=folder,
-            since=_utc(since),
-            until=_utc(until),
+            since=since,
+            until=until,
             limit=limit,
             cursor=cursor,
             scope=scope,
@@ -312,7 +306,7 @@ def build_server(context: AppContext) -> FastMCP:
         recurring occurrence totals are intentionally not reported. For a date range, use
         list_calendar_events."""
         return await (await services()).calendar.search_events(
-            query, since=_utc(since), until=_utc(until), limit=limit, cursor=cursor
+            query, since=since, until=until, limit=limit, cursor=cursor
         )
 
     @mcp.tool(annotations=READ_ONLY)
@@ -471,8 +465,8 @@ def build_server(context: AppContext) -> FastMCP:
         request = ExportRequest(
             conversation_ids=conversation_ids or [],
             message_ids=message_ids or [],
-            since=_utc(since),
-            until=_utc(until),
+            since=since,
+            until=until,
             folder=folder,
             scope=scope,
             limit=limit,

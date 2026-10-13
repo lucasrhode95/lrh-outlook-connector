@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarEvent, CalendarSearchCoverage, CalendarSearchResult
+from outlook_connector.domain.time import as_utc, optional_utc
 from outlook_connector.remote.ports import CalendarItemReader, CalendarSearchReader
 from outlook_connector.service import cursors
 
 MAX_EVENT_PAGE_SIZE = 25  # the standalone-proven Exchange Search v2 page size
-MAX_EVENT_OFFSET = 100_000
+EVENT_SEARCH_OFFSET_LIMIT = 1_000  # Search v2 refuses a page that starts at this offset or later (2026-10-13)
 MAX_EVENT_QUERY_CHARS = 512
 
 
@@ -35,7 +36,7 @@ class Calendar:
         query = query.strip()
         if len(query) > MAX_EVENT_QUERY_CHARS:
             raise InvalidRequest(f"query must be no longer than {MAX_EVENT_QUERY_CHARS} characters.")
-        since, until = _utc(since), _utc(until)
+        since, until = optional_utc(since), optional_utc(until)
         if since and until and since > until:
             raise InvalidRequest("since must be earlier than or equal to until.")
         if not 1 <= limit <= MAX_EVENT_PAGE_SIZE:
@@ -50,7 +51,7 @@ class Calendar:
             cvid = _cursor_uuid(state.get("cvid"), "Cvid")
             logical_id = _cursor_uuid(state.get("logical_id"), "LogicalId")
             since, until = _parse_datetime(state.get("since")), _parse_datetime(state.get("until"))
-            if type(offset) is not int or not 0 <= offset <= MAX_EVENT_OFFSET:
+            if type(offset) is not int or not 0 <= offset < EVENT_SEARCH_OFFSET_LIMIT:
                 raise InvalidRequest("The calendar cursor has an invalid offset.")
             if type(page_size) is not int or not 1 <= page_size <= MAX_EVENT_PAGE_SIZE:
                 raise InvalidRequest("The calendar cursor has an invalid page size.")
@@ -71,7 +72,7 @@ class Calendar:
         next_cursor = None
         notes_at_offset_limit = False
         if page.more_results_available and page.rows_received:
-            if next_offset <= MAX_EVENT_OFFSET:
+            if next_offset < EVENT_SEARCH_OFFSET_LIMIT:
                 next_cursor = cursors.encode(
                     "calendar_event_search",
                     query=query,
@@ -97,7 +98,8 @@ class Calendar:
             notes.append("Search reported more events but returned no rows to advance the offset.")
         elif notes_at_offset_limit:
             notes.append(
-                f"The maximum event-search offset ({MAX_EVENT_OFFSET}) was reached; no cursor is available."
+                f"Search v2 refuses a page that starts at offset {EVENT_SEARCH_OFFSET_LIMIT} or later, "
+                "so no cursor is available."
             )
         elif page.more_results_available:
             notes.append("Follow the cursor only if additional event matches are useful.")
@@ -139,7 +141,7 @@ def _in_window(
     selected: list[CalendarEvent] = []
     unknown = 0
     for event in events:
-        start = _utc(event.start)
+        start = optional_utc(event.start)
         if start is None:
             unknown += 1
             continue
@@ -147,12 +149,6 @@ def _in_window(
             continue
         selected.append(event)
     return selected, unknown
-
-
-def _utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _cursor_uuid(value: object, label: str) -> str:
@@ -173,4 +169,4 @@ def _parse_datetime(value: object) -> datetime | None:
         parsed = datetime.fromisoformat(value)
     except ValueError:
         raise InvalidRequest("The calendar cursor has an invalid date bound.") from None
-    return _utc(parsed)
+    return as_utc(parsed)
