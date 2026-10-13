@@ -79,8 +79,8 @@ Further detail: [Outlook API research](outlook-api-research.md) and [Outlook roa
 The Teams connector now exposes bounded online Message/Teams discovery through Search v2 and the
 shared `m365.search` profile. Request mapping and continuation have synthetic coverage; a live MCP
 call and direct hydration of a returned hit ID remain unverified. Recap and transcript capabilities
-remain separate open work. See the [Teams search roadmap](../../lrh-teams-connector/docs/teams-connector-roadmap.md#p22--search)
-and [adapter research](../../lrh-teams-connector/docs/teams-api-research.md#teams-online-message-search-adapter-2026-10-12).
+remain separate open work. See the [Teams search roadmap](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-connector-roadmap.md#p22--search)
+and [adapter research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-api-research.md#teams-online-message-search-adapter-2026-10-12).
 
 | Endpoint or route family | Purpose and observed shape | Evidence / limit |
 | --- | --- | --- |
@@ -118,17 +118,17 @@ and [adapter research](../../lrh-teams-connector/docs/teams-api-research.md#team
 
 The observed product behavior jumps to the selected message in its conversation. The 2026-10-10 Teams bundle gives a concrete client-side explanation: the search result activation path parses the result's primary navigation reference and calls `chat.chatById` with `replyChainId`, `messageId`, `dateTimeSent`, a generated `searchSessionId`, and highlight text; the channel path calls `channel.channelMessagesById` with channel/team identity, `replyChainId`, `deepLinkId`/message identity, and highlight options. A separate deep-link handler uses `focusOnLoad=DeeplinkedMessage`. The client can therefore address the hit by identity and timestamp without a page number.
 
-No message-history HTTP call or event-level click trace appears in the supplied HARs. The exact request chain and the conversion of `dateTimeSent` to the existing Chat Service `startTime` parameter remain unverified. Treat the source-level navigation fields as established, and the timestamp-to-wire-query mapping as an inference. See [the Teams capture/source audit](../../lrh-teams-connector/docs/teams-api-research.md#search-result-activation-and-exact-message-navigation-source-2026-10-11-audit).
+No message-history HTTP call or event-level click trace appears in the supplied HARs. The exact request chain and the conversion of `dateTimeSent` to the existing Chat Service `startTime` parameter remain unverified. Treat the source-level navigation fields as established, and the timestamp-to-wire-query mapping as an inference. See [the Teams capture/source audit](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-api-research.md#search-result-activation-and-exact-message-navigation-source-2026-10-11-audit).
 
 The captured Teams Search v2 route and the message deep link serve different steps: Search v2 discovers results; the deep link identifies a destination message. They should not be collapsed into one endpoint. The in-pane transcript search is a third workflow whose request route remains unknown.
 
-Further detail: [Teams API research](../../lrh-teams-connector/docs/teams-api-research.md) and [Teams roadmap](../../lrh-teams-connector/docs/teams-connector-roadmap.md).
+Further detail: [Teams API research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-api-research.md) and [Teams roadmap](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-connector-roadmap.md).
 
 ## SharePoint and OneDrive
 
 **Graph link:** the file search here uses Graph Search API `driveItem`; see [Microsoft Graph](#microsoft-graph-cross-product-api-product) for the shared request family and its differences from mail and Teams search.
 
-SharePoint/OneDrive file search was investigated separately from Outlook mail and Teams global search. The observed Graph route was `POST /v1.0/search/query` with `entityTypes: ["driveItem"]`; synthetic filename-only and content-only queries returned hits. The read-only SharePoint connector now uses this route, preserves returned drive/item identity, hydrates selected metadata, and supports bounded downloads. Live checks found synthetic known items in personal OneDrive and a shared SharePoint library, hydrated their metadata, downloaded matching bytes, and returned distinct pages for explicit offsets. The account's permissions exceed the connector's requested Graph scopes, so minimum permissions and exhaustive recall remain unverified; see the [SharePoint roadmap](../../lrh-sharepoint-connector/docs/roadmap.md).
+SharePoint/OneDrive file search was investigated separately from Outlook mail and Teams global search. The observed Graph route was `POST /v1.0/search/query` with `entityTypes: ["driveItem"]`; synthetic filename-only and content-only queries returned hits. The read-only SharePoint connector now uses this route, preserves returned drive/item identity, hydrates selected metadata, and supports bounded downloads. Live checks found synthetic known items in personal OneDrive and a shared SharePoint library, hydrated their metadata, downloaded matching bytes, and returned distinct pages for explicit offsets. The account's permissions exceed the connector's requested Graph scopes, so minimum permissions and exhaustive recall remain unverified; see the [SharePoint roadmap](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md).
 
 The web routes now resolve by surface. The OneDrive Files flow submitted Substrate `POST /search/api/v2/query` for `File` and also used the SharePoint REST proxy `POST /_api/sp.searchresultitemcollection.getsearchresultsasstream`; SharePoint list-stream calls loaded list content. The company SharePoint search page submitted `POST /searchservice/api/v2/query` for `File` and `People`, with `GET /search/api/v1/suggestions` for suggestions and separate init/configuration calls. The response envelope carried Search result sets, but these private routes are distinct from Graph `driveItem` search. See [Outlook research §3.9](outlook-api-research.md#39-microsoft-365-search-capture-and-source-route-map-2026-10-10) for counts and route details.
 
@@ -161,7 +161,7 @@ Outlook mail already has a direct message-ID and conversation-ID expansion path.
 
 Measurements below are point-in-time observations, not broad latency claims. Before online Teams search was implemented, a one-chat/one-day exact search fetched one history page in about one second. A five-page all-catalog search covered five pages across 966 catalog IDs in 8.7 seconds and remained incomplete. Four concurrent one-page history reads took 3.552 seconds versus 4.298 seconds sequentially, about 17% lower; each result was incomplete at the one-page limit, so this small sample does not establish a safe concurrency setting.
 
-A synthetic SQLite FTS5 comparison across 14,720 and 100,000 messages found selective rare-substring searches improved from 15.36 to 3.82 ms and 44.06 to 4.64 ms, respectively. Common-substring searches regressed from 3.97 to 29.28 ms and 4.02 to 153.09 ms; common all-terms searches regressed from 4.01 to 31.80 ms and 3.87 to 185.98 ms. The FTS index increased database size by 30.5% and 34.1% and took 77 ms and 717 ms to build. Only three query shapes were compared, so this does not justify replacing the current matcher. An empty temporary-scope delete measured roughly 1–3 microseconds per search, within noise. Detailed methods and limits are in [Teams API research](../../lrh-teams-connector/docs/teams-api-research.md#connector-code-path-audit-and-measurements-2026-10-10).
+A synthetic SQLite FTS5 comparison across 14,720 and 100,000 messages found selective rare-substring searches improved from 15.36 to 3.82 ms and 44.06 to 4.64 ms, respectively. Common-substring searches regressed from 3.97 to 29.28 ms and 4.02 to 153.09 ms; common all-terms searches regressed from 4.01 to 31.80 ms and 3.87 to 185.98 ms. The FTS index increased database size by 30.5% and 34.1% and took 77 ms and 717 ms to build. Only three query shapes were compared, so this does not justify replacing the current matcher. An empty temporary-scope delete measured roughly 1–3 microseconds per search, within noise. Detailed methods and limits are in [Teams API research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-api-research.md#connector-code-path-audit-and-measurements-2026-10-10).
 
 Three Outlook one-hit `search_messages` calls took 3.409 seconds cold, then 0.760 and 0.784 seconds warm. They returned one conversation/message each and were incomplete at the one-hit limit. These end-to-end calls do not isolate Graph latency, and no same-query comparison against Graph Search API was made. See [Outlook API research §3.16](outlook-api-research.md#316-outlook-mail-search-timing-and-route-comparison-2026-10-10).
 
@@ -185,9 +185,9 @@ Primary references: [Outlook message search](https://learn.microsoft.com/en-us/g
 
 - [Outlook API research](outlook-api-research.md)
 - [Outlook roadmap](outlook-roadmap.md)
-- [SharePoint roadmap](../../lrh-sharepoint-connector/docs/roadmap.md)
-- [Teams API research](../../lrh-teams-connector/docs/teams-api-research.md)
-- [Teams roadmap](../../lrh-teams-connector/docs/teams-connector-roadmap.md)
+- [SharePoint roadmap](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md)
+- [Teams API research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-api-research.md)
+- [Teams roadmap](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-connector-roadmap.md)
 - [Microsoft Teams deep links](https://learn.microsoft.com/en-us/microsoftteams/platform/concepts/build-and-test/deep-link-teams)
 - [Microsoft Graph chat-message search](https://learn.microsoft.com/en-us/graph/search-concept-chat-messages)
 - [Get a chatMessage](https://learn.microsoft.com/en-us/graph/api/chatmessage-get?view=graph-rest-1.0)

@@ -113,10 +113,10 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 
 | Repository | Responsible for |
 |---|---|
-| [lrh-m365-auth](../lrh-m365-auth/README.md) | Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses |
-| [lrh-outlook-connector](../lrh-outlook-connector/README.md) | Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link) |
-| [lrh-teams-connector](../lrh-teams-connector/README.md) | Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes |
-| [lrh-sharepoint-connector](../lrh-sharepoint-connector/README.md) | General OneDrive and SharePoint file search and selected file retrieval (read-only) |
+| [lrh-m365-auth](https://github.com/lucasrhode95/lrh-m365-auth) | Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses |
+| [lrh-outlook-connector](https://github.com/lucasrhode95/lrh-outlook-connector) | Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link) |
+| [lrh-teams-connector](https://github.com/lucasrhode95/lrh-teams-connector) | Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes |
+| [lrh-sharepoint-connector](https://github.com/lucasrhode95/lrh-sharepoint-connector) | General OneDrive and SharePoint file search and selected file retrieval (read-only) |
 
 A calendar event stays with Outlook even when it links to a Teams meeting.
 
