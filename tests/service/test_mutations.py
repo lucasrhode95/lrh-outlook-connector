@@ -153,10 +153,16 @@ async def test_move_refuses_deleted_items_and_hidden_folders(mutations: Mutation
     assert not fake.ows_calls
 
 
-async def test_items_out_of_reach_are_not_touched(mutations: Mutations, fake: FakeGraph) -> None:
+async def test_explicit_ids_in_hidden_folders_are_acted_on(mutations: Mutations, fake: FakeGraph) -> None:
     fake.add_folder("f-hidden", "Secret", hidden=True)
     fake.add(FakeMessage("h1", "hidden", "f-hidden", "2026-09-01T00:00:00Z", is_read=False))
-    assert statuses(await mutations.set_read(["h1"], True)) == {"h1": "failed"}
+    assert statuses(await mutations.set_read(["h1"], True)) == {"h1": "done"}
+    assert len(fake.ows_calls) == 1
+
+
+async def test_items_outside_the_mail_folders_are_not_touched(mutations: Mutations, fake: FakeGraph) -> None:
+    fake.add(FakeMessage("o1", "outside", "f-outside", "2026-09-01T00:00:00Z", is_read=False))
+    assert statuses(await mutations.set_read(["o1"], True)) == {"o1": "failed"}
     assert not fake.ows_calls
 
 

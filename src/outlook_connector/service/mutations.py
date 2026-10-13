@@ -189,7 +189,7 @@ class Mutations:
         unread = [mid for mid in ids if mid not in known]
         before = await self.mailbox.reader.get_summaries(unread) if unread else FetchedSummaries()
         summaries = known | before.summaries
-        folders, hidden = await self.mailbox.reach(m.folder_id for m in summaries.values() if m)
+        folders, _ = await self.mailbox.reach(m.folder_id for m in summaries.values() if m)
         if prepare:
             await prepare()
         results: dict[str, ItemResult] = {}
@@ -200,8 +200,8 @@ class Mutations:
                 results[mid] = ItemResult(id=mid, status="failed", detail=describe(before.failed[mid]))
             elif summary is None:
                 results[mid] = ItemResult(id=mid, status="not_found", detail="Not on the server.")
-            elif summary.folder_id not in folders or summary.folder_id in hidden:
-                results[mid] = ItemResult(id=mid, status="failed", detail="Out of reach (hidden folder).")
+            elif summary.folder_id not in folders:
+                results[mid] = ItemResult(id=mid, status="failed", detail="Outside the mail folders.")
             elif already(summary):
                 results[mid] = ItemResult(id=mid, status="unchanged")
             else:
