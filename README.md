@@ -22,7 +22,7 @@ uv run outlook-connector auth
 uv run outlook-connector status
 ```
 
-Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 connectors share one login engine (`lrh-m365-auth`), so one login covers them all.
+Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 connectors share one login engine (`lrh-m365-auth`), so one login covers them all. Microsoft may ask for more than one approval, because the connectors use different Microsoft clients.
 
 `status` shows the signed-in account and its cached profiles without touching the network. To switch accounts, run `auth --sign-out`, then `auth` again. Which profile serves which tool is in [architecture §6](docs/architecture.md#6-capability-routing-and-portability).
 
@@ -109,22 +109,22 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 
 ## Microsoft 365 connectors
 
-This repository is part of the `lrh-*` Microsoft 365 connectors: local tools that give MCP agents
+This repository is part of the `lrh-*` **Microsoft 365** connectors: local tools that give MCP agents
 access to a common corporate environment, its mail and calendar, chats and meetings, and files. Each
 repository owns one product, and all of them share one sign-in.
 
 <table>
   <tr><th width="270" nowrap>Repository</th><th>Responsible for</th></tr>
-  <tr><td nowrap><picture><img src="docs/logos/entra-id.svg" height="29" align="absmiddle" alt="Entra ID"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-m365-auth">lrh-m365-auth</a></td><td>Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses</td></tr>
-  <tr><td nowrap><picture><img src="docs/logos/outlook.svg" height="24" align="absmiddle" alt="Outlook"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-outlook-connector">lrh-outlook-connector</a></td><td>Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link)</td></tr>
-  <tr><td nowrap><picture><img src="docs/logos/teams.svg" height="24" align="absmiddle" alt="Teams"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-teams-connector">lrh-teams-connector</a></td><td>Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes</td></tr>
-  <tr><td nowrap><picture><img src="docs/logos/sharepoint.svg" height="24" align="absmiddle" alt="SharePoint"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-sharepoint-connector">lrh-sharepoint-connector</a></td><td>General OneDrive and SharePoint file search and selected file retrieval (read-only)</td></tr>
+  <tr><td nowrap><picture><img src="https://raw.githubusercontent.com/lucasrhode95/lrh-m365-auth/main/docs/logos/entra-id.svg" height="29" align="absmiddle" alt="Entra ID"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-m365-auth">lrh-m365-auth</a></td><td>Shared <b>Microsoft</b> sign-in through <b>Entra ID</b>: one encrypted token cache and the profiles every connector uses</td></tr>
+  <tr><td nowrap><picture><img src="https://raw.githubusercontent.com/lucasrhode95/lrh-m365-auth/main/docs/logos/outlook.svg" height="24" align="absmiddle" alt="Outlook"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-outlook-connector">lrh-outlook-connector</a></td><td><b>Exchange</b> mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, <b>Teams</b> join link)</td></tr>
+  <tr><td nowrap><picture><img src="https://raw.githubusercontent.com/lucasrhode95/lrh-m365-auth/main/docs/logos/teams.svg" height="24" align="absmiddle" alt="Teams"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-teams-connector">lrh-teams-connector</a></td><td><b>Teams</b> chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes</td></tr>
+  <tr><td nowrap><picture><img src="https://raw.githubusercontent.com/lucasrhode95/lrh-m365-auth/main/docs/logos/sharepoint.svg" height="24" align="absmiddle" alt="SharePoint"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-sharepoint-connector">lrh-sharepoint-connector</a></td><td>General <b>OneDrive</b> and <b>SharePoint</b> file search and selected file retrieval (read-only)</td></tr>
 </table>
 
-A calendar event stays with Outlook even when it links to a Teams meeting; Teams owns that meeting's
-chat and artifacts. A file linked from an email or a Teams message stays part of that message, while
-the stored file itself is retrieved through SharePoint. Only verified identifiers connect records
-across products.
+A calendar event stays with **Outlook** even when it links to a **Teams** meeting; **Teams** owns that
+meeting's chat and artifacts. A file linked from an email or a **Teams** message stays part of that
+message, while the stored file itself is retrieved through **SharePoint**. Only verified identifiers
+connect records across products.
 
 ## Development
 
