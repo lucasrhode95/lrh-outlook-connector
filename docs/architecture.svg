@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1600" viewBox="0 0 2600 1600" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1820" viewBox="0 0 2600 1820" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector architecture</title>
-  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads and verification; OWS handles mail changes and inbox-rule reads and writes; Cloud Settings handles native signature reads and writes. Tokens come from Entra ID through MSAL with an encrypted, cross-process-locked cache. The store keeps only the folder cache and account binding.</desc>
+  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads, verification and calendar windows; OWS handles mail changes, inbox rules, event details and the calendar fallback; Search v2 finds calendar events; Cloud Settings handles native signatures. Tokens come from Entra ID through the shared lrh-m365-auth cache, encrypted and locked across processes. The store keeps only the folder cache and account binding.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -24,9 +24,9 @@
     <marker id="purple-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#7650a4"/></marker>
   </defs>
 
-  <rect width="2600" height="1600" fill="#fff"/>
+  <rect width="2600" height="1820" fill="#fff"/>
   <text class="title" x="1300" y="70" text-anchor="middle">Outlook connector architecture</text>
-  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail data · OWS mail changes and rules · Cloud Settings signatures · minimal local state</text>
+  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail and calendar · OWS changes, rules and events · Search v2 events · Cloud Settings signatures · minimal local state</text>
 
   <!-- MCP surface. -->
   <rect x="80" y="170" width="790" height="210" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -34,9 +34,9 @@
   <text class="card-title" x="100" y="203">MCP SERVER</text>
   <text class="card-subtitle" x="100" y="227"><tspan class="code">outlook-connector mcp</tspan> · one stdio process per agent session</text>
   <rect x="100" y="260" width="750" height="100" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="detail" x="120" y="292"><tspan class="code">surfaces/mcp_main.py</tspan>: FastMCP tools + resources</text>
+  <text class="detail" x="120" y="292"><tspan class="code">surfaces/mcp_main.py</tspan>: 30 FastMCP tools</text>
   <text class="detail" x="120" y="320">Bounded results, self-contained cursors</text>
-  <text class="detail" x="120" y="348">Started by Claude Code / Codex on demand</text>
+  <text class="detail" x="120" y="348">Started by Claude Code, Codex or Copilot on demand</text>
 
   <!-- Web UI surface. -->
   <rect x="910" y="170" width="790" height="210" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -45,7 +45,7 @@
   <text class="card-subtitle" x="930" y="227"><tspan class="code">outlook-connector ui</tspan> · started by you when needed</text>
   <rect x="930" y="260" width="750" height="100" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="detail" x="950" y="292"><tspan class="code">surfaces/web/</tspan>: Starlette JSON API + static JS</text>
-  <text class="detail" x="950" y="320">Conversation list · in-memory filter · export download</text>
+  <text class="detail" x="950" y="320">Mail reads and exports only · in-memory filter · download</text>
   <text class="detail" x="950" y="348">Localhost only · exits on Ctrl+C or idle timeout</text>
 
   <!-- No-daemon note. -->
@@ -64,11 +64,12 @@
   <text class="flow-label" x="1325" y="420">calls</text>
 
   <!-- Service layer. -->
-  <rect x="80" y="450" width="1620" height="350" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="80" y="450" width="1620" height="530" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
   <path d="M80 524 V464 Q80 450 94 450 H1686 Q1700 450 1700 464 V524 Z" fill="#183153"/>
   <text class="card-title" x="100" y="483">SERVICE</text>
-  <text class="card-subtitle" x="100" y="507"><tspan class="code">service/</tspan> · every domain decision; never sees HTTP, MCP, Graph or OWS JSON</text>
+  <text class="card-subtitle" x="100" y="507"><tspan class="code">service/</tspan> · every domain decision; validates input once at the entry point; never sees HTTP or wire JSON</text>
 
+  <!-- Mail. -->
   <rect x="100" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="116" y="580">mailbox.py</text>
   <text class="detail" x="116" y="615">folders · list · get</text>
@@ -89,9 +90,9 @@
 
   <rect x="899" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="915" y="580">writes.py</text>
-  <text class="detail" x="915" y="615">drafts · send</text>
-  <text class="detail" x="915" y="643">confirmation code</text>
-  <text class="detail" x="915" y="671">reply history check</text>
+  <text class="detail" x="915" y="615">drafts, read back</text>
+  <text class="detail" x="915" y="643">send a stored draft</text>
+  <text class="detail" x="915" y="671">once · reply check</text>
 
   <rect x="1166" y="544" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="1182" y="580">mutations.py</text>
@@ -105,166 +106,245 @@
   <text class="detail" x="1448" y="643">formatter · packaging</text>
   <text class="detail" x="1448" y="671">one .txt or one .zip</text>
 
-  <rect x="100" y="718" width="1580" height="80" fill="#eff8f6"/>
-  <text class="detail" x="118" y="746"><tspan class="code" fill="#086d68">domain/models.py</tspan>: the single schema for service, MCP and web  ·  <tspan class="code" fill="#086d68">domain/errors.py</tspan></text>
-  <text class="detail" x="118" y="776"><tspan class="code" fill="#086d68">service/rules.py</tspan> · <tspan class="code" fill="#086d68">service/signatures.py</tspan>: inbox rules and roaming signatures</text>
+  <!-- Calendar, rules, signatures and shared checks. -->
+  <rect x="100" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="116" y="756">calendar.py</text>
+  <text class="detail" x="116" y="791">event search</text>
+  <text class="detail" x="116" y="819">(Search v2) · event</text>
+  <text class="detail" x="116" y="847">details by id</text>
+
+  <rect x="366" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="382" y="756" style="font-size:20px">calendar_listing.py</text>
+  <text class="detail" x="382" y="791">events in a window</text>
+  <text class="detail" x="382" y="819">Graph first, Outlook</text>
+  <text class="detail" x="382" y="847">Web if Graph fails</text>
+
+  <rect x="633" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="649" y="756">rules.py</text>
+  <text class="detail" x="649" y="791">inbox rules</text>
+  <text class="detail" x="649" y="819">propose → confirm</text>
+  <text class="detail" x="649" y="847">one write, read back</text>
+
+  <rect x="899" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="915" y="756">signatures.py</text>
+  <text class="detail" x="915" y="791">native signatures</text>
+  <text class="detail" x="915" y="819">default for drafts</text>
+  <text class="detail" x="915" y="847">each write sent once</text>
+
+  <rect x="1166" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="756">passive_html.py</text>
+  <text class="detail" x="1182" y="791">one HTML check for</text>
+  <text class="detail" x="1182" y="819">draft bodies and</text>
+  <text class="detail" x="1182" y="847">signatures</text>
+
+  <rect x="1432" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="1448" y="756">helpers</text>
+  <text class="detail" x="1448" y="791" style="font-size:19px"><tspan class="code">scope</tspan> · <tspan class="code">cursors</tspan></text>
+  <text class="detail" x="1448" y="819" style="font-size:19px"><tspan class="code">failures</tspan> · <tspan class="code">localfiles</tspan></text>
+  <text class="detail" x="1448" y="847" style="font-size:19px"><tspan class="code">concurrency</tspan></text>
+
+  <rect x="100" y="896" width="1580" height="66" fill="#eff8f6"/>
+  <text class="detail" x="118" y="937"><tspan class="code" fill="#086d68">domain/models.py</tspan>: the single schema for service, MCP and web  ·  <tspan class="code" fill="#086d68">domain/errors.py</tspan>  ·  <tspan class="code" fill="#086d68">domain/time.py</tspan>: a time without a zone is UTC</text>
 
   <!-- Service uses store and remote. -->
-  <path class="local-flow" d="M340 804 V866"/>
-  <text class="flow-label" x="360" y="842">cache</text>
-  <path class="call-flow" d="M1170 800 V866"/>
-  <text class="flow-label" x="1190" y="842">domain calls</text>
+  <path class="local-flow" d="M340 984 V1046"/>
+  <text class="flow-label" x="360" y="1022">cache</text>
+  <path class="call-flow" d="M1170 980 V1046"/>
+  <text class="flow-label" x="1190" y="1022">domain calls through ports</text>
 
   <!-- Local store. -->
-  <rect x="80" y="870" width="520" height="320" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-  <path d="M80 944 V884 Q80 870 94 870 H586 Q600 870 600 884 V944 Z" fill="#183153"/>
-  <text class="card-title" x="100" y="903">LOCAL STORE</text>
-  <text class="card-subtitle" x="100" y="927"><tspan class="code">store/</tspan> · SQLite per account (WAL)</text>
-  <rect x="100" y="960" width="480" height="210" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="detail" x="120" y="995">Folder cache (fresh for 10 minutes)</text>
-  <text class="detail" x="120" y="1025">Account binding</text>
-  <text class="muted" x="120" y="1110">Not stored: messages, bodies,</text>
-  <text class="muted" x="120" y="1138">attachments</text>
+  <rect x="80" y="1050" width="520" height="400" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M80 1124 V1064 Q80 1050 94 1050 H586 Q600 1050 600 1064 V1124 Z" fill="#183153"/>
+  <text class="card-title" x="100" y="1083">LOCAL STORE</text>
+  <text class="card-subtitle" x="100" y="1107"><tspan class="code">store/</tspan> · SQLite per account (WAL)</text>
+  <rect x="100" y="1140" width="480" height="290" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="detail" x="120" y="1175">Folder cache (fresh for 10 minutes)</text>
+  <text class="detail" x="120" y="1205">Account binding</text>
+  <text class="muted" x="120" y="1370">Not stored: messages, bodies,</text>
+  <text class="muted" x="120" y="1398">attachments, events</text>
 
   <!-- Remote layer. -->
-  <rect x="640" y="870" width="1060" height="320" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-  <path d="M640 944 V884 Q640 870 654 870 H1686 Q1700 870 1700 884 V944 Z" fill="#183153"/>
-  <text class="card-title" x="660" y="903">REMOTE</text>
-  <text class="card-subtitle" x="660" y="927"><tspan class="code">remote/</tspan> · adapters behind MailReader, MailWriter, RuleWriter and SignatureStore</text>
+  <rect x="640" y="1050" width="1060" height="400" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M640 1124 V1064 Q640 1050 654 1050 H1686 Q1700 1050 1700 1064 V1124 Z" fill="#183153"/>
+  <text class="card-title" x="660" y="1083">REMOTE</text>
+  <text class="card-subtitle" x="660" y="1107"><tspan class="code">remote/</tspan> · the only code that knows wire formats and ids; one adapter per port</text>
 
-  <rect x="660" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="672" y="982" font-size="19">graph.py</text>
-  <text class="detail" x="672" y="1008" font-size="16">paging · batches · files</text>
+  <rect x="660" y="1138" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="1162" style="font-size:20px">graph.py</text>
+  <text class="detail" x="672" y="1188" style="font-size:18px">paging · batches · files</text>
 
-  <rect x="915" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="927" y="982" font-size="19">graph_mail.py</text>
-  <text class="detail" x="927" y="1008" font-size="16">mail · search · files</text>
+  <rect x="915" y="1138" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="1162" style="font-size:20px">graph_mail.py</text>
+  <text class="detail" x="927" y="1188" style="font-size:18px">mail · search · files</text>
 
-  <rect x="1170" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1182" y="982" font-size="19">graph_mapping.py</text>
-  <text class="detail" x="1182" y="1008" font-size="16">Graph JSON → models</text>
+  <rect x="1170" y="1138" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="1162" style="font-size:20px">graph_mapping.py</text>
+  <text class="detail" x="1182" y="1188" style="font-size:18px">Graph JSON → models</text>
 
-  <rect x="1425" y="958" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1437" y="982" font-size="19">urls.py</text>
-  <text class="detail" x="1437" y="1008" font-size="16">host allowlist</text>
+  <rect x="1425" y="1138" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="1162" style="font-size:20px">graph_calendar.py</text>
+  <text class="detail" x="1437" y="1188" style="font-size:18px">calendar view (Graph)</text>
 
-  <rect x="660" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="672" y="1056" font-size="19">ows.py</text>
-  <text class="detail" x="672" y="1082" font-size="16">JSON RPC · transport</text>
+  <rect x="660" y="1212" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="1236" style="font-size:20px">ows.py</text>
+  <text class="detail" x="672" y="1262" style="font-size:18px">JSON RPC · transport</text>
 
-  <rect x="915" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="927" y="1056" font-size="19">ows_mapping.py</text>
-  <text class="detail" x="927" y="1082" font-size="16">OWS request bodies</text>
+  <rect x="915" y="1212" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="1236" style="font-size:20px">ows_mapping.py</text>
+  <text class="detail" x="927" y="1262" style="font-size:18px">OWS request bodies</text>
 
-  <rect x="1170" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1182" y="1056" font-size="19">ows_mail.py</text>
-  <text class="detail" x="1182" y="1082" font-size="16">drafts · send · changes</text>
+  <rect x="1170" y="1212" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="1236" style="font-size:20px">ows_mail.py</text>
+  <text class="detail" x="1182" y="1262" style="font-size:18px">drafts · send · changes</text>
 
-  <rect x="1425" y="1032" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1437" y="1056" font-size="19">ows_rules.py</text>
-  <text class="detail" x="1437" y="1082" font-size="16">read · write rules</text>
+  <rect x="1425" y="1212" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="1236" style="font-size:20px">ows_rules.py</text>
+  <text class="detail" x="1437" y="1262" style="font-size:18px">read · write rules</text>
 
-  <rect x="660" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="672" y="1130" font-size="19">ports.py</text>
-  <text class="detail" x="672" y="1156" font-size="16">adapter interfaces</text>
+  <rect x="660" y="1286" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="1310" style="font-size:20px">ows_calendar.py</text>
+  <text class="detail" x="672" y="1336" style="font-size:18px">event details · fallback</text>
 
-  <rect x="915" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="927" y="1130" font-size="19">transport.py</text>
-  <text class="detail" x="927" y="1156" font-size="16">auth · host · retries</text>
+  <rect x="915" y="1286" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="1310" style="font-size:20px">substrate_events.py</text>
+  <text class="detail" x="927" y="1336" style="font-size:18px">event search (Search v2)</text>
 
-  <rect x="1170" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1182" y="1130" font-size="19">ids.py</text>
-  <text class="detail" x="1182" y="1156" font-size="16">Graph ID ↔ OWS ID</text>
+  <rect x="1170" y="1286" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="1310" style="font-size:20px">calendar_mapping.py</text>
+  <text class="detail" x="1182" y="1336" style="font-size:18px">event fields → models</text>
 
-  <rect x="1425" y="1106" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="1437" y="1130" font-size="19">cloud_settings.py</text>
-  <text class="detail" x="1437" y="1156" font-size="16">signature settings</text>
+  <rect x="1425" y="1286" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="1310" style="font-size:20px">cloud_settings.py</text>
+  <text class="detail" x="1437" y="1336" style="font-size:18px">signature settings</text>
+
+  <rect x="660" y="1360" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="672" y="1384" style="font-size:20px">ports.py</text>
+  <text class="detail" x="672" y="1410" style="font-size:18px">adapter interfaces</text>
+
+  <rect x="915" y="1360" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="927" y="1384" style="font-size:20px">transport.py</text>
+  <text class="detail" x="927" y="1410" style="font-size:18px">auth · retries · ≤ 4 at once</text>
+
+  <rect x="1170" y="1360" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1182" y="1384" style="font-size:20px">urls.py</text>
+  <text class="detail" x="1182" y="1410" style="font-size:18px">host allowlist</text>
+
+  <rect x="1425" y="1360" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title code" x="1437" y="1384" style="font-size:20px">ids.py</text>
+  <text class="detail" x="1437" y="1410" style="font-size:18px">Graph ID ↔ OWS ID</text>
 
   <!-- Sign-in command. -->
-  <rect x="80" y="1240" width="520" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-  <path d="M80 1314 V1254 Q80 1240 94 1240 H586 Q600 1240 600 1254 V1314 Z" fill="#183153"/>
-  <text class="card-title" x="100" y="1273">SIGN-IN</text>
-  <text class="card-subtitle" x="100" y="1297"><tspan class="code">outlook-connector auth</tspan></text>
-  <rect x="100" y="1328" width="480" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="detail" x="120" y="1362">Device code happens only here.</text>
-  <text class="detail" x="120" y="1396">Surfaces never prompt; they return</text>
-  <text class="detail" x="120" y="1426">"run outlook-connector auth".</text>
-  <path class="call-flow" d="M600 1376 H636"/>
+  <rect x="80" y="1500" width="520" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M80 1574 V1514 Q80 1500 94 1500 H586 Q600 1500 600 1514 V1574 Z" fill="#183153"/>
+  <text class="card-title" x="100" y="1533">SIGN-IN</text>
+  <text class="card-subtitle" x="100" y="1557"><tspan class="code">outlook-connector auth</tspan></text>
+  <rect x="100" y="1588" width="480" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="detail" x="120" y="1622">Device code happens only here.</text>
+  <text class="detail" x="120" y="1656">Surfaces never prompt; they return</text>
+  <text class="detail" x="120" y="1686">"run outlook-connector auth".</text>
+  <path class="call-flow" d="M600 1636 H636"/>
 
   <!-- Tokens. -->
-  <rect x="640" y="1240" width="1060" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-  <path d="M640 1314 V1254 Q640 1240 654 1240 H1686 Q1700 1240 1700 1254 V1314 Z" fill="#183153"/>
-  <text class="card-title" x="660" y="1273">TOKENS</text>
-  <text class="card-subtitle" x="660" y="1297"><tspan class="code">lrh-m365-auth</tspan> · shared profiles · MSAL · encrypted · locked</text>
-  <rect x="660" y="1328" width="500" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <rect x="678" y="1340" width="32" height="26" rx="5" fill="#2b6cb0"/>
-  <text class="badge" x="694" y="1359" text-anchor="middle">G</text>
-  <text class="section-title" x="720" y="1361">outlook.graph</text>
-  <text class="detail" x="680" y="1398">Outlook Mobile <tspan class="code">27922004…</tspan></text>
-  <text class="detail" x="680" y="1428">→ Graph <tspan class="code">Mail.Read + User.Read</tspan></text>
-  <rect x="1180" y="1328" width="500" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <rect x="1198" y="1340" width="32" height="26" rx="5" fill="#b7791f"/>
-  <text class="badge" x="1214" y="1359" text-anchor="middle">O</text>
-  <text class="section-title" x="1240" y="1361" font-size="19">outlook.api</text>
-  <text class="detail" x="1200" y="1398">One Outlook Web <tspan class="code">9199bf20…</tspan></text>
-  <text class="detail" x="1200" y="1428">→ <tspan class="code">outlook.office.com</tspan></text>
+  <rect x="640" y="1500" width="1060" height="220" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M640 1574 V1514 Q640 1500 654 1500 H1686 Q1700 1500 1700 1514 V1574 Z" fill="#183153"/>
+  <text class="card-title" x="660" y="1533">TOKENS</text>
+  <text class="card-subtitle" x="660" y="1557"><tspan class="code">lrh-m365-auth</tspan> · profiles shared by every <tspan class="code">lrh-*</tspan> Microsoft 365 connector · encrypted · locked</text>
+
+  <rect x="660" y="1588" width="245" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="674" y="1600" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="690" y="1619" text-anchor="middle">G</text>
+  <text class="section-title" x="714" y="1620" style="font-size:21px">outlook.graph</text>
+  <text class="detail" x="674" y="1656" style="font-size:19px">Outlook Mobile</text>
+  <text class="detail" x="674" y="1684" style="font-size:19px">Graph mail, profile</text>
+
+  <rect x="915" y="1588" width="245" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="929" y="1600" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="945" y="1619" text-anchor="middle">G</text>
+  <text class="section-title" x="969" y="1620" style="font-size:21px">teams.graph</text>
+  <text class="detail" x="929" y="1656" style="font-size:19px">Teams client</text>
+  <text class="detail" x="929" y="1684" style="font-size:19px">Graph calendar view</text>
+
+  <rect x="1170" y="1588" width="245" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1184" y="1600" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="1200" y="1619" text-anchor="middle">O</text>
+  <text class="section-title" x="1224" y="1620" style="font-size:21px">outlook.api</text>
+  <text class="detail" x="1184" y="1656" style="font-size:19px">One Outlook Web</text>
+  <text class="detail" x="1184" y="1684" style="font-size:19px">OWS · Cloud Settings</text>
+
+  <rect x="1425" y="1588" width="245" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1439" y="1600" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="1455" y="1619" text-anchor="middle">O</text>
+  <text class="section-title" x="1479" y="1620" style="font-size:21px">m365.search</text>
+  <text class="detail" x="1439" y="1656" style="font-size:19px">One Outlook Web</text>
+  <text class="detail" x="1439" y="1684" style="font-size:19px">Search v2</text>
 
   <!-- Tokens feed the transport and come from Entra. -->
-  <path class="call-flow" d="M910 1240 V1194"/>
-  <text class="flow-label" x="930" y="1224">bearer tokens per request</text>
-  <path class="call-flow" d="M1700 1376 H1916"/>
-  <text class="flow-label" x="1800" y="1362" text-anchor="middle">sign-in / refresh</text>
+  <path class="call-flow" d="M780 1500 V1454"/>
+  <text class="flow-label" x="800" y="1484">bearer tokens per request</text>
+  <path class="call-flow" d="M1700 1636 H1916"/>
+  <text class="flow-label" x="1800" y="1622" text-anchor="middle">sign-in / refresh</text>
 
   <!-- Microsoft 365. -->
-  <rect x="1900" y="790" width="620" height="670" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-  <path d="M1900 864 V804 Q1900 790 1914 790 H2506 Q2520 790 2520 804 V864 Z" fill="#183153"/>
-  <text class="card-title" x="1920" y="823">MICROSOFT 365</text>
-  <text class="card-subtitle" x="1920" y="847">first-party public clients · no app registration</text>
+  <rect x="1900" y="970" width="620" height="750" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+  <path d="M1900 1044 V984 Q1900 970 1914 970 H2506 Q2520 970 2520 984 V1044 Z" fill="#183153"/>
+  <text class="card-title" x="1920" y="1003">MICROSOFT 365</text>
+  <text class="card-subtitle" x="1920" y="1027">first-party public clients · no app registration</text>
 
-  <rect x="1920" y="884" width="580" height="150" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <rect x="1938" y="898" width="32" height="26" rx="5" fill="#2b6cb0"/>
-  <text class="badge" x="1954" y="917" text-anchor="middle">G</text>
-  <text class="section-title" x="1980" y="919">Microsoft Graph (documented)</text>
-  <text class="detail" x="1940" y="954"><tspan class="code">graph.microsoft.com/v1.0</tspan></text>
-  <text class="detail" x="1940" y="984"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan></text>
-  <text class="detail" x="1940" y="1014">$search · $batch · $count · attachments</text>
+  <rect x="1920" y="1060" width="580" height="124" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1072" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="1954" y="1091" text-anchor="middle">G</text>
+  <text class="section-title" x="1980" y="1093">Microsoft Graph (documented)</text>
+  <text class="detail" x="1940" y="1126" style="font-size:17px"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan> · <tspan class="code">/me/calendarView</tspan></text>
+  <text class="detail" x="1940" y="1160" style="font-size:19px">$search · $batch · $count · attachments</text>
 
-  <rect x="1920" y="1050" width="580" height="150" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <rect x="1938" y="1064" width="32" height="26" rx="5" fill="#b7791f"/>
-  <text class="badge" x="1954" y="1083" text-anchor="middle">O</text>
-  <text class="section-title" x="1980" y="1085">Outlook Web App OWS (private)</text>
-  <text class="detail" x="1940" y="1120"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text>
-  <text class="detail" x="1940" y="1150">CreateItem · UpdateItem · MoveItem</text>
-  <text class="detail" x="1940" y="1180">DeleteItem · GetInboxRule · rule actions</text>
+  <rect x="1920" y="1196" width="580" height="124" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1208" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="1954" y="1227" text-anchor="middle">O</text>
+  <text class="section-title" x="1980" y="1229">Outlook Web App OWS (private)</text>
+  <text class="detail" x="1940" y="1262" style="font-size:19px">CreateItem · UpdateItem · MoveItem · DeleteItem</text>
+  <text class="detail" x="1940" y="1296" style="font-size:19px">GetItem · GetCalendarView · inbox rules</text>
 
-  <rect x="1920" y="1250" width="580" height="194" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title" x="1940" y="1290">Entra ID</text>
-  <text class="detail" x="1940" y="1324"><tspan class="code">login.microsoftonline.com</tspan></text>
-  <text class="detail" x="1940" y="1354">device code · refresh tokens</text>
-  <text class="detail" x="1940" y="1384">Denied pairs (AADSTS65002)</text>
-  <text class="detail" x="1940" y="1412">are never requested again</text>
+  <rect x="1920" y="1332" width="580" height="80" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1344" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="1954" y="1363" text-anchor="middle">O</text>
+  <text class="section-title" x="1980" y="1365">Search v2 (private)</text>
+  <text class="detail" x="1940" y="1398" style="font-size:19px">Exchange events · <tspan class="code">searchservice/api/v2/query</tspan></text>
+
+  <rect x="1920" y="1424" width="580" height="80" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <rect x="1938" y="1436" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="1954" y="1455" text-anchor="middle">O</text>
+  <text class="section-title" x="1980" y="1457">Cloud Settings</text>
+  <text class="detail" x="1940" y="1490" style="font-size:19px">native roaming signatures</text>
+
+  <rect x="1920" y="1534" width="580" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+  <text class="section-title" x="1940" y="1570">Entra ID</text>
+  <text class="detail" x="1940" y="1602"><tspan class="code">login.microsoftonline.com</tspan></text>
+  <text class="detail" x="1940" y="1632">device code · refresh tokens</text>
+  <text class="detail" x="1940" y="1662">Denied pairs (AADSTS65002)</text>
+  <text class="detail" x="1940" y="1690">are never requested again</text>
 
   <!-- Remote to Microsoft. -->
-  <path class="api-flow" d="M1680 1008 H1916"/>
-  <text class="flow-label" x="1800" y="994" text-anchor="middle">Graph API calls</text>
-  <path class="api-flow" d="M1680 1064 H1916"/>
-  <text class="flow-label" x="1800" y="1050" text-anchor="middle">OWS mail + rule calls</text>
-  <path class="api-flow" d="M1680 1160 H1870 V1220 H1916"/>
-  <text class="flow-label" x="1800" y="1208" text-anchor="middle">signature API calls</text>
-  <text class="detail" x="1940" y="1228">Cloud Settings · native roaming signatures</text>
+  <path class="api-flow" d="M1700 1122 H1916"/>
+  <text class="flow-label" x="1800" y="1108" text-anchor="middle">Graph calls</text>
+  <path class="api-flow" d="M1700 1258 H1916"/>
+  <text class="flow-label" x="1800" y="1244" text-anchor="middle">OWS calls</text>
+  <path class="api-flow" d="M1700 1372 H1916"/>
+  <text class="flow-label" x="1800" y="1358" text-anchor="middle">event search</text>
+  <path class="api-flow" d="M1700 1430 H1870 V1464 H1916"/>
+  <text class="flow-label" x="1790" y="1420" text-anchor="middle">signatures</text>
 
   <!-- Profile badges identify API families; API flows do not imply read or write. -->
-  <rect x="80" y="1500" width="32" height="26" rx="5" fill="#2b6cb0"/>
-  <text class="badge" x="96" y="1519" text-anchor="middle">G</text>
-  <text class="flow-label" x="122" y="1520">Graph profile</text>
-  <rect x="330" y="1500" width="32" height="26" rx="5" fill="#b7791f"/>
-  <text class="badge" x="346" y="1519" text-anchor="middle">O</text>
-  <text class="flow-label" x="372" y="1520">Outlook profile</text>
-  <path class="api-flow" d="M650 1513 H720"/>
-  <text class="flow-label" x="732" y="1520">API call over HTTPS</text>
-  <path class="local-flow" d="M1020 1513 H1090"/>
-  <text class="flow-label" x="1102" y="1520">local read and write</text>
-  <path class="call-flow" d="M1360 1513 H1430"/>
-  <text class="flow-label" x="1442" y="1520">call / dependency (points to the callee)</text>
-  <text class="flow-label" x="1900" y="1520">Surfaces never call <tspan class="code">remote/</tspan> or <tspan class="code">store/</tspan> directly.</text>
+  <rect x="80" y="1760" width="32" height="26" rx="5" fill="#2b6cb0"/>
+  <text class="badge" x="96" y="1779" text-anchor="middle">G</text>
+  <text class="flow-label" x="122" y="1780">Graph profiles</text>
+  <rect x="330" y="1760" width="32" height="26" rx="5" fill="#b7791f"/>
+  <text class="badge" x="346" y="1779" text-anchor="middle">O</text>
+  <text class="flow-label" x="372" y="1780">Outlook Web profiles</text>
+  <path class="api-flow" d="M650 1773 H720"/>
+  <text class="flow-label" x="732" y="1780">API call over HTTPS</text>
+  <path class="local-flow" d="M1020 1773 H1090"/>
+  <text class="flow-label" x="1102" y="1780">local read and write</text>
+  <path class="call-flow" d="M1360 1773 H1430"/>
+  <text class="flow-label" x="1442" y="1780">call / dependency (points to the callee)</text>
+  <text class="flow-label" x="1900" y="1780">Surfaces never call <tspan class="code">remote/</tspan> or <tspan class="code">store/</tspan> directly.</text>
 </svg>
