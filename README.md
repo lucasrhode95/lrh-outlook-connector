@@ -24,7 +24,7 @@ uv run outlook-connector auth
 uv run outlook-connector status
 ```
 
-Run the `auth` command above and it logs you in. All `lrh-*` products share the same login engine, so one login covers them all.
+Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 connectors share one login engine (`lrh-m365-auth`), so one login covers them all.
 
 Core mail reads, search, exports and attachment downloads use `outlook.graph`. The `outlook.api`
 profile is also required for inbox-rule and native-signature reads, as well as to draft, send, change
