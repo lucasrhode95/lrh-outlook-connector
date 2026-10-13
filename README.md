@@ -1,4 +1,4 @@
-# Outlook for MCP clients
+![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](docs/connector-overview.svg)
 
 A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
@@ -6,8 +6,6 @@ A local MCP server and browser UI for one user’s Exchange Online mailbox.
 - Export conversations, messages, or a folder/date window with attachments.
 - Draft and send email, manage mailbox rules, and organize messages.
 - Browse folders, read messages, and download attachments in the local UI.
-
-![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](docs/connector-overview.svg)
 
 ## Requirements
 
@@ -117,10 +115,10 @@ repository owns one product, and all of them share one sign-in.
 
 <table>
   <tr><th width="270" nowrap>Repository</th><th>Responsible for</th></tr>
-  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-m365-auth"><img src="docs/logos/entra-id.svg" height="24" align="absmiddle" alt="Entra ID">&nbsp;lrh-m365-auth</a></td><td>Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses</td></tr>
-  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-outlook-connector"><img src="docs/logos/outlook.svg" height="24" align="absmiddle" alt="Outlook">&nbsp;lrh-outlook-connector</a></td><td>Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link)</td></tr>
-  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-teams-connector"><img src="docs/logos/teams.svg" height="24" align="absmiddle" alt="Teams">&nbsp;lrh-teams-connector</a></td><td>Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes</td></tr>
-  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-sharepoint-connector"><img src="docs/logos/sharepoint.svg" height="24" align="absmiddle" alt="SharePoint">&nbsp;lrh-sharepoint-connector</a></td><td>General OneDrive and SharePoint file search and selected file retrieval (read-only)</td></tr>
+  <tr><td nowrap><picture><img src="docs/logos/entra-id.svg" height="29" align="absmiddle" alt="Entra ID"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-m365-auth">lrh-m365-auth</a></td><td>Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses</td></tr>
+  <tr><td nowrap><picture><img src="docs/logos/outlook.svg" height="24" align="absmiddle" alt="Outlook"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-outlook-connector">lrh-outlook-connector</a></td><td>Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link)</td></tr>
+  <tr><td nowrap><picture><img src="docs/logos/teams.svg" height="24" align="absmiddle" alt="Teams"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-teams-connector">lrh-teams-connector</a></td><td>Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes</td></tr>
+  <tr><td nowrap><picture><img src="docs/logos/sharepoint.svg" height="24" align="absmiddle" alt="SharePoint"></picture>&nbsp;<a href="https://github.com/lucasrhode95/lrh-sharepoint-connector">lrh-sharepoint-connector</a></td><td>General OneDrive and SharePoint file search and selected file retrieval (read-only)</td></tr>
 </table>
 
 A calendar event stays with Outlook even when it links to a Teams meeting; Teams owns that meeting's
