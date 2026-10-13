@@ -223,7 +223,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 **[`writes.py`](../src/outlook_connector/service/writes.py):**
 - create_draft validates explicit text/HTML, recipients, subject and reply context; text becomes
   escaped minimal HTML preserving whitespace and NBSP. HTML passes through [`passive_start_tags`](../src/outlook_connector/service/passive_html.py), which refuses
-  active web content and markup left open at the end (an unfinished tag, attribute, comment or script). The private writer takes DraftMessage, always HTML.
+  active web content, elements that change how the rest of the markup is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`), and markup left open at the end (an unfinished tag, attribute, comment or script). The private writer takes DraftMessage, always HTML.
 - [`service/signatures.py`](../src/outlook_connector/service/signatures.py) validates exact names and passive HTML with the same checker as drafts, plus quoted data-URI image sources; commas are not allowed in names. It checks
   Outlook-profile account ownership, freshly reads native settings and contents, and refuses
   missing/unreadable defaults or a configuration that changes during a read. It does not cache
@@ -518,7 +518,7 @@ Saves a new message or a reply as a draft and returns the server's read-back: th
 - Recipients: `to`, `cc` and `bcc` together hold at most 100 addresses, and none may repeat.
 - Subject: a new message needs one, up to 255 characters. For a reply, set `reply_to_message_id`; `reply_all=true` also replies to everyone on the original. `reply_all` needs `reply_to_message_id`.
 - Signatures: by default, Outlook's native default for new mail or for replies is added after the body. `signature` selects one by exact name, and `include_signature=false` adds none. A selected signature that is missing or unreadable is an error, not a silent fallback.
-- HTML bodies are checked once, by the passive-HTML rules (a live save test showed Outlook dropping an event handler, but the join also rewrote the signature wrapper; research [§3.21](outlook-api-research.md#321-unfinished-markup-on-save-2026-10-13)): scripts, frames, form controls, event-handler attributes and `javascript:` or `vbscript:` URLs are refused, and markup left open at the end is refused too, so the signature block appended after the body cannot complete it.
+- HTML bodies are checked once, by the passive-HTML rules (a live save test showed Outlook dropping an event handler, but the join also rewrote the signature wrapper; research [§3.21](outlook-api-research.md#321-unfinished-markup-on-save-2026-10-13)): scripts, frames, form controls, event-handler attributes and `javascript:` or `vbscript:` URLs are refused, and markup left open at the end is refused too, and so are elements that change how the rest of the markup is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`). The signature block appended after the body can then neither complete the body's markup nor render as text.
 - For a reply, `history_intact` and `history_problem` report whether the quoted original kept its structure and inline images.
 - Drafts are composed once and never edited. To change a draft, create a full replacement with the same content (and, for a reply, the same `reply_to_message_id` and `reply_all`), check its read-back, delete the old draft with `delete_messages`, and use the new id. Never delete first. The old version stays in Deleted Items. Edits and attachments made to the old draft in Outlook are not carried over. There is no version check, so read the old draft first if needed.
 
@@ -572,7 +572,7 @@ Returns one signature's HTML and plain text. A signature that `list_signatures` 
 
 #### `create_signature`
 
-Creates a signature from passive HTML. Scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs and markup left open at the end are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
+Creates a signature from passive HTML. Scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs, markup left open at the end, and elements that change how the rest of the markup is read are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
 
 To copy a signature from an Outlook draft: read its HTML, download each inline image it references by `cid:`, replace each `cid:` reference with a `data:image` URI holding that image's bytes, and create the signature from the result.
 

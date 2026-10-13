@@ -53,3 +53,19 @@ def test_start_tags_carry_their_source_for_later_rules() -> None:
     (tag,) = passive_start_tags('<img src="data:image/png;base64,AAAA">')
     assert tag.name == "img"
     assert 'src="data:image/png;base64,AAAA"' in tag.source
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        "<plaintext>Body",
+        "<p>x</p><title>t</title>",
+        "<xmp>x</xmp>",
+        "<noembed>x</noembed>",
+        "<noframes>x</noframes>",
+        "<noscript>x</noscript>",
+    ],
+)
+def test_elements_that_change_how_the_rest_is_read_are_refused(page: str) -> None:
+    with pytest.raises(InvalidRequest, match="changes how the rest of the markup is read"):
+        passive_start_tags(page)

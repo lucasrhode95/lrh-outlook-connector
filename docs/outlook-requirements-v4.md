@@ -263,7 +263,7 @@ authoring or Send As is supported.
 
 Text is escaped into minimal HTML, preserving line breaks, indentation, repeated spaces/tabs and
 non-breaking spaces. HTML is intentional pass-through except scripts, embedded active content,
-forms, JavaScript URLs, event handlers and markup left open at the end. Both routes share one private HTML write engine.
+forms, JavaScript URLs, event handlers, markup left open at the end, and elements that change how the rest of the markup is read. Both routes share one private HTML write engine.
 
 A successful create requires Graph read-back and returns the draft id, server text and HTML, and
 simple findings (empty body, missing known attachments/inline images, reply history). Read-back
