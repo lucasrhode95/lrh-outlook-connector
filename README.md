@@ -115,12 +115,13 @@ This repository is part of the `lrh-*` Microsoft 365 connectors: local tools tha
 access to a common corporate environment, its mail and calendar, chats and meetings, and files. Each
 repository owns one product, and all of them share one sign-in.
 
-| | Repository | Responsible for |
-|---|---|---|
-| <img src="docs/logos/entra-id.svg" height="20" alt="Entra ID"> | [lrh-m365-auth](https://github.com/lucasrhode95/lrh-m365-auth) | Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses |
-| <img src="docs/logos/outlook.svg" height="20" alt="Outlook"> | [lrh-outlook-connector](https://github.com/lucasrhode95/lrh-outlook-connector) | Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link) |
-| <img src="docs/logos/teams.svg" height="20" alt="Teams"> | [lrh-teams-connector](https://github.com/lucasrhode95/lrh-teams-connector) | Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes |
-| <img src="docs/logos/sharepoint.svg" height="20" alt="SharePoint"> | [lrh-sharepoint-connector](https://github.com/lucasrhode95/lrh-sharepoint-connector) | General OneDrive and SharePoint file search and selected file retrieval (read-only) |
+<table>
+  <tr><th width="270" nowrap>Repository</th><th>Responsible for</th></tr>
+  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-m365-auth"><img src="docs/logos/entra-id.svg" height="24" align="absmiddle" alt="Entra ID">&nbsp;lrh-m365-auth</a></td><td>Shared Microsoft sign-in: one encrypted token cache and the profiles every connector uses</td></tr>
+  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-outlook-connector"><img src="docs/logos/outlook.svg" height="24" align="absmiddle" alt="Outlook">&nbsp;lrh-outlook-connector</a></td><td>Exchange mail, folders, drafts, rules, native signatures, and calendar events (schedule, agenda, attendees, Teams join link)</td></tr>
+  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-teams-connector"><img src="docs/logos/teams.svg" height="24" align="absmiddle" alt="Teams">&nbsp;lrh-teams-connector</a></td><td>Teams chats and channels, message attachments, and meeting chats, recordings, transcripts, recaps and notes</td></tr>
+  <tr><td nowrap><a href="https://github.com/lucasrhode95/lrh-sharepoint-connector"><img src="docs/logos/sharepoint.svg" height="24" align="absmiddle" alt="SharePoint">&nbsp;lrh-sharepoint-connector</a></td><td>General OneDrive and SharePoint file search and selected file retrieval (read-only)</td></tr>
+</table>
 
 A calendar event stays with Outlook even when it links to a Teams meeting; Teams owns that meeting's
 chat and artifacts. A file linked from an email or a Teams message stays part of that message, while
