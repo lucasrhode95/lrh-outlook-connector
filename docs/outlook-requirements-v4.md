@@ -54,7 +54,7 @@ Both surfaces are thin adapters over one shared service, and neither may limit t
 
 ## 4. Authentication (decided)
 
-No new Entra registration exists or will be made. The shared private `lrh-m365-auth` package owns
+No new Entra registration exists or will be made. The shared `lrh-m365-auth` package owns
 MSAL `PublicClientApplication` instances and one encrypted token cache used by Outlook, Teams and
 SharePoint. Its profile catalog includes these Outlook client/resource pairs:
 
