@@ -3,6 +3,8 @@ name = "outlook-connector"
 version = "0.1.0"
 description = "Local Outlook mailbox connector: MCP server and local UI over Microsoft Graph and Outlook APIs."
 readme = "README.md"
+license = "LicenseRef-PolyForm-Strict-1.0.0"
+license-files = ["LICENSE.md"]
 requires-python = ">=3.12"
 dependencies = [
     "mcp>=1.26,<2",
