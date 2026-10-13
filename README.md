@@ -26,28 +26,10 @@ uv run outlook-connector status
 
 Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 connectors share one login engine (`lrh-m365-auth`), so one login covers them all.
 
-Core mail reads, search, exports and attachment downloads use `outlook.graph`. The `outlook.api`
-profile is also required for inbox-rule and native-signature reads, as well as to draft, send, change
-mailbox state or manage signature settings. `outlook.graph` requests Graph `Mail.Read` for mailbox
-data and `User.Read` for the signed-in profile and photo.
+`status` shows the signed-in account and its cached profiles without touching the network. To switch accounts, run `auth --sign-out`, then `auth` again. Which profile serves which tool is in [architecture §6](docs/architecture.md#6-capability-routing-and-portability).
 
-The encrypted shared cache lives under `~/.lrh-m365-auth` by default; set `M365_AUTH_HOME` to use a
-different shared location. It holds one active Microsoft account for all three connectors. To switch
-accounts, sign out of the shared cache and sign in again:
-
-```bash
-uv run outlook-connector auth --sign-out
-uv run outlook-connector auth
-```
-
-`uv run outlook-connector status` reads local profile state without network requests. It reports
-cached client credentials and any matching resource access-token expiry. Profiles sharing one
-client can have the same credential state even when only one resource token is cached.
-`status --check` attempts token acquisition for every profile; it does not verify that each
-Microsoft service or mailbox operation is authorized.
-
-> Credentials are entered only on Microsoft's sign-in page. The application never sees them; tokens
-> stay in the shared encrypted cache. If encryption is unavailable, authentication fails closed.
+> Credentials are entered only on Microsoft's sign-in page. Tokens stay in the shared encrypted cache
+> (`~/.lrh-m365-auth`, or `M365_AUTH_HOME`). If encryption is unavailable, sign-in fails closed.
 
 ### Configure a local MCP client
 

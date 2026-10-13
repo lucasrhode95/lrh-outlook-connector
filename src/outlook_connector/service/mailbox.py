@@ -620,7 +620,7 @@ class Mailbox:
         scope: Scope = DEFAULT_SCOPE,
         detail: Detail = "full",
     ) -> SearchResult:
-        """Server-side search, hits grouped by conversation (requirements v4 §9).
+        """Server-side search, hits grouped by conversation (requirements v4 §8).
 
         Entry point: normalize naive dates as UTC and aware dates to UTC; validate scope, query, limit,
         folder and cursor. The web and MCP search routes pass dates through unchecked.

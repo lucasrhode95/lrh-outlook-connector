@@ -36,21 +36,12 @@ and backup are one-shot CLI commands:
 
 Consequences of short-lived processes (see [AGENTS.md](../AGENTS.md)):
 
-- **Nothing in memory is relied on across sessions.** A continuation travels in the result: cursors carry the remote link or per-folder positions and the original options.
-- **Local caches are used only while fresh.** A process may start after days or weeks idle, so the cache it finds may be old. The folder cache is used while younger than 10 minutes and otherwise refreshed before the call continues.
+- **No in-memory state outlives a call.** A continuation travels in the result: cursors are self-contained (the remote link, offset or per-folder positions plus the original options) and survive a client restart.
+- **Local caches are used only while fresh.** A process may start after weeks idle. The folder cache is used while younger than 10 minutes; an older cache waits for a refresh (under a second). Messages are always listed from the server.
 - **No background work outlives a call:** no schedulers, sync loops or warm-up tasks. The UI's idle timer only stops the process.
-- **Concurrent processes share local files:** the store uses WAL and short transactions, `lrh-m365-auth` locks the shared token cache across processes, and output files use exclusive creation.
+- **Concurrency is cross-process.** Outlook, Teams and SharePoint processes may run at once. The **encrypted MSAL cache** in `lrh-m365-auth` uses cross-process locking and account-generation invalidation; the **SQLite store** uses WAL mode, a busy timeout, short write transactions and one connection per operation; output files use exclusive creation.
+- **Startup cost matters**, because every agent session pays it. Nothing runs at startup: no sync, no folder walk, no token refresh. The web stack (Starlette, uvicorn) is imported only by ui. MCP and UI never prompt for credentials; a service call requests its profile from `lrh-m365-auth`, and only `auth` signs in interactively.
 - **Not a hosted service:** one user, localhost only (the UI binds 127.0.0.1 with a per-run session token), no multi-user auth or remote access.
-
-**Consequences:**
-
-- **Concurrency is cross-process.** Outlook, Teams, and SharePoint processes may run at the same time. Their shared resources include the **encrypted MSAL cache** in `lrh-m365-auth` (cross-process locking and account-generation invalidation) and the Outlook **SQLite store** (WAL mode, busy timeout, short write transactions, one connection per operation).
-- **Startup cost matters**, because every agent session pays it.
-  - Nothing runs at startup: no sync, no folder walk, no token refresh before the first call.
-  - The web stack (Starlette, uvicorn) is imported only by ui, never by mcp.
-  - Folders come from the cache while it is younger than 10 minutes; an older cache waits for a refresh (under a second). Messages are always listed from the server (no local message cache).
-  - MCP and UI startup do not prompt or refresh credentials. A service call requests the product-specific profile from `lrh-m365-auth`; explicit `auth` performs the full interactive bootstrap.
-- **No in-memory state outlives a call.** MCP continuation cursors are self-contained (they encode the remote nextLink or offset plus the original selection). They survive a client restart.
 - **Exports run in the process that asked.** A UI export is one request that returns the file; an MCP export completes inside the tool call and returns a local file path. There is no background job queue and no progress reporting. An export holds at most 2,000 messages; it fetches bodies in bounded $batch rounds and finishes with per-message gaps marked rather than failing as a whole (§5.8).
 
 ## 3. Layers
@@ -108,7 +99,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 **[`graph.py`](../src/outlook_connector/remote/graph.py):**
 - Sends Prefer: IdType="ImmutableId" on every call.
-- Follows nextLink safely, keeping it on the Graph host.
+- Follows nextLink safely, keeping it on the Graph host, and stops at a repeated continuation link (a cycle back to a page already read).
 - Batches with **$batch**, up to 20 sub-requests per call. Used to hydrate conversations and exports, count conversation sizes and list attachments, instead of N sequential GETs. Rules:
   - batch request ids are numbers assigned per batch and mapped back. Graph compares them case-insensitively, and immutable ids can differ only by case;
   - at most 2 batches in flight per process, shared by all concurrent callers (each sub-request counts against the mailbox's concurrency limit);
@@ -152,7 +143,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 - [`substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) uses the Outlook-hosted Search v2 route with the shared `m365.search` profile, `EntityType="Event"`, and `ContentSources=["Exchange"]`. It preserves `Cvid` and `LogicalId` across bounded pages and maps only observed event fields.
 - [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) hydrates a selected Search result with OWS `GetItem` under the `outlook.api` profile, requesting the default event shape plus body and attachment metadata. It uses the retryable read path in `Ows.call_read`; it does not download event attachment bytes.
-- [`service/calendar.py`](../src/outlook_connector/service/calendar.py) validates query, date bounds and cursors, filters event start times, and omits Search v2 totals because recurring-occurrence totals were inconsistent in the standalone replay, and stops at offset 1,000, which Search v2 refuses (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)). The MCP surface exposes the tools; the web UI does not.
+- [`service/calendar.py`](../src/outlook_connector/service/calendar.py) validates query, date bounds and cursors, filters event start times, keeps OWS agenda text verbatim with its truncation flag, and omits Search v2 totals because recurring-occurrence totals were inconsistent in the standalone replay, and stops at offset 1,000, which Search v2 refuses (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)). The MCP surface exposes the tools; the web UI does not.
 - No Graph fallback or automatic event-to-Teams mapping is performed. Outlook owns the Exchange event and join URL; Teams owns linked meeting chats, recordings, recaps, transcripts and notes. Only a verified reference can connect them.
 
 #### Calendar window listing (Graph first)
@@ -195,13 +186,13 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 - Numeric input bounds are validated once at service entry points, shared by MCP and web. MCP schemas describe those bounds without enforcing a second range.
 - Times: an entry point that takes a window normalizes it once with [`domain/time.py`](../src/outlook_connector/domain/time.py): a time without a zone is UTC, and an aware time is converted to UTC. Surfaces pass times through; the export request normalizes its own window, so every caller gets the same rule.
-- [`calendar.py`](../src/outlook_connector/service/calendar.py) provides bounded online Exchange event search, explicit continuation and selected-event hydration through separate remote ports. OWS agenda text is kept verbatim, with its truncation state exposed when the response supplies it. It does not search Teams artifacts or infer a meeting-chat id.
+- Calendar search and listing are described with their adapters in §5.5.
 - Conversation expansion for exports and read-state changes runs in groups of four, using the shared request cap from [`remote/ports.py`](../src/outlook_connector/remote/ports.py) and [`remote/transport.py`](../src/outlook_connector/remote/transport.py).
 
 **[`mailbox.py`](../src/outlook_connector/service/mailbox.py):**
 - list_folders and every scope decision use the folder cache only while it is younger than 10 minutes (whichever process saved it; within a long process the map is reloaded at the same age). An older or empty cache, or refresh=true, waits for Graph, whose folder levels are fetched in parallel (under a second). One refresh at a time per process; concurrent unknown-folder lookups recheck under the lock and share the refresh.
-- **Scope rules, shared by list, search, conversations, sizes and export:** each refreshed folder map derives each folder's category once from itself and its parents, then reuses those categories for the call: hidden (also Sync Issues) > deleted_or_junk > outgoing. Deleted Items and Junk Email (with their subfolders; a folder deleted in Outlook sits inside Deleted Items) are left out unless scope.deleted_items (a folder named in the request is always included); Sent Items, Drafts and Outbox are left out when scope.sent_items is false; list, search and folder/date-window exports also leave out meeting mail (invitations, RSVPs, cancellations; excluded.meeting_mail) when scope.meeting_mail is false, per message, so a conversation that is only meeting traffic disappears and one with real replies shows through them. For exports, all scope keys apply to folder/date-window selections; conversations keep sent/meeting mail but follow scope.deleted_items, and explicit message ids are authoritative. True shows more mail and false filters more where scope applies; coverage.excluded counts what was left out, per reason. A non-default scope key that an operation cannot apply is rejected. Export accepts scope alongside any selection and applies it according to those rules.
-- **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in SkypeSpacesData/TeamsMeetings), are always dropped (excluded.hidden): from lists, search, conversations, conversation sizes, totals and folder/date-window/conversation exports. list_folders omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues and its subfolders (classic Outlook's conflict and failure copies) are out of reach too, recognized by their well-known names since Graph does not always mark them hidden. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a received copy; also_in names the other folders.
+- **Scope rules** (the contract is §8.1): each refreshed folder map derives each folder's category once from itself and its parents, then reuses it for the call, in precedence hidden (also Sync Issues) > deleted_or_junk > outgoing. A folder deleted in Outlook sits inside Deleted Items, so it counts as deleted. Meeting mail is filtered per message, so a conversation that is only meeting traffic disappears and one with real replies shows through them. coverage.excluded counts what was left out, per reason.
+- **Out of reach:** items in hidden folders or outside the mail folders (e.g. Teams meeting records in SkypeSpacesData/TeamsMeetings) are dropped as excluded.hidden. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues and its subfolders are recognized by their well-known names, since Graph does not always mark them hidden. Of several **copies**, a received copy is kept.
 - list_messages(selection, scope, include_total, detail) fetches from remote and returns MessagePage + Coverage. A mailbox-wide scope (no folder) is listed one of two ways, chosen on every first page: when the folders the scope leaves out (Junk Email, Deleted Items and their subfolders, hidden folders, and Sent Items, Drafts and Outbox with scope.sent_items=false) hold at least two thirds of the mailbox's messages (PER_FOLDER_SHARE, from the cached folder counts, no request), it lists **folder by folder**: one $count batch picks the in-scope folders with mail in the window, first reads are sized by each folder's share of the requested page; every eligible folder gets a current head read before the merge chooses messages; eventual count dates are not ordering bounds, and missing counts fall back to cached weights (folders that need more are read in parallel, within the transport's limit of 4), and the merge returns the newest limit. The same count batch also counts the window's Deleted Items and Junk (with subfolders), reported in coverage.excluded on the first page only (continuation pages do not repeat the full-window count); an excluded count is reported only when every excluded folder was counted. The cursor carries each folder's position (offsets, folder id → messages returned), plus the scope object with its current keys; coverage.notes says the listing was per folder and why. Otherwise it lists /me/messages and the folder filters apply after paging, so a filtered page can hold fewer than limit messages; a page that the filters empty entirely is skipped (bounded). Both return the same messages in the same order; a cursor keeps the method its first page chose. Folder views (a named folder) are always one listing. include_total adds server_total (copies counted separately; meeting mail included even when scope.meeting_mail=false hides it, and a coverage note says so). detail=compact (the MCP default) drops recipients, categories and Internet ids.
 - get_message(id, offset, max_chars, body) returns a bounded full body, including quoted history by default, with continuation; `body=unique` omits quoted history. max_chars=None returns the whole body (the local web reader: one server read, where chunks would each re-read the message). An unreadable id is NotFound, worded without guessing the cause (deleted, moved out of reach, or a wrong id).
 - search(query, since?, until?, folder?, scope, detail) runs Graph $search and groups hits by conversationId, each hit with the conversation's message_count. since/until are normalized once here for every caller, by the shared rule in [`domain/time.py`](../src/outlook_connector/domain/time.py), before the window and the cursor are built. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact since/until.
@@ -231,10 +222,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
   correct default or explicit name, adds one signature block after the body, converts data-URI images
   into CID-linked inline attachments, and verifies the saved image bytes on Graph read-back.
   include_signature=false skips signature lookup entirely.
-- Drafts are composed once. A change creates a full replacement and verifies its read-back before the
-  old draft is moved to Deleted Items; the new id replaces the old one. Never delete first. Changes
-  in Outlook and attachments added there are not carried over. There is no version check against
-  the old draft; read it first if needed. Every change recreates the draft.
+- Drafts are composed once; the replacement flow is in §8.10.
 - create_draft requires bounded Graph read-back and returns DraftResult: id, saved/failed, full
   server text/HTML, message metadata and simple findings. Reply creation retains full quoted-history verification, reusing the original and draft data already fetched while checking original HTML structure and inline images.
 - send_draft(id) requires an existing draft and the bound Outlook account, and sends once with
@@ -279,7 +267,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 **export/:**
 - Export requests default to full bodies (quoted history included) and attachment files; set `body="unique"` or `include_attachments=false` to omit either.
-- [`orchestrator.py`](../src/outlook_connector/service/export/orchestrator.py) resolves a selection: conversations, individual messages and/or a folder/date window (since, until, folder, narrowed by scope), paged through list_messages with the same rules, then merges copies once across the whole selection; per-source reads defer copy merging to this final pass. Conversation expansion runs in batches of four; a failing read cancels and awaits sibling reads before returning the original error. Scope does not select anything; it narrows folder/date-window selections, and scope.deleted_items also applies to conversations while explicit message ids remain authoritative. Scope alone is refused with the error "Select conversations, messages, a folder, or a date window (since/until)." The window is paged with skip_returned_copies=False, so copies on different pages reach that merge and also_in names every folder. The selection is refused above limit (at most 2,000 logical messages) with its deduplicated count; raw copies remain available until the final merge preserves their folder labels. Messages selected by id are authoritative, like get_message(id): they are exported wherever Graph can read them (hidden folders and Sync Issues included) and only labeled and merged with the rest, while conversations keep sent/meeting mail but follow scope.deleted_items and folder/date windows follow all scope rules. They are read from the server in $batch; if any cannot be read, the export fails before writing anything: NotFound when they are gone, Throttled when any is still throttled after the batch retries, Upstream otherwise, with their count, the first few ids and their case, and what to do. It then hydrates through $batch (reusing bodies fetched while selecting), formats, attaches and packages, and returns an ExportArtifact with messages_excluded, unavailable_message_ids, export_errors (failures per step) and error_summary (the header's "Export errors" line). A body, attachment download or attachment listing that fails during the export becomes an ExportError marked in the file; the export still completes.
+- [`orchestrator.py`](../src/outlook_connector/service/export/orchestrator.py) resolves a selection (the contract is §8.7): conversations, individual messages and/or a folder/date window paged through list_messages with the same rules. Per-source reads defer copy merging to one final pass across the whole selection; the window is paged with skip_returned_copies=False, so copies on different pages reach that merge and also_in names every folder. Conversation expansion runs in batches of four; a failing read cancels and awaits sibling reads before returning the original error. Scope alone is refused with "Select conversations, messages, a folder, or a date window (since/until)." Messages selected by id are read in $batch first and fail the export before anything is written when any cannot be read. It then hydrates through $batch (reusing bodies fetched while selecting), formats, attaches and packages, and returns an ExportArtifact.
 - [`formatter.py`](../src/outlook_connector/service/export/formatter.py) renders **TXT** (for people): a header (counts, date span, what was left out, and the "Export errors" summary), then per-message headers with the message, conversation and internet ids, Also in: for merged copies, full bodies including quoted history by default (`body=unique` omits it), plus attachment lines and [EXPORT ERROR] blocks for what failed; people are separated by ;  (display names are often "Last, First"). Or **JSONL** (format=jsonl, for agents): one record per message with ids, dates, folder, also_in, people, the body (or body: null and an export_error object), attachment records (with the file path inside the ZIP when attachments are included, or their own export_error), and attachments_export_error when the attachments could not be listed.
 - [`attachments.py`](../src/outlook_connector/service/export/attachments.py) applies the attachment policy:
   - non-inline attachments by default;
@@ -303,8 +291,8 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 - [`index.html`](../src/outlook_connector/surfaces/web/static/index.html) + [`app.js`](../src/outlook_connector/surfaces/web/static/app.js) provide:
   - Outlook-style rows: sender, subject and preview; unread rows with a blue bar and blue subject; Outlook dates ("Fri 9:31 AM"); flag and paperclip icons; file chips under messages with attachments (names fetched after the list loads, one batched POST /api/attachments per 200 messages; a chip downloads its file); meeting mail labelled (Invite, Updated, Canceled, Accepted, Tentative, Declined) with its time and place, a conversation showing its current invitation. The whole row is clickable; the palette follows the operating system's light or dark preference, and [`ui-preview.svg`](ui-preview.svg) illustrates the light theme;
   - a conversation-grouped list that opens on the Inbox. After a list loads, the UI asks for each conversation's real size: one-message conversations are plain rows, conversations show an accurate count. An expanded conversation spans all folders and shows the newest message on top; merged copies carry an "also in" badge, and search matches are marked;
-  - an "Invites / RSVPs" switch in the list header, off by default (meeting mail hidden), applied to the list, search and "export this view";
-  - a "Deleted / Junk" switch in the list header, applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date window). The folder list shows only reachable folders;
+  - an "Invites / RSVPs" checkbox under "Scope filters" in the folder sidebar, off by default (meeting mail hidden), applied to the list, search and "export this view";
+  - a "Deleted / Junk" checkbox beside it, applied to the list, search, counts, expansion and exports (always on inside those folders and their subfolders), and "export this view" (the current folder and date window). The folder list shows only reachable folders;
   - a reader that shows the whole chosen body in one request (no size cap; an answer for a message no longer selected is ignored), with attachment download buttons;
   - your display name and profile photo in the header (Graph /me and /me/photos/48x48/$value, read once per process and kept in memory; initials when no photo is set);
   - a folder picker and a "recent, all mail" view;
@@ -319,21 +307,20 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 The adapters below describe the current tenant's routing, not a universal division between read and write operations. Graph handles ordinary mail-data reads—including attachment bytes and MIME—and verifies selected results after OWS writes. OWS handles mail mutations and both reads and writes for inbox rules. Outlook Cloud Settings handles native signature reads and writes. The Outlook profile is therefore also needed for some read-only tools. These choices depend on tenant permissions; capability evidence and limitations are recorded in [API research §2](outlook-api-research.md).
 
-| Capability | Adapter | Token profile |
-|---|---|---|
-| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
-| Exchange event search | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
-| Selected event hydration and attachment metadata | [OwsCalendarItems](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
-| Calendar events in a window, Graph first (`/me/calendarView`) | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `teams.graph` (`config.CALENDAR_PROFILE`) |
-| Calendar events in a window, fallback when Graph fails (`GetCalendarView`) | [OwsCalendarWindow](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
-| Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
-| List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
-| List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
+| Capability | Port | Adapter | Token profile |
+|---|---|---|---|
+| Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | MailReader | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
+| Exchange event search | CalendarSearchReader | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
+| Selected event hydration and attachment metadata | CalendarItemReader | [OwsCalendarItems](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
+| Calendar events in a window, Graph first (`/me/calendarView`) | CalendarViewReader | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `teams.graph` (`config.CALENDAR_PROFILE`) |
+| Calendar events in a window, fallback when Graph fails (`GetCalendarView`) | CalendarWindowReader | [OwsCalendarWindow](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
+| Draft creation and send; read-state, flag, move and soft-delete changes | MailWriter | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
+| List and manage inbox rules | RuleWriter | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
+| List/read native roaming signature settings and contents; create, update, delete and set defaults | SignatureStore | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), CalendarSearchReader, CalendarItemReader, CalendarViewReader, CalendarWindowReader, RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete adapter.
-- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) implements CalendarSearchReader; [`remote/ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) implements CalendarItemReader and CalendarWindowReader; [`remote/graph_calendar.py`](../src/outlook_connector/remote/graph_calendar.py) implements CalendarViewReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
+- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines the ports in the table. The service depends only on them, never on a concrete adapter, and each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
 - **Wiring.** [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port and each adapter requests its named profile from `lrh-m365-auth`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change
@@ -352,7 +339,7 @@ The domain, service, store and surface boundaries remain independent of Graph an
   - shared token cache: %USERPROFILE%/.lrh-m365-auth/token-cache.bin by default on Windows, or ~/.lrh-m365-auth/token-cache.bin elsewhere. `M365_AUTH_HOME` overrides it. `--unsecure` selects a separate plaintext development cache;
   - OUTLOOK_CONNECTOR_HOME overrides the data directory (tests, portability);
   - store: <data directory>/accounts/<fingerprint>/mail.sqlite3 (account binding and folder cache only);
-  - exports: <data directory>/exports/. Downloaded attachments and saved .eml files: <data directory>/downloads/. Both are removed after 7 days. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
+  - exports: <data directory>/exports/. Downloaded attachments and saved .eml files: <data directory>/downloads/. Both are removed after 7 days; cleanup tolerates a file another process removed first. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
 
 ## 8. Surfaces: tools and endpoints
 
@@ -437,7 +424,7 @@ Lists a message's attachments: `id`, `name`, `content_type`, `size`, `is_inline`
 Saves one attachment under `<data directory>/downloads/` and returns its local path, name, content type and size. Read the file with your own file tools.
 
 - Downloads over 150 MB are refused. Download a larger file directly from Outlook.
-- `reference` attachments are cloud links with no file content here, so they are refused.
+- `reference` attachments are cloud links with no file content here, so they are refused. Fetching `item` attachments is best effort.
 - A forwarded message (`kind: item`) is saved as an `.eml` file.
 
 #### `save_message_mime`
@@ -452,14 +439,14 @@ Saves the original message, headers and all, as an `.eml` file named from its Su
 
 Writes one local file and returns its path, with counts (`message_count`, `text_files`, `attachment_files`), messages left out by reason (`messages_excluded`), ids whose bodies could not be read (`unavailable_message_ids`), failures by step (`export_errors`) and an `error_summary` line.
 
-Select conversations (`conversation_ids`), messages (`message_ids`) or a folder or date window (`folder`, `since`, `until`). Selections combine, and `scope` narrows folder and date-window selections only. Options: `format` (`txt` for people, or `jsonl`, one record per message, for analysis); `combine` (`per_conversation` by default, `all` or `none`); `body` (`full` by default, or `unique`); `include_attachments` (default true); `limit` (1–2,000, default 2,000). A larger selection is refused, with its count.
+Select conversations (`conversation_ids`), messages (`message_ids`) or a folder or date window (`folder`, `since`, `until`). Selections combine, and `scope` narrows folder and date-window selections only. Options: `format` (`txt` for people, or `jsonl`, one record per message in one file, for analysis); `combine` (`per_conversation` by default, where a selected message goes into its conversation's file; `all`, one file with a section per conversation; or `none`, one file per message); `body` (`full` by default, or `unique`); `include_attachments` (default true); `limit` (1–2,000, default 2,000). A larger selection is refused, with its count.
 
 The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several files or attachments. In a zip, the text files sit at the root and each text file's attachments sit in a folder named for it.
 
 - Explicit message ids are authoritative: they are exported wherever Graph can read them, hidden folders included. If any cannot be read, the export fails before writing a file: `NotFound` if they are gone, `Throttled` if they stay throttled after retries, `Upstream` otherwise. The error gives the count and the first ids.
 - A copy of one message is exported once, and `also_in` names the other folders.
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
-- Inline images are included when their `cid:` appears in the rendered body. If the reference cannot be read, the image is included rather than dropped.
+- Inline images (74% of file attachments in the R1 mailbox, mostly signatures and quoted history) are included when their `cid:` appears in the rendered body. If the reference cannot be read, the image is included rather than dropped.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
 - Attachments over 150 MB are marked and must be downloaded from Outlook.
 - The export runs inside the tool call. No progress is reported and no background job is left behind.
@@ -517,7 +504,7 @@ Saves a new message or a reply as a draft and returns the server's read-back: th
 - Body: exactly one of `text_body` (plain text, escaped, with its line breaks and spacing kept) or `html_body`, up to 100,000 characters.
 - Recipients: `to`, `cc` and `bcc` together hold at most 100 addresses, and none may repeat.
 - Subject: a new message needs one, up to 255 characters. For a reply, set `reply_to_message_id`; `reply_all=true` also replies to everyone on the original. `reply_all` needs `reply_to_message_id`.
-- Signatures: by default, Outlook's native default for new mail or for replies is added after the body. `signature` selects one by exact name, and `include_signature=false` adds none. A selected signature that is missing or unreadable is an error, not a silent fallback.
+- Signatures: by default, Outlook's native default for new mail or for replies is added after the body. `signature` selects one by exact name, and `include_signature=false` adds none. A selected signature that is missing or unreadable is an error, not a silent fallback. A text-only signature is escaped as body text. A replacement draft resolves the default again, so select a named signature again to keep the same one.
 - HTML bodies are checked once, by the passive-HTML rules (a live save test showed Outlook dropping an event handler, but the join also rewrote the signature wrapper; research [§3.21](outlook-api-research.md#321-unfinished-markup-on-save-2026-10-13)): scripts, frames, form controls, event-handler attributes and `javascript:` or `vbscript:` URLs are refused, and markup left open at the end is refused too, and so are elements that change how the rest of the markup is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`). The signature block appended after the body can then neither complete the body's markup nor render as text.
 - For a reply, `history_intact` and `history_problem` report whether the quoted original kept its structure and inline images.
 - Drafts are composed once and never edited. To change a draft, create a full replacement with the same content (and, for a reply, the same `reply_to_message_id` and `reply_all`), check its read-back, delete the old draft with `delete_messages`, and use the new id. Never delete first. The old version stays in Deleted Items. Edits and attachments made to the old draft in Outlook are not carried over. There is no version check, so read the old draft first if needed.
@@ -532,7 +519,7 @@ Sends an existing draft once, exactly as stored. The tool takes no content: pass
 
 ### 8.11 Mailbox changes
 
-These tools act only on the message ids they are given, at most 100 per call. None of them searches for messages to change.
+These tools act only on the message ids they are given, at most 100 per call. None of them searches for messages to change. None is read-only by annotation, so the client asks before each call; move and delete are also marked destructive.
 
 #### `set_read_state`
 
@@ -620,7 +607,7 @@ Sets the order of the supported rules. `rule_ids` must list every supported rule
 
 Deletes one supported rule. It is sent once and never retried.
 
-The web UI serves the same read operations through the local UI, plus attachment downloads, conversation-size lookups, exports, status, profile details and a heartbeat. The web surface is implemented in [`surfaces/web/`](../src/outlook_connector/surfaces/web/); every API call requires the per-run session token and a localhost Host header. Write tools are MCP-first.
+The web UI serves the same read operations through the local UI, plus attachment downloads, conversation-size lookups, exports, status, profile details and a heartbeat. The web surface is implemented in [`surfaces/web/`](../src/outlook_connector/surfaces/web/); every API call requires the per-run session token and a localhost Host header. GET requests take scope as `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests use a nested `scope` object. Write tools are MCP-first.
 
 ## 9. Cross-cutting concerns
 

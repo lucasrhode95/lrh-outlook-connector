@@ -1,4 +1,4 @@
-"""Rendering of exported messages (requirements v4 §10.1): TXT for people, JSONL for agents."""
+"""Rendering of exported messages (requirements v4 §10): TXT for people, JSONL for agents."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""Mailbox changes on explicit message ids (requirements v4 §11.2, architecture §5.8).
+"""Mailbox changes on explicit message ids (requirements v4 §11.2, architecture §5.9).
 
 The user's MCP client prompt is the authorization: tools take explicit ids and an explicit target,
 never a query. Every action:

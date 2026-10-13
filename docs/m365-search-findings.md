@@ -49,7 +49,7 @@ Message/Teams. Event offsets advanced to distinct results; OWS `GetItem` hydrate
 body, attendees, and attachment. Search attachment flags and recurring-event totals were unreliable
 in the observed sample. The Outlook connector now exposes bounded event discovery and event hydration;
 synthetic adapter coverage exists, while live invocation through the connector and fresh-account
-consent remain unverified. See [Outlook roadmap X10](outlook-roadmap.md#x10--meetingcalendar-search).
+consent remain unverified. See the [Outlook roadmap](outlook-roadmap.md).
 
 The Teams-message replay returned paginated hits with a verified known-chat identity for one target;
 a second target's identity bridge remains unresolved. The Teams connector now implements bounded
