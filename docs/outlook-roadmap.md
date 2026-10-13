@@ -85,7 +85,7 @@ The live checks ([research §3.20](outlook-api-research.md#320-review-gap-live-c
 - **Decision: one message-listing tool.** Merging `list_messages` and `search_messages` needs one response shape. A list returns flat messages in date order; search returns conversation groups in rank order. Options: one tool whose result carries a `mode` field, or one flat shape for both (search would lose conversation grouping and `message_count`). Routing is simple: an empty query lists, and a query searches. Folder, date and scope apply to both. Renaming the tools would break existing agent configurations.
 - **Decision: `search_calendar_events` date bounds.** Date terms in the query returned no result set, so `since` and `until` only filter the pages fetched. Keep the bounds with the documented limit, or remove them so window questions go to `list_calendar_events`.
 - **Enhancement: passive HTML is a deny-list.** It relies on Python's HTML parser, so markup that tokenizes differently in a browser could pass. The one save test showed Outlook dropping an event handler, but that is one account and one client. Candidates: an allow-list, or wider sanitization evidence checked against browser parsing.
-- **Limit: one conversation lists at most 1,000 messages.** `notes` reports the cap. Whether Graph pages past it is unverified.
+- **Decision: conversation read budget.** `get_conversation` reads at most 1,000 messages of a conversation, and `notes` reports the cap. Graph pages conversation listings (research [§3.22](outlook-api-research.md#322-conversation-listing-paging-check-2026-10-13)), so the cap is the connector's own budget. Keep it, or raise it?
 
 ## Outlook mail-search comparison (2026-10-12)
 

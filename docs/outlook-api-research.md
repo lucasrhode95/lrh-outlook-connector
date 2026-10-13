@@ -775,6 +775,12 @@ One authorized test, with one synthetic draft. It was written through the mail w
 
 In this test Outlook removed the event handler on save, so the join did not keep an active handler. It did damage the signature structure. The connector's refusal remains the contract, and the refusal also prevents the structural damage. One account and one client were tested; other attributes and other clients were not. The draft remains in Deleted Items until Outlook empties that folder.
 
+### 3.22 Conversation listing paging check (2026-10-13)
+
+A read-only check on the signed-in account. It took the most-populated conversation among the first 100 messages of the mailbox (five messages across folders) and read it through the connector's conversation read. It then requested the same conversation with one-message pages, following next links to the end. Both reads returned all five messages with no truncation.
+
+Graph pages conversation listings. The check does not reach the 1,000-message cap, because this account has no conversation that long. The cap in `get_conversation` is therefore the connector's own read budget (`MAX_CONVERSATION` in `remote/graph_mail.py`), not a Graph limit.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract
