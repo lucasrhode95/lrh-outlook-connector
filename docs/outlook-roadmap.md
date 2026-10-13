@@ -32,8 +32,11 @@ transcript discovery/retrieval, and transcript-text keyword search are separate 
 the event to Teams resources through verified identifiers; do not mark broad search complete with
 only mail and files.
 
-**Graph limitation:** the Graph profile has no `Calendars.*` scope, so Graph `/me/calendarView` is
-not available through the current Graph sign-in. This does not block the proven OWA route.
+**Graph profiles (updated 2026-10-12):** `outlook.graph` has no `Calendars.*` scope, but the shared
+cache's existing `teams.graph` profile has calendar-read permission. A read-only probe using that
+profile returned HTTP 200 for `/me/calendarView`, Graph event Search, and event-body hydration.
+No new interactive sign-in was needed. This account's result does not establish fresh-account
+grants; see [research §3.18](outlook-api-research.md#318-calendar-range-listing-and-description-search-through-the-teams-client-graph-profile-2026-10-12).
 
 **Search API documentation (2026-10-10):** Graph also documents `event` search, scoped to the
 signed-in user's primary calendar, with a 25-result page limit. This does not resolve the current
@@ -72,6 +75,8 @@ if deploying with a new account. Search v2 totals remain intentionally omitted, 
 download is not exposed, and Graph `Calendars.Read` remains a separate alternative to reassess
 rather than an automatic fallback. Transcript and recap discovery remain in Teams and are not
 completed by calendar search.
+
+**Calendar usability (2026-10-12, implemented):** `list_calendar_events(since, until, contains, include_body, limit, cursor)` lists the default calendar's occurrences that overlap a window, in time order and in UTC, through Graph's calendar view under the shared `teams.graph` profile (`config.CALENDAR_PROFILE`), with next links followed. Outlook Web's `GetCalendarView` answers a first page only when that Graph read fails for a service reason; it has no descriptions, so `contains` and `include_body` fail on that path. A live check on the signed-in account returned the same 16 events from both routes for a week, hydrated a listed id with `get_calendar_event`, and matched description text (research [§3.19](outlook-api-research.md#319-list_calendar_events-live-check-2026-10-12)). Still open: (a) confirm the Teams-profile calendar scopes on a fresh account before relying on them; (b) decide whether a purpose-named calendar profile in `lrh-m365-auth` should replace reusing `teams.graph` (that repository is outside this change); (c) topic search across the calendar's history: Graph event search returned 12 hits for a known description term, but its date and body-only semantics are unverified, so Search v2 remains the tool for that; (d) `get_calendar_event` still uses OWS only, and Graph-first hydration needs its own check; (e) shared and other people's calendars are not listed.
 
 ## Outlook mail-search comparison (2026-10-12)
 

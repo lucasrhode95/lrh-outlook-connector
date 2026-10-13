@@ -56,20 +56,24 @@ def _prefer(*extra: str) -> dict[str, str]:
 
 
 class Graph:
-    def __init__(self, transport: Transport) -> None:
+    def __init__(self, transport: Transport, *, profile: str = PROFILE) -> None:
+        """``profile``: the shared-cache profile whose token every call uses (``config.CALENDAR_PROFILE``)."""
         self._transport = transport
+        self._profile = profile
         self._batch_gate = asyncio.Semaphore(BATCH_CONCURRENCY)
 
     async def get(
         self, path: str, params: Mapping[str, Any] | None = None, *, prefer: tuple[str, ...] = ()
     ) -> dict[str, Any]:
         url = graph_url(path if "://" in path else relative(path, params))
-        data = await self._transport.json("GET", url, profile=PROFILE, headers=_prefer(*prefer))
+        data = await self._transport.json("GET", url, profile=self._profile, headers=_prefer(*prefer))
         return data if isinstance(data, dict) else {}
 
     async def get_bytes(self, path: str, *, max_bytes: int) -> bytes:
         """A small binary GET (a profile photo), read whole."""
-        response = await self._transport.request("GET", graph_url(path), profile=PROFILE, headers=_prefer())
+        response = await self._transport.request(
+            "GET", graph_url(path), profile=self._profile, headers=_prefer()
+        )
         if len(response.content) > max_bytes:
             raise Upstream("Response too large.")
         return response.content
@@ -77,15 +81,24 @@ class Graph:
     async def post(self, path: str, body: Any) -> dict[str, Any]:
         """POST for read-style APIs (search). Idempotent, so retried like a GET."""
         data = await self._transport.json(
-            "POST", graph_url(path), profile=PROFILE, headers=_prefer(), json_body=body, retry=True
+            "POST", graph_url(path), profile=self._profile, headers=_prefer(), json_body=body, retry=True
         )
         return data if isinstance(data, dict) else {}
 
     async def page(
-        self, path_or_link: str, params: Mapping[str, Any] | None = None
+        self,
+        path_or_link: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        prefer: tuple[str, ...] = (),
     ) -> tuple[list[dict[str, Any]], str | None]:
-        """One page of a collection and the opaque link to the next page (if any)."""
-        data = await self.get(path_or_link, None if path_or_link.startswith("https://") else params)
+        """One page of a collection and the opaque link to the next page (if any).
+
+        ``prefer`` is sent with every page, including a continuation link (headers are not in the link).
+        """
+        data = await self.get(
+            path_or_link, None if path_or_link.startswith("https://") else params, prefer=prefer
+        )
         items = [x for x in data.get("value", []) if isinstance(x, dict)]
         link = data.get("@odata.nextLink")
         return items, link if isinstance(link, str) else None
@@ -181,7 +194,7 @@ class Graph:
         dest.parent.mkdir(parents=True, exist_ok=True)
         with dest.open("wb") as handle:
             return await self._transport.download(
-                graph_url(path), handle, profile=PROFILE, headers=_prefer(), max_bytes=max_bytes
+                graph_url(path), handle, profile=self._profile, headers=_prefer(), max_bytes=max_bytes
             )
 
 

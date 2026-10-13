@@ -668,6 +668,88 @@ This closes the live connector-path check for the current account. Fresh-account
 unverified. The Graph calendar scope remains a separate unresolved alternative; transcript and
 recap search remain outside this Outlook workflow.
 
+### 3.18 Calendar range listing and description search through the Teams-client Graph profile (2026-10-12)
+
+**LIVE, read-only:** a weekly schedule request exposed the limitation of the current Outlook MCP
+calendar search. The broad keyword query required 40 pages of 25 upstream rows to return 15
+in-window matches. The next request at offset 1,000 returned HTTP 400 `BadRequest`; this does not
+establish a universal offset ceiling. Date bounds were applied locally, and keyword search could
+not establish a complete calendar inventory. Fifteen selected event hydrations succeeded.
+
+The shared encrypted cache's existing `teams.graph` profile silently supplied a Graph token with
+`Calendars.Read`, `Calendars.Read.Shared`, `Calendars.ReadWrite`, and `Calendars.ReadWrite.Shared`.
+This is distinct from the Outlook Mobile `outlook.graph` profile that lacks calendar scopes.
+No interactive sign-in, consent, calendar write, or auth configuration change was performed.
+
+`GET https://graph.microsoft.com/v1.0/me/calendarView` with `startDateTime`, `endDateTime`,
+`$top=100`, and selected event properties returned HTTP 200, 16 entries, and no `@odata.nextLink`.
+A second bounded read selected `start`, `end`, `isCancelled`, `isAllDay`, `attendees`, `body`,
+`responseStatus`, and `type`, with `Prefer: outlook.body-content-type="text"`. It returned 16
+entries with attendees, zero cancellations, one all-day entry, and 16 nonempty text bodies. The
+second HTTP call took approximately 950 ms, including client connection setup and excluding
+token acquisition; this single measurement is not a latency benchmark. These are calendar
+entries, not a reconciliation against the earlier 15 keyword matches. No event content,
+identities, links, or identifiers are retained.
+
+`POST https://graph.microsoft.com/v1.0/search/query` with `entityTypes=["event"]`, a known
+description keyword, `from=0`, and `size=25` returned HTTP 200, 12 hits, and
+`moreResultsAvailable=false`. Hydrating one hit with `GET /me/events/{id}?$select=subject,body`
+returned HTTP 200; the term was absent from its subject and present in its description. This
+establishes a description match for that result, not a body-only query contract or semantic
+search guarantee. Field restrictions and date-filter query semantics remain to be verified.
+
+**SOURCE recheck:** the Teams Meet `searchEvents` builder uses
+`POST https://substrate.office.com/search/api/v2/query` (configurable base URL), authorizing for
+the `https://substrate.office.com` resource. Its lower-camel `entityRequests[]` contains `query`,
+`entityType="Event"`, `startDateTime`, `endDateTime`, `from=0`, `size=30`,
+`contentSources=["Exchange"]`, and `sort=[{"Time":"Proximity"}]`, plus a top-level `cvid` and
+scenario name. The parser reads `EntitySets[0].ResultSets[0].Results[].Source`. These are source
+contracts; server enforcement, empty-query listing, and continuation were not replayed. This
+search builder is not proof of the endpoint used for Teams Calendar week navigation. See
+[Teams Meet research](../../lrh-teams-connector/docs/teams-api-research.md#meet-search-and-recap).
+
+**Implementation direction:** Outlook should expose a calendar-range listing independent of a
+keyword query, expand occurrences through `calendarView`, and return optional agenda text in
+the same bounded request. Global keyword search can use Graph event Search under the verified
+calendar-capable client, followed by event hydration. The shared auth package should own a
+purpose-named calendar profile using that client/resource pair; Outlook need not depend on
+Teams connector code. Fresh-account grants and other-calendar access remain unverified.
+
+### 3.19 `list_calendar_events` live check (2026-10-12)
+
+**LIVE, read-only, counts only.** The Graph-first calendar listing was run against the signed-in account for
+one week (2026-10-12 03:00Z to 2026-10-19 03:00Z, a local UTC−3 week). Results:
+
+- Graph calendar view (`teams.graph` profile): complete in one call with 16 events, in time order, with
+  UTC-aware times. Item types were 11 occurrences, 4 single events and 1 exception, so recurrence expansion is
+  visible. 15 events carried a Teams join link. Attendee lists were longer than the 15-name cap for 11 events;
+  each reported its total.
+- A cursor walk at `limit=3` returned the same 16 identifiers as one call.
+- A forced fallback to OWS `GetCalendarView` for the same window returned 16 events, complete. After the
+  standard id mapping, the Graph immutable identifiers and the OWS identifiers agree exactly, with no event on
+  only one side. The fallback carries no descriptions, as designed.
+- `include_body=true` returned a description for all 16 events; some were cut at 4,000 characters
+  (`body_truncated`).
+- `contains` with a common word matched 15 of 16 events, in subjects and descriptions combined.
+- `get_calendar_event` with a Graph-listed identifier, converted to the Outlook Web form, returned the event
+  with its start time.
+
+Ordering correction (2026-10-12): the checks above sorted results inside the connector, so they did not show
+Graph's own order. A cursor walk through the MCP tool then showed that a later Graph page could begin earlier
+than the previous page ended. A direct check found that Graph's calendar view, without `$orderby`, is not in
+start order even within one 100-event page; with `$orderby=start/dateTime asc`, next-link paging at page sizes 3
+and 100 returned the 16 events in start order, and the request is accepted without error. The connector now
+sends that order on the first request, and the next links keep it.
+
+Interpretation: one Graph request now answers the week that earlier needed up to 40 Search v2 pages, and the
+OWS fallback returns the same event set. Listed identifiers hydrate through the existing OWS path, so no second
+identifier scheme is needed.
+
+Not proven: consent for the calendar scopes on a fresh account; shared or delegated calendars; time zones other
+than UTC (the request asks for UTC and refuses other zones); and the MCP tool through a restarted server, since
+the running server still held the previous tool list when this check ran. No subjects, attendees, identifiers,
+descriptions or tokens are retained here.
+
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
 ### 4.1 Transport contract

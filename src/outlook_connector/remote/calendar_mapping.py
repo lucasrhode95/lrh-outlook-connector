@@ -1,11 +1,14 @@
-"""Shared primitive normalizers for Search v2 and OWS calendar responses."""
+"""Shared primitive normalizers for Search v2, OWS and Graph calendar responses."""
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
 from outlook_connector.domain.models import Recipient
+
+_TEAMS_JOIN = re.compile(r"https://teams\.microsoft\.com/l/meetup-join/\S+", re.IGNORECASE)
 
 
 def text(value: Any) -> str | None:
@@ -41,3 +44,11 @@ def location(value: Any) -> str | None:
     if isinstance(value, dict):
         return text(value.get("DisplayName")) or text(value.get("Name"))
     return text(value)
+
+
+def teams_join_url(body: str | None) -> str | None:
+    """The first Teams meeting join link in a description, without trailing punctuation."""
+    if not body:
+        return None
+    match = _TEAMS_JOIN.search(body)
+    return match.group(0).rstrip(".,);]") if match else None

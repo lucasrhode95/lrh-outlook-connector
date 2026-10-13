@@ -155,6 +155,12 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 - [`service/calendar.py`](../src/outlook_connector/service/calendar.py) validates query, date bounds and cursors, filters event start times, and omits Search v2 totals because recurring-occurrence totals were inconsistent in the standalone replay. The MCP surface exposes the tools; the web UI does not.
 - No Graph fallback or automatic event-to-Teams mapping is performed. Outlook owns the Exchange event and join URL; Teams owns linked meeting chats, recordings, recaps, transcripts and notes. Only a verified reference can connect them.
 
+#### Calendar window listing (Graph first)
+
+- [`graph_calendar.py`](../src/outlook_connector/remote/graph_calendar.py) reads `/me/calendarView` for the default calendar with the `teams.graph` profile named by `config.CALENDAR_PROFILE` (the Graph client takes the profile; the Outlook Graph profile has no calendar scope). It asks Graph for UTC times and text bodies, follows next links, and refuses any time that is not UTC. Event ids are converted to the Outlook Web form so `get_calendar_event` can hydrate them.
+- [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) `OwsCalendarWindow` calls OWS `GetCalendarView` under `outlook.api`, with the default calendar and a UTC `TimeZoneContext`. It returns the window without descriptions.
+- [`service/calendar_listing.py`](../src/outlook_connector/service/calendar_listing.py) tries Graph first. It falls back to Outlook Web only for a first page whose Graph read failed for a service reason (`AuthenticationRequired`, `Throttled` or `Upstream`). It never falls back for bad requests, missing events or account mismatches, and never when `contains` or `include_body` needs descriptions. A cursor keeps the service that answered its first page. The research record is [§3.18](outlook-api-research.md) and [§3.19](outlook-api-research.md).
+
 ### 5.6 [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py)
 
 - CloudSettings implements the SignatureStore port for Outlook native roaming signatures. It uses
@@ -317,14 +323,16 @@ The adapters below describe the current tenant's routing, not a universal divisi
 | Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
 | Exchange event search | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
 | Selected event hydration and attachment metadata | [OwsCalendarItems](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
+| Calendar events in a window, Graph first (`/me/calendarView`) | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `teams.graph` (`config.CALENDAR_PROFILE`) |
+| Calendar events in a window, fallback when Graph fails (`GetCalendarView`) | [OwsCalendarWindow](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
 | Draft creation and send; read-state, flag, move and soft-delete changes | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
 | List and manage inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
 | List/read native roaming signature settings and contents; create, update, delete and set defaults | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
 
 ### 6.1 How the code stays swappable
 
-- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), CalendarSearchReader, CalendarItemReader, RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete adapter.
-- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) implements CalendarSearchReader; [`remote/ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) implements CalendarItemReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
+- **Ports.** [`remote/ports.py`](../src/outlook_connector/remote/ports.py) defines MailReader (mail data, attachments and MIME), MailWriter (drafts, sends and mail changes), CalendarSearchReader, CalendarItemReader, CalendarViewReader, CalendarWindowReader, RuleWriter (inbox-rule reads and changes) and SignatureStore (native signature settings and contents). The service depends only on these ports, never on a concrete adapter.
+- **Adapters.** [`remote/graph_mail.py`](../src/outlook_connector/remote/graph_mail.py) implements MailReader; [`remote/substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) implements CalendarSearchReader; [`remote/ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) implements CalendarItemReader and CalendarWindowReader; [`remote/graph_calendar.py`](../src/outlook_connector/remote/graph_calendar.py) implements CalendarViewReader; [`remote/ows_mail.py`](../src/outlook_connector/remote/ows_mail.py) implements MailWriter; [`remote/ows_rules.py`](../src/outlook_connector/remote/ows_rules.py) implements RuleWriter; and [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py) implements SignatureStore. Each adapter keeps its wire format in the [`remote/`](../src/outlook_connector/remote/) layer.
 - **Wiring.** [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port and each adapter requests its named profile from `lrh-m365-auth`. There is exactly one implementation per port at runtime. No dual backends and no automatic cross-backend fallback (a write must never be retried through a second backend).
 
 ### 6.2 Adapting to another tenant or a policy change
@@ -354,6 +362,7 @@ The domain, service, store and surface boundaries remain independent of Graph an
 | `list_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | List messages in a folder or mailbox, with folder, date-window and scope filters |
 | `search_messages` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
 | `search_calendar_events` | [`service/calendar.py`](../src/outlook_connector/service/calendar.py) | Search Exchange events online with bounded continuation and optional start-date bounds |
+| `list_calendar_events` | [`service/calendar_listing.py`](../src/outlook_connector/service/calendar_listing.py) | List the events overlapping a window in time order, Graph first; `contains` and descriptions need Graph |
 | `get_calendar_event` | [`service/calendar.py`](../src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, join URL and attachment metadata |
 | `get_conversation` | [`service/conversations.py`](../src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
 | `get_message` | [`service/mailbox.py`](../src/outlook_connector/service/mailbox.py) | Read a message body |

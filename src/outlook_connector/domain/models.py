@@ -218,6 +218,7 @@ class CalendarEvent(Compact):
     display_to: str | None = None
     required_attendees: list[Recipient] = Field(default_factory=list)
     optional_attendees: list[Recipient] = Field(default_factory=list)
+    attendee_count: int | None = None  # all attendees, when a listing shows only the first few
     location: str | None = None
     is_meeting: bool | None = None
     is_cancelled: bool | None = None
@@ -248,6 +249,24 @@ class CalendarSearchResult(Compact):
     events: list[CalendarEvent]
     cursor: str | None = None
     coverage: CalendarSearchCoverage
+
+
+class CalendarListCoverage(Compact):
+    """What a calendar listing covers. ``source`` says which Microsoft service answered: Graph, or Outlook
+    Web when the Graph read failed (research §3.18)."""
+
+    complete: bool
+    source: Literal["graph", "outlook"]
+    scanned: int  # events read in this call
+    notes: list[str] = Field(default_factory=list)
+
+
+class CalendarListResult(Compact):
+    since: datetime
+    until: datetime
+    events: list[CalendarEvent]
+    cursor: str | None = None
+    coverage: CalendarListCoverage
 
 
 class MessageContent(Compact):

@@ -115,10 +115,17 @@ uv run outlook-connector ui
 - `list_folders` — List reachable mail folders and their counts.
 - `list_messages` — Read a page of recent messages, newest first; filter by folder, dates, and scope.
 - `search_messages` — Search mail and group hits by conversation.
+- `list_calendar_events` — List the events that overlap a `since`/`until` window (at most 366 days) in
+  time order, with recurring meetings expanded per occurrence and times in UTC. `contains` finds
+  literal text in each subject or description within the window (case- and accent-insensitive);
+  `include_body` returns descriptions, cut to 4,000 characters. Graph's calendar view answers first;
+  Outlook Web's `GetCalendarView` answers only when that Graph read fails, and it has no descriptions,
+  so `contains` and `include_body` then fail. `coverage.source` says which service answered. Follow
+  the cursor while `coverage.complete` is false.
 - `search_calendar_events` — Search Exchange calendar events online, with bounded paging and optional
   start-date bounds. Bounds filter each fetched page after Search v2; an empty page may still have a
   cursor. Continue while a cursor is available, and report incomplete coverage if paging stops
-  without matches.
+  without matches. For a date range, use `list_calendar_events`.
 - `get_calendar_event` — Hydrate one event's agenda, attendees and attachment metadata from Outlook; `body_truncated` reports OWS truncation when available.
 - `get_conversation` — Read a whole conversation across folders.
 - `get_message` — Read one message body, including quoted history by default, and its attachment metadata.
@@ -164,6 +171,11 @@ hydration: schedule and recurrence, agenda, organizer, invitees, event attachmen
 Teams join URL when present in the event body. Event attachments are listed, but direct event-
 attachment download is not currently exposed. Search result totals are omitted because recurring
 occurrence totals were inconsistent in the tested Search v2 responses.
+
+Calendar listing reads the default calendar. Its Graph read uses the shared `teams.graph` profile, whose
+token carries calendar read scope (`config.CALENDAR_PROFILE`); the Outlook Graph profile has none. The
+Outlook Web fallback uses the `outlook.api` profile. Both are prepared by `outlook-connector auth`.
+Shared calendars and other people's calendars are not listed.
 
 A calendar event linked to a Teams meeting has resources in both products. Outlook supplies the
 event and verified meeting references; `lrh-teams-connector` owns the meeting chat, recordings,
