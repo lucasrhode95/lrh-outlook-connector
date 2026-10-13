@@ -152,7 +152,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 - [`substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) uses the Outlook-hosted Search v2 route with the shared `m365.search` profile, `EntityType="Event"`, and `ContentSources=["Exchange"]`. It preserves `Cvid` and `LogicalId` across bounded pages and maps only observed event fields.
 - [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) hydrates a selected Search result with OWS `GetItem` under the `outlook.api` profile, requesting the default event shape plus body and attachment metadata. It uses the retryable read path in `Ows.call_read`; it does not download event attachment bytes.
-- [`service/calendar.py`](../src/outlook_connector/service/calendar.py) validates query, date bounds and cursors, filters event start times, and omits Search v2 totals because recurring-occurrence totals were inconsistent in the standalone replay. The MCP surface exposes the tools; the web UI does not.
+- [`service/calendar.py`](../src/outlook_connector/service/calendar.py) validates query, date bounds and cursors, filters event start times, and omits Search v2 totals because recurring-occurrence totals were inconsistent in the standalone replay, and stops at offset 1,000, which Search v2 refuses (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)). The MCP surface exposes the tools; the web UI does not.
 - No Graph fallback or automatic event-to-Teams mapping is performed. Outlook owns the Exchange event and join URL; Teams owns linked meeting chats, recordings, recaps, transcripts and notes. Only a verified reference can connect them.
 
 #### Calendar window listing (Graph first)
@@ -194,6 +194,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.9 [`service/`](../src/outlook_connector/service/)
 
 - Numeric input bounds are validated once at service entry points, shared by MCP and web. MCP schemas describe those bounds without enforcing a second range.
+- Times: an entry point that takes a window normalizes it once with [`domain/time.py`](../src/outlook_connector/domain/time.py): a time without a zone is UTC, and an aware time is converted to UTC. Surfaces pass times through; the export request normalizes its own window, so every caller gets the same rule.
 - [`calendar.py`](../src/outlook_connector/service/calendar.py) provides bounded online Exchange event search, explicit continuation and selected-event hydration through separate remote ports. OWS agenda text is kept verbatim, with its truncation state exposed when the response supplies it. It does not search Teams artifacts or infer a meeting-chat id.
 - Conversation expansion for exports and read-state changes runs in groups of four, using the shared request cap from [`remote/ports.py`](../src/outlook_connector/remote/ports.py) and [`remote/transport.py`](../src/outlook_connector/remote/transport.py).
 
@@ -203,7 +204,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 - **Out of reach:** hidden folders, and items whose folder is not among the mail folders (e.g. Teams meeting records in SkypeSpacesData/TeamsMeetings), are always dropped (excluded.hidden): from lists, search, conversations, conversation sizes, totals and folder/date-window/conversation exports. list_folders omits hidden folders and naming one is refused. An unknown folder id first refreshes the folder list once (a folder created meanwhile is found); ids still unknown are remembered as outside and never refresh again. Sync Issues and its subfolders (classic Outlook's conflict and failure copies) are out of reach too, recognized by their well-known names since Graph does not always mark them hidden. **Copies** of one message (same Internet message id: mail sent to yourself or to a list you are on) are shown once, keeping a received copy; also_in names the other folders.
 - list_messages(selection, scope, include_total, detail) fetches from remote and returns MessagePage + Coverage. A mailbox-wide scope (no folder) is listed one of two ways, chosen on every first page: when the folders the scope leaves out (Junk Email, Deleted Items and their subfolders, hidden folders, and Sent Items, Drafts and Outbox with scope.sent_items=false) hold at least two thirds of the mailbox's messages (PER_FOLDER_SHARE, from the cached folder counts, no request), it lists **folder by folder**: one $count batch picks the in-scope folders with mail in the window, first reads are sized by each folder's share of the requested page; every eligible folder gets a current head read before the merge chooses messages; eventual count dates are not ordering bounds, and missing counts fall back to cached weights (folders that need more are read in parallel, within the transport's limit of 4), and the merge returns the newest limit. The same count batch also counts the window's Deleted Items and Junk (with subfolders), reported in coverage.excluded on the first page only (continuation pages do not repeat the full-window count); an excluded count is reported only when every excluded folder was counted. The cursor carries each folder's position (offsets, folder id → messages returned), plus the scope object with its current keys; coverage.notes says the listing was per folder and why. Otherwise it lists /me/messages and the folder filters apply after paging, so a filtered page can hold fewer than limit messages; a page that the filters empty entirely is skipped (bounded). Both return the same messages in the same order; a cursor keeps the method its first page chose. Folder views (a named folder) are always one listing. include_total adds server_total (copies counted separately; meeting mail included even when scope.meeting_mail=false hides it, and a coverage note says so). detail=compact (the MCP default) drops recipients, categories and Internet ids.
 - get_message(id, offset, max_chars, body) returns a bounded full body, including quoted history by default, with continuation; `body=unique` omits quoted history. max_chars=None returns the whole body (the local web reader: one server read, where chunks would each re-read the message). An unreadable id is NotFound, worded without guessing the cause (deleted, moved out of reach, or a wrong id).
-- search(query, since?, until?, folder?, scope, detail) runs Graph $search and groups hits by conversationId, each hit with the conversation's message_count. since/until are normalized once here for every caller (naive dates are UTC, aware dates converted to UTC) before the window and the cursor are built. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact since/until.
+- search(query, since?, until?, folder?, scope, detail) runs Graph $search and groups hits by conversationId, each hit with the conversation's message_count. since/until are normalized once here for every caller, by the shared rule in [`domain/time.py`](../src/outlook_connector/domain/time.py), before the window and the cursor are built. KQL only takes dates, so the query asks for a day more on each side and results are then filtered to the exact since/until.
 - conversation_sizes(conversation_ids, scope) counts each conversation the way get_conversation lists it (copies once); only scope.deleted_items affects its result. The UI and search hits use it.
 
 **[`conversations.py`](../src/outlook_connector/service/conversations.py):**
@@ -221,9 +222,9 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 
 **[`writes.py`](../src/outlook_connector/service/writes.py):**
 - create_draft validates explicit text/HTML, recipients, subject and reply context; text becomes
-  escaped minimal HTML preserving whitespace and NBSP. Intentional HTML passes through, with only
-  active web content refused. The private writer takes DraftMessage, always HTML.
-- [`service/signatures.py`](../src/outlook_connector/service/signatures.py) validates exact names and passive HTML; commas are not allowed in names. It checks
+  escaped minimal HTML preserving whitespace and NBSP. HTML passes through [`passive_start_tags`](../src/outlook_connector/service/passive_html.py), which refuses
+  active web content and markup left open at the end (an unfinished tag, attribute, comment or script). The private writer takes DraftMessage, always HTML.
+- [`service/signatures.py`](../src/outlook_connector/service/signatures.py) validates exact names and passive HTML with the same checker as drafts, plus quoted data-URI image sources; commas are not allowed in names. It checks
   Outlook-profile account ownership, freshly reads native settings and contents, and refuses
   missing/unreadable defaults or a configuration that changes during a read. It does not cache
   settings or emulate the organization's recipient-dependent add-in. create_draft resolves the
@@ -291,7 +292,7 @@ The MCP surface is in [`surfaces/mcp_main.py`](../src/outlook_connector/surfaces
 ### 5.10 [`surfaces/`](../src/outlook_connector/surfaces/)
 
 **[`mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py):**
-- FastMCP over stdio. Each tool is a few lines: validate, call the service, return a model.
+- FastMCP over stdio. Each tool is a few lines: FastMCP checks argument types and literals, the tool passes values to the service unchanged, and returns a model. The service normalizes times.
 - Bounded responses with self-contained cursors.
 - Attachments, MIME and export artifacts are returned as local file paths, never inline base64.
 - Server instructions explain the scope object, what is out of reach (hidden folders, non-mail items; search is mail only), merged copies, coverage and cursors, scope.sent_items=false for "latest mail", include_total, the export options (format=jsonl for analysis), Graph's throttling limits (no parallel tool calls; prefer one folder/date-window export), the 150 MB attachment download limit, and that "access denied" is not a sign-in problem. With send, they will also repeat the send-authorization rule.
@@ -362,6 +363,7 @@ The MCP server exposes 30 tools, grouped below by task. The [README](../README.m
 - **Reads never change the mailbox**, not even read state. Tools that save files (`download_attachment`, `save_message_mime`, `export_messages`) write only to the local data directory (§7), and those files are kept for seven days.
 - **Writes are explicit.** Drafts, sends, mailbox changes, rule changes and signature changes are separate tools with their own rules, described below. No tool permanently deletes mail: `delete_messages` moves messages to Deleted Items.
 - **Scope.** One `scope` object holds three independent keys: `sent_items` (default true) includes Sent Items, Drafts and Outbox; `meeting_mail` (default true) includes invitations, RSVPs and cancellations; `deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is always included, and subfolders count with their parent. `true` shows more mail and `false` filters more. A key the operation cannot apply is refused when it differs from its default. Export applies all three keys to folder and date-window selections; conversations keep sent and meeting mail and follow `deleted_items`.
+- **Times.** A time without a zone is UTC in every tool. The service converts each window once ([`domain/time.py`](../src/outlook_connector/domain/time.py)), and results report UTC.
 - **Out of reach.** Hidden folders, Sync Issues and items outside the mail folders (for example Teams meeting records) are never listed, searched, counted, grouped into conversations, or selected by folder, date window or conversation. `list_folders` omits hidden folders, and `coverage.excluded.hidden` counts what was dropped. Explicit ids are the exception: `get_message` and `export_messages` read them wherever Graph can, while the change tools report them as `failed`.
 - **Copies and coverage.** A message stored in more than one folder, such as mail sent to yourself, is shown once, and `also_in` names the other folders. Read `coverage` before treating a result as complete: `complete`, `excluded` (counts by reason) and `notes`. Follow `cursor` while `complete` is false. Cursors are self-contained, so they survive a client restart.
 - **Per-message results.** Tools that change messages take explicit ids, at most 100 per call, and return one result per message: `done`; `unchanged` (already so; nothing was sent); `not_found`; `failed` (with Outlook's code); or `unknown` (no clear answer; check before repeating). `continue_on_error` defaults to true. With false, a failing chunk stops the later chunks, and their messages are reported as `failed` with the detail "not sent".
@@ -492,11 +494,11 @@ Outlook owns the event, its schedule, its invitees and any join link. `lrh-teams
 
 Searches Exchange calendar events online through Microsoft Search v2, for words up to 512 characters. Each page holds `limit` events (1–25, default 25). `since` and `until` bound the event start time. They are applied to each page as it arrives, so an empty page can still have a `cursor`. `coverage` gives `complete`, `offset`, `page_size`, `more_results_available` and `notes`.
 
-- Follow `cursor` only while more matches help. Paging stops at offset 100,000, and `notes` says so.
+- Follow `cursor` only while more matches help. Search v2 refuses a page that starts at offset 1,000 or later, so a query reaches at most its first 1,000 results here; `notes` says when no cursor is left (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)).
 - Totals for recurring events are not reported, because Search v2 totals were inconsistent in testing.
 - Events with no start time are dropped when a bound is set. `notes` counts them.
 - Results without an Outlook item id cannot be hydrated by `get_calendar_event`. `notes` says so.
-- For a date range, use `list_calendar_events`, which lists by window.
+- `since` and `until` do not reach the server: date terms in the query returned no result set (research [§3.20](outlook-api-research.md#320-review-gap-live-checks-2026-10-13)), so the bounds filter the pages fetched, and a window's events may lie beyond the first 1,000 results. For a date range, use `list_calendar_events`, which lists by window.
 - It does not search Teams recaps, transcripts or chats.
 
 #### `get_calendar_event`
@@ -516,7 +518,7 @@ Saves a new message or a reply as a draft and returns the server's read-back: th
 - Recipients: `to`, `cc` and `bcc` together hold at most 100 addresses, and none may repeat.
 - Subject: a new message needs one, up to 255 characters. For a reply, set `reply_to_message_id`; `reply_all=true` also replies to everyone on the original. `reply_all` needs `reply_to_message_id`.
 - Signatures: by default, Outlook's native default for new mail or for replies is added after the body. `signature` selects one by exact name, and `include_signature=false` adds none. A selected signature that is missing or unreadable is an error, not a silent fallback.
-- HTML bodies are checked: scripts, frames, form controls, event-handler attributes and `javascript:` or `vbscript:` URLs are refused.
+- HTML bodies are checked once, by the passive-HTML rules: scripts, frames, form controls, event-handler attributes and `javascript:` or `vbscript:` URLs are refused, and markup left open at the end is refused too, so the signature block appended after the body cannot complete it.
 - For a reply, `history_intact` and `history_problem` report whether the quoted original kept its structure and inline images.
 - Drafts are composed once and never edited. To change a draft, create a full replacement with the same content (and, for a reply, the same `reply_to_message_id` and `reply_all`), check its read-back, delete the old draft with `delete_messages`, and use the new id. Never delete first. The old version stays in Deleted Items. Edits and attachments made to the old draft in Outlook are not carried over. There is no version check, so read the old draft first if needed.
 
@@ -570,7 +572,7 @@ Returns one signature's HTML and plain text. A signature that `list_signatures` 
 
 #### `create_signature`
 
-Creates a signature from passive HTML. Scripts, frames, form controls, event-handler attributes and `javascript:` or `vbscript:` URLs are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
+Creates a signature from passive HTML. Scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs and markup left open at the end are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
 
 To copy a signature from an Outlook draft: read its HTML, download each inline image it references by `cid:`, replace each `cid:` reference with a `data:image` URI holding that image's bytes, and create the signature from the result.
 
