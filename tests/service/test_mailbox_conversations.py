@@ -329,16 +329,6 @@ async def test_conversation_cursor_belongs_to_its_conversation(mailbox: Mailbox)
         await Conversations(mailbox).get_conversation("c-lunch", cursor=first.cursor)
 
 
-async def test_truncated_conversation_is_not_reported_complete(
-    mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
-    conversation = await Conversations(mailbox).get_conversation("c-rel", include_bodies=False)
-    assert not conversation.coverage.complete and any(
-        "listing limit" in n for n in conversation.coverage.notes
-    )
-
-
 async def test_conversation_sizes_count_like_get_conversation(mailbox: Mailbox, fake: FakeGraph) -> None:
     conversations = Conversations(mailbox)
     sizes = {s.conversation_id: s.messages for s in await mailbox.conversation_sizes(["c-rel", "c-lunch"])}
@@ -473,14 +463,6 @@ async def test_conversation_coverage_ignores_a_body_cut_to_fit(mailbox: Mailbox,
     assert (
         conversation.messages[0].truncated and conversation.cursor is None and conversation.coverage.complete
     )
-
-
-async def test_truncated_listing_stays_incomplete_when_bodies_fit(
-    mailbox: Mailbox, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
-    conversation = await Conversations(mailbox).get_conversation("c-rel", max_chars=100_000)
-    assert not conversation.coverage.complete
 
 
 async def test_search_dates_are_exact_whatever_the_time_zone(mailbox: Mailbox) -> None:

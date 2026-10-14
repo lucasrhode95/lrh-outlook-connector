@@ -81,7 +81,7 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - **`$batch`**, up to 20 sub-requests: request ids are numbers mapped back (Graph compares ids case-insensitively, and immutable ids can differ only by case); at most 2 batches in flight per process; throttled or temporarily failing items (429/502/503/504) are re-sent in new batches after Retry-After, for up to 4 rounds; results stay per item, so callers report failures per message.
 - `list_folders` includes hidden folders: the service needs them to decide what is out of reach.
 - Meeting-mail fields (kind, time, place, out of date) come from `eventMessage` properties in the same listing, with no extra requests.
-- A conversation listing cannot use `$orderby` with the `conversationId` filter, so the service sorts; Graph pages it, and the connector reads at most 1,000 messages (research §3.21).
+- A conversation listing cannot use `$orderby` with the `conversationId` filter, so the service sorts; Graph pages it, and the connector reads every page (research §3.21).
 - `count_messages` returns per-folder counts in one `$batch` (`$count`, `ConsistencyLevel: eventual`); a failed folder is left out instead of hiding the others.
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
 - Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MB guard stops larger ones.
@@ -143,7 +143,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 **[`mutations.py`](../src/outlook_connector/service/mutations.py)**
 - Ids are checked (at most 100) before anything is read, and the Outlook sign-in must be the bound account.
 - Explicit ids are read through Graph in one `$batch`: unknown → `not_found`, outside the mail folders → `failed` (hidden folders are acted on; an explicit id is authoritative), already as wanted → `unchanged` with nothing sent. The rest go in chunks of 20. On `WriteOutcomeUnknown` the chunk is read back: `done` where the change is visible, `unknown` elsewhere.
-- Conversations given to `set_read` expand to every message in scope, up to the 1,000 the server lists. With more than 100 messages, `counts` covers all and `results` keeps explicit ids and anything not `done` or `unchanged`.
+- Conversations given to `set_read` expand to every message in scope. With more than 100 messages, `counts` covers all and `results` keeps explicit ids and anything not `done` or `unchanged`.
 - `move` refuses Deleted Items and hidden folders; `delete` leaves messages already in Deleted Items alone.
 
 **[`files.py`](../src/outlook_connector/service/files.py)** names a saved `.eml` from the downloaded Subject header.
@@ -227,6 +227,7 @@ Reports the signed-in account and, for each profile, whether a client credential
 Returns the reachable mail folders with their paths (for example `Inbox/Projects/Project Alpha`), well-known aliases such as `inbox`, `sentitems` and `archive`, and counts. The folder list is cached for ten minutes; `refresh=true` reads it from Graph now.
 
 - Hidden folders, Sync Issues and their subfolders are out of reach and are not listed. Naming one as a folder is refused.
+- At most 1,000 folders are read at each level of the tree (directly under the root, or under one parent). The result does not say when a level was cut; the limit is stated in the tool description.
 
 #### `list_messages`
 
@@ -261,7 +262,7 @@ Returns one message's body and its attachment metadata. `body` is `full` (defaul
 
 Returns a whole conversation across all folders, oldest first (sorted locally). `include_bodies` (default true) adds bodies; `false` returns message summaries only. `body` is `full` (default) or `unique`. `max_chars` (1–400,000, default 40,000) is the body budget for one response. When the budget runs out, `cursor` continues at the next message. The cursor restores the original options, and later calls ignore any others. For `scope`, only `deleted_items` applies, because conversations keep sent and meeting mail; `sent_items=false` and `meeting_mail=false` are refused.
 
-- One listing reads at most 1,000 messages of a conversation. When the conversation is longer, `notes` says so and points to `search_messages` or `list_messages` for the rest.
+- Every message of the conversation is listed, however long it is; `max_chars` and `cursor` bound the bodies of one response.
 - A body that cannot be fetched sets `export_error` on its message, and that message's text shows an `[EXPORT ERROR]` block. Count messages with `export_error` rather than reading their text.
 - `coverage.complete` stays false while a failed body might succeed on a retry.
 
@@ -322,7 +323,7 @@ Lists the events that overlap `since` to `until`, in time order, with recurring 
 Results: `events`, with required and optional attendees (up to 15 of each, plus `attendee_count` for the total); `cursor`; and `coverage`, with `complete`, `source` (`graph` or `outlook`, the service that answered), `scanned` and `notes`.
 
 - Graph answers first. Outlook Web answers only for a first page whose Graph read failed for a service reason: sign-in, throttling or an upstream error. Its answer has no descriptions, no Teams join links and no `contains` matching, so `contains` and `include_body` fail instead of returning less. A cursor stays with the service that answered its first page.
-- One call reads at most ten Graph pages (up to 100 events each), so a filtered listing can need several calls. Follow `cursor` while `coverage.complete` is false.
+- One call reads at most ten Graph pages (up to 100 events each), so a filtered listing can need several calls. When a call stops at that budget before `limit` events match, `coverage.notes` says so. Follow `cursor` while `coverage.complete` is false.
 - Only the signed-in user's default calendar is listed. Shared calendars and other people's calendars are not.
 - Graph reads use the `teams.graph` profile, which carries the calendar scope. The fallback uses `outlook.api`. `outlook-connector auth` prepares both.
 - A Graph time that is not UTC is refused, which counts as a Graph failure, so the fallback rules above apply.
@@ -377,10 +378,10 @@ These tools act only on the message ids they are given, at most 100 per call. No
 
 #### `set_read_state`
 
-Marks messages read or unread (`read`). Select them by `message_ids`, by `conversation_ids`, or both. A conversation expands to every message in scope, copies included, up to the 1,000 messages a listing returns for it. Read receipts are never sent.
+Marks messages read or unread (`read`). Select them by `message_ids`, by `conversation_ids`, or both. A conversation expands to every message in scope, copies included. Read receipts are never sent.
 
 - Only `scope.deleted_items` applies, and only with `conversation_ids`. The other scope keys are refused when set away from their defaults.
-- When a selection has more than 100 messages, `counts` covers all of them, but `results` keeps only explicit ids and messages that did not end `done` or `unchanged`. `notes` names any conversation that was cut at 1,000 messages.
+- When a selection has more than 100 messages, `counts` covers all of them, but `results` keeps only explicit ids and messages that did not end `done` or `unchanged`.
 
 #### `set_flag`
 

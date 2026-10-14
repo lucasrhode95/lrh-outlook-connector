@@ -151,12 +151,7 @@ class Exports:
                     for conversation_id in batch
                 )
             )
-            for conversation_id, (items, left_out, truncated) in zip(batch, expanded, strict=True):
-                if truncated:
-                    raise InvalidRequest(
-                        f"Conversation {conversation_id} is larger than the server listing limit; "
-                        "export its messages by message id instead."
-                    )
+            for items, left_out in expanded:
                 _add(excluded, left_out)
                 for item in items:
                     selected.setdefault(item.id, item)

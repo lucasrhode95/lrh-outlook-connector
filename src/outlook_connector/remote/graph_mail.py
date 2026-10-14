@@ -33,7 +33,8 @@ WELL_KNOWN = (
     "recoverableitemsdeletions", "searchfolders", "conversationhistory",
     "syncissues", "conflicts", "localfailures", "serverfailures",
 )  # fmt: skip
-MAX_CONVERSATION = 1000
+MAX_FOLDERS_PER_LEVEL = 1000  # folders read under the root or one parent (documented on list_folders)
+MAX_COUNTED = 1000  # messages counted per conversation in one batched request; more is "at least"
 PHOTO_MAX_BYTES = 1024 * 1024
 
 
@@ -87,7 +88,9 @@ class GraphMailReader(MailReader):
         params = {"$top": 100, "includeHiddenFolders": "true", "$select": mapping.FOLDER_FIELDS}
 
         async def level(paths: list[str]) -> list[dict]:
-            pages = await asyncio.gather(*(self._graph.collect(p, params, max_items=1000) for p in paths))
+            pages = await asyncio.gather(
+                *(self._graph.collect(p, params, max_items=MAX_FOLDERS_PER_LEVEL) for p in paths)
+            )
             return [item for items, _ in pages for item in items]
 
         # Aliases and the folder tree are independent; each tree level is fetched in parallel.
@@ -179,15 +182,15 @@ class GraphMailReader(MailReader):
         return found
 
     @_named("listing a conversation")
-    async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
+    async def conversation(self, conversation_id: str) -> list[MessageSummary]:
         # $orderby cannot be combined with this filter (InefficientFilter, research §3.4): sort locally.
         params = {
             "$filter": f"conversationId eq {_odata_string(conversation_id)}",
             "$select": mapping.SUMMARY_FIELDS,
             "$top": 100,
         }
-        items, truncated = await self._graph.collect("/me/messages", params, max_items=MAX_CONVERSATION)
-        return [mapping.summary(i) for i in items], truncated
+        items, _ = await self._graph.collect("/me/messages", params, max_items=None)
+        return [mapping.summary(i) for i in items]
 
     @_named("counting conversation messages")
     async def conversation_folders(
@@ -199,7 +202,7 @@ class GraphMailReader(MailReader):
                 {
                     "$filter": f"conversationId eq {_odata_string(cid)}",
                     "$select": "id,parentFolderId,internetMessageId",
-                    "$top": MAX_CONVERSATION,
+                    "$top": MAX_COUNTED,
                 },
             )
             for index, cid in enumerate(conversation_ids)

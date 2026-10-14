@@ -394,14 +394,6 @@ async def test_message_still_throttled_fails_the_export_as_throttled(
     assert exported_files() == []
 
 
-async def test_truncated_conversation_is_not_exported_silently(
-    exports: Exports, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
-    with pytest.raises(InvalidRequest, match="listing limit"):
-        await exports.export(ExportRequest(conversation_ids=["c-rel"]))
-
-
 async def test_identical_exports_in_the_same_second_get_distinct_files(exports: Exports) -> None:
     first = await exports.export(ExportRequest(message_ids=["m1"]))
     second = await exports.export(ExportRequest(message_ids=["m1"]))

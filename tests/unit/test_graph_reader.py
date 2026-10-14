@@ -117,8 +117,8 @@ async def test_list_messages_in_one_folder(fake: FakeGraph) -> None:
 
 
 async def test_conversation_spans_folders_and_never_uses_orderby(fake: FakeGraph) -> None:
-    messages, truncated = await reader_for(fake).conversation("c-rel")
-    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-project", "f-junk"} and not truncated
+    messages = await reader_for(fake).conversation("c-rel")
+    assert {m.folder_id for m in messages} == {"f-inbox", "f-sent", "f-project", "f-junk"}
 
 
 async def test_summary_lookup_failures_keep_structured_details(fake: FakeGraph) -> None:
@@ -128,12 +128,11 @@ async def test_summary_lookup_failures_keep_structured_details(fake: FakeGraph) 
     assert result.failed["m1"].status == 403
 
 
-async def test_large_conversation_reports_truncation(
-    fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr("outlook_connector.remote.graph_mail.MAX_CONVERSATION", 2)
-    messages, truncated = await reader_for(fake).conversation("c-rel")
-    assert len(messages) == 2 and truncated
+async def test_a_large_conversation_is_read_to_its_last_page(fake: FakeGraph) -> None:
+    for i in range(1050):
+        fake.add(FakeMessage(f"big-{i}", "x", "f-inbox", "2026-09-01T00:00:00Z", conversation="big"))
+    messages = await reader_for(fake).conversation("big")
+    assert len(messages) == 1050 and len({m.id for m in messages}) == 1050
 
 
 async def test_conversation_folders_in_one_batch(fake: FakeGraph) -> None:
@@ -368,7 +367,7 @@ async def test_continuation_links_must_stay_on_graph(fake: FakeGraph, page: str)
 async def test_odata_quotes_are_escaped_in_conversation_ids() -> None:
     fake = FakeGraph()
     fake.add(FakeMessage("q1", "quote", "f", "2026-09-01T00:00:00Z", conversation="it's"))
-    messages, _ = await reader_for(fake).conversation("it's")
+    messages = await reader_for(fake).conversation("it's")
     assert [m.id for m in messages] == ["q1"]
 
 

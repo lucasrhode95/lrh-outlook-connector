@@ -59,7 +59,7 @@ class Mutations:
         scope: Scope = DEFAULT_SCOPE,
         continue_on_error: bool = True,
     ) -> MutationResult:
-        """Entry point: bound explicit ids to 100; expand each conversation under its server limit."""
+        """Entry point: bound explicit ids to 100; expand each conversation to all its messages in scope."""
         validate_scope(scope, sent_items=False, meeting_mail=False, deleted_items=bool(conversation_ids))
         explicit = _message_ids(message_ids, allow_empty=bool(conversation_ids))
         ids = list(explicit)
@@ -71,14 +71,9 @@ class Mutations:
             expanded_conversations = await gather_cancel_on_error(
                 *(self._conversation(conversation_id, scope=scope) for conversation_id in batch)
             )
-            for conversation_id, (expanded, truncated) in zip(batch, expanded_conversations, strict=True):
+            for expanded in expanded_conversations:
                 ids.extend(summary.id for summary in expanded)
                 conversation_summaries.update({summary.id: summary for summary in expanded})
-                if truncated:
-                    notes.append(
-                        f"Conversation {conversation_id} was truncated at the 1,000-message listing limit; "
-                        "only listed messages in scope are included."
-                    )
         ids = list(dict.fromkeys(ids))
         if not ids:
             raise InvalidRequest("Name at least one message id or a conversation with messages in scope.")
@@ -151,20 +146,20 @@ class Mutations:
 
     # ---------------------------------------------------------------- shared flow
 
-    async def _conversation(self, conversation_id: str, *, scope: Scope) -> tuple[list[MessageSummary], bool]:
+    async def _conversation(self, conversation_id: str, *, scope: Scope) -> list[MessageSummary]:
         """Every message of the conversation in scope (all copies, not merged).
 
         Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
         results) and ``scope`` was validated by ``set_read``.
         """
-        items, truncated = await self.mailbox.reader.conversation(conversation_id)
+        items = await self.mailbox.reader.conversation(conversation_id)
         skip = await self.mailbox.exclusions(scope)
         folders, hidden = await self.mailbox.reach(m.folder_id for m in items)
         return [
             m
             for m in items
             if m.folder_id in folders and m.folder_id not in hidden and m.folder_id not in skip
-        ], truncated
+        ]
 
     async def _apply(
         self,

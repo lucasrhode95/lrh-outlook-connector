@@ -52,21 +52,20 @@ class Conversations:
 
     async def messages(
         self, conversation_id: str, *, scope: Scope, merge_result: bool = True
-    ) -> tuple[list[MessageSummary], dict[ExclusionReason, int], bool]:
-        """All messages of the conversation, oldest first, what was left out by folder, and whether
-        the server listing was truncated (more than MAX_CONVERSATION messages).
+    ) -> tuple[list[MessageSummary], dict[ExclusionReason, int]]:
+        """All messages of the conversation, oldest first, and what was left out by folder.
 
         Assumes (not re-checked here): ``conversation_id`` is taken as given (from this connector's own
         results) and ``scope`` was validated at the public entry point; an unknown id raises NotFound.
         """
-        remote, truncated = await self.mailbox.reader.conversation(conversation_id)
+        remote = await self.mailbox.reader.conversation(conversation_id)
         if not remote:
             raise NotFound(f"No conversation {conversation_id} on the server.")
         skip = await self.mailbox.exclusions(scope)
         items, excluded = await self.mailbox.finish(
             sorted(remote, key=oldest_first), skip, merge_result=merge_result
         )
-        return items, excluded, truncated
+        return items, excluded
 
     async def get_conversation(
         self,
@@ -96,13 +95,8 @@ class Conversations:
         validate_scope(scope, sent_items=False, meeting_mail=False)
         if not 1 <= max_chars <= 400_000:
             raise InvalidRequest("max_chars must be between 1 and 400000.")
-        items, excluded, listing_truncated = await self.messages(conversation_id, scope=scope)
+        items, excluded = await self.messages(conversation_id, scope=scope)
         notes = ["Messages are sorted oldest first (sorted locally)."]
-        if listing_truncated:
-            notes.append(
-                "The conversation has more messages than the server listing limit; only the first ones "
-                "the server returned are included. Use search_messages or list_messages for the rest."
-            )
         for reason, count in excluded.items():
             notes.append(f"{count} message(s) left out: {EXCLUSION_TEXT[reason]}.")
         if any(m.also_in for m in items):
@@ -159,7 +153,7 @@ class Conversations:
             if next_start is not None
             else None,
             coverage=Coverage(
-                complete=next_start is None and not listing_truncated and not retryable,
+                complete=next_start is None and not retryable,
                 excluded=excluded,
                 notes=notes,
             ),

@@ -18,6 +18,7 @@ from outlook_connector.remote.ports import CalendarViewPage
 from outlook_connector.service import cursors
 from outlook_connector.service.calendar_listing import (
     CURSOR_KIND,
+    MAX_GRAPH_PAGES,
     MAX_LISTED_ATTENDEES,
     MAX_LISTED_BODY_CHARS,
     CalendarListing,
@@ -158,6 +159,20 @@ async def test_a_filtered_listing_keeps_reading_pages_until_it_has_matches() -> 
     assert [event.id for event in result.events] == ["yes"]
     assert result.coverage.complete and result.coverage.scanned == 2
     assert [call["page_size"] for call in graph.calls] == [100, 100]
+
+
+async def test_a_call_that_spends_its_read_budget_says_so() -> None:
+    graph = GraphStub([CalendarViewPage(events=[_event("no", 9)], next_link=LINK_2)])
+    listing = CalendarListing(graph_view=graph, outlook_view=OutlookStub())
+
+    result = await listing.list_events(since=SINCE, until=UNTIL, contains="keyword", limit=1)
+
+    assert result.events == [] and result.cursor is not None and not result.coverage.complete
+    assert len(graph.calls) == MAX_GRAPH_PAGES
+    assert any("read budget" in note for note in result.coverage.notes)
+
+    full = await listing.list_events(since=SINCE, until=UNTIL, limit=1)
+    assert not full.coverage.complete and not any("read budget" in n for n in full.coverage.notes)
 
 
 async def test_descriptions_and_attendees_are_bounded_and_counted() -> None:

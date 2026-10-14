@@ -248,7 +248,7 @@ async def test_long_conversations_use_normal_chunks_and_compact_counts(
     assert all(fake.messages[f"long-{i}"].is_read is read for i in range(125))
 
 
-async def test_expansion_truncation_is_reported_at_existing_limit(
+async def test_expansion_covers_a_conversation_past_one_thousand_messages(
     mutations: Mutations, fake: FakeGraph
 ) -> None:
     for i in range(1001):
@@ -256,11 +256,10 @@ async def test_expansion_truncation_is_reported_at_existing_limit(
             FakeMessage(f"cap-{i}", "x", "f-inbox", "2026-09-01T00:00:00Z", conversation="cap", is_read=False)
         )
     result = await mutations.set_read([], True, conversation_ids=["cap"])
-    assert result.counts == {"done": 1000} and not result.results
-    assert any("truncated" in n and "1,000" in n for n in result.notes)
+    assert result.counts == {"done": 1001} and not result.results
     assert (
-        len(fake.ows_calls) == 50
-        and sum(m.is_read for mid, m in fake.messages.items() if mid.startswith("cap-")) == 1000
+        len(fake.ows_calls) == 51
+        and sum(m.is_read for mid, m in fake.messages.items() if mid.startswith("cap-")) == 1001
     )
 
 

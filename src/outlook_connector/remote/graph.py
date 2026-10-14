@@ -6,6 +6,7 @@ Every request asks for immutable ids. Continuation links pass through unchanged 
 from __future__ import annotations
 
 import asyncio
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -108,10 +109,12 @@ class Graph:
         path: str,
         params: Mapping[str, Any] | None = None,
         *,
-        max_items: int,
+        max_items: int | None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Follow pages up to ``max_items``. Returns (items, truncated)."""
+        """Follow pages up to ``max_items`` (to the last page when None). Returns (items, truncated)."""
         items, link = await self.page(path, params)
+        if max_items is None:
+            max_items = sys.maxsize
         seen_links: set[str] = set()
         while link and len(items) < max_items:
             if link in seen_links:

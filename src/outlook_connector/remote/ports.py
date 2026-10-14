@@ -79,8 +79,8 @@ class MailReader(Protocol):
         self, *, query: str, folder_id: str | None, page_size: int, page: str | None
     ) -> tuple[list[MessageSummary], str | None]: ...
 
-    async def conversation(self, conversation_id: str) -> tuple[list[MessageSummary], bool]:
-        """Every message of the conversation in every folder (unsorted), and whether it was truncated."""
+    async def conversation(self, conversation_id: str) -> list[MessageSummary]:
+        """Every message of the conversation in every folder (unsorted)."""
         ...
 
     async def conversation_folders(

@@ -129,6 +129,11 @@ class CalendarListing:
             notes.append(
                 f"Descriptions are cut to {MAX_LISTED_BODY_CHARS:,} characters; body_truncated marks them."
             )
+        if not complete and len(matched) < limit:
+            notes.append(
+                f"This call stopped at its read budget of {MAX_GRAPH_PAGES} Graph pages ({scanned} event(s) "
+                f"read) before {limit} event(s) matched; the window is not finished."
+            )
         if not complete:
             notes.append("More events are available: follow the cursor.")
         return CalendarListResult(
