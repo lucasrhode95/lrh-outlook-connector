@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from uuid import UUID, uuid4
 
 from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarEvent, CalendarSearchCoverage, CalendarSearchResult
-from outlook_connector.domain.time import as_utc, optional_utc
 from outlook_connector.remote.ports import CalendarItemReader, CalendarSearchReader
 from outlook_connector.service import cursors
 
@@ -25,20 +23,15 @@ class Calendar:
         self,
         query: str,
         *,
-        since: datetime | None = None,
-        until: datetime | None = None,
         limit: int = 25,
         cursor: str | None = None,
     ) -> CalendarSearchResult:
-        """Validate public search inputs, preserve cursor filters, then return one bounded page."""
+        """Validate public search inputs, resume from the cursor, then return one bounded page."""
         if not isinstance(query, str) or not query.strip():
             raise InvalidRequest("query must be a non-empty string.")
         query = query.strip()
         if len(query) > MAX_EVENT_QUERY_CHARS:
             raise InvalidRequest(f"query must be no longer than {MAX_EVENT_QUERY_CHARS} characters.")
-        since, until = optional_utc(since), optional_utc(until)
-        if since and until and since > until:
-            raise InvalidRequest("since must be earlier than or equal to until.")
         if not 1 <= limit <= MAX_EVENT_PAGE_SIZE:
             raise InvalidRequest(f"limit must be between 1 and {MAX_EVENT_PAGE_SIZE}.")
 
@@ -50,7 +43,6 @@ class Calendar:
             page_size = state.get("page_size")
             cvid = _cursor_uuid(state.get("cvid"), "Cvid")
             logical_id = _cursor_uuid(state.get("logical_id"), "LogicalId")
-            since, until = _parse_datetime(state.get("since")), _parse_datetime(state.get("until"))
             if type(offset) is not int or not 0 <= offset < EVENT_SEARCH_OFFSET_LIMIT:
                 raise InvalidRequest("The calendar cursor has an invalid offset.")
             if type(page_size) is not int or not 1 <= page_size <= MAX_EVENT_PAGE_SIZE:
@@ -67,7 +59,7 @@ class Calendar:
             cvid=cvid,
             logical_id=logical_id,
         )
-        events, excluded_unknown_dates = _in_window(page.events, since, until)
+        events = page.events
         next_offset = offset + page.rows_received
         next_cursor = None
         notes_at_offset_limit = False
@@ -80,8 +72,6 @@ class Calendar:
                     page_size=page_size,
                     cvid=cvid,
                     logical_id=logical_id,
-                    since=since.isoformat() if since else None,
-                    until=until.isoformat() if until else None,
                 )
             else:
                 notes_at_offset_limit = True
@@ -103,10 +93,6 @@ class Calendar:
             )
         elif page.more_results_available:
             notes.append("Follow the cursor only if additional event matches are useful.")
-        if excluded_unknown_dates:
-            notes.append(
-                f"{excluded_unknown_dates} event(s) with no start time were omitted by date filters."
-            )
         if any(event.id is None for event in events):
             notes.append(
                 "Some results did not contain an OWS item id and cannot be hydrated by get_calendar_event."
@@ -133,24 +119,6 @@ class Calendar:
         return await self._items.get_event(event_id)
 
 
-def _in_window(
-    events: list[CalendarEvent], since: datetime | None, until: datetime | None
-) -> tuple[list[CalendarEvent], int]:
-    if since is None and until is None:
-        return events, 0
-    selected: list[CalendarEvent] = []
-    unknown = 0
-    for event in events:
-        start = optional_utc(event.start)
-        if start is None:
-            unknown += 1
-            continue
-        if since and start < since or until and start > until:
-            continue
-        selected.append(event)
-    return selected, unknown
-
-
 def _cursor_uuid(value: object, label: str) -> str:
     if not isinstance(value, str):
         raise InvalidRequest(f"The calendar cursor has an invalid {label}.")
@@ -158,15 +126,3 @@ def _cursor_uuid(value: object, label: str) -> str:
         return str(UUID(value))
     except ValueError:
         raise InvalidRequest(f"The calendar cursor has an invalid {label}.") from None
-
-
-def _parse_datetime(value: object) -> datetime | None:
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise InvalidRequest("The calendar cursor has an invalid date bound.")
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        raise InvalidRequest("The calendar cursor has an invalid date bound.") from None
-    return as_utc(parsed)

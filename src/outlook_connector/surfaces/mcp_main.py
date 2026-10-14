@@ -68,8 +68,8 @@ Outlook Web answers only when the Graph read fails, and then it has no descripti
 include_body fail. coverage.source says which service answered. Follow the cursor while \
 coverage.complete is false.
 - Calendar: search_calendar_events discovers Exchange events by words across the calendar, not Teams \
-recaps or transcripts; its date bounds apply after each page, so use list_calendar_events for a date \
-range. Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
+recaps or transcripts, across all dates; for a date range, use list_calendar_events instead. \
+Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
 owns the event, schedule and any join link; related Teams chats, recaps, recordings and transcripts \
 belong to the Teams connector. Event-to-Teams linkage is not inferred when Search v2 omits a verified \
 identifier.
@@ -297,19 +297,15 @@ def build_server(context: AppContext) -> FastMCP:
             str,
             Field(description="Words to search in Exchange calendar events (512-character service limit)."),
         ],
-        since: Annotated[datetime | None, Field(description="Inclusive lower event-start bound.")] = None,
-        until: Annotated[datetime | None, Field(description="Inclusive upper event-start bound.")] = None,
         limit: Annotated[
             int, Field(description="Events returned in this page; the service enforces a range of 1 to 25.")
         ] = 25,
         cursor: str | None = None,
     ) -> CalendarSearchResult:
-        """Search Exchange calendar events online. Follow cursor only when more events are useful;
-        recurring occurrence totals are intentionally not reported. For a date range, use
-        list_calendar_events."""
-        return await (await services()).calendar.search_events(
-            query, since=since, until=until, limit=limit, cursor=cursor
-        )
+        """Search Exchange calendar events online, across all dates. Follow cursor only when more events
+        are useful; recurring occurrence totals are intentionally not reported. For a date range, use
+        list_calendar_events (its contains filter finds text within the window)."""
+        return await (await services()).calendar.search_events(query, limit=limit, cursor=cursor)
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_calendar_events(

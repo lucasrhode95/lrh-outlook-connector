@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 
 import pytest
 
@@ -38,7 +38,7 @@ def _event(event_id: str, start: str | None) -> CalendarEvent:
     )
 
 
-async def test_calendar_search_bounds_dates_and_preserves_remote_paging() -> None:
+async def test_calendar_search_returns_every_hit_and_preserves_remote_paging() -> None:
     search = SearchStub(
         [
             CalendarSearchPage(
@@ -61,13 +61,14 @@ async def test_calendar_search_bounds_dates_and_preserves_remote_paging() -> Non
     )
     items = ItemsStub()
     calendar = Calendar(search, items)
-    since = datetime(2026, 10, 1, tzinfo=UTC)
-    until = datetime(2026, 10, 31, tzinfo=UTC)
 
-    first = await calendar.search_events("synthetic event", since=since, until=until, limit=10)
-    assert [event.id for event in first.events] == ["synthetic-in-range"]
+    first = await calendar.search_events("synthetic event", limit=10)
+    assert [event.id for event in first.events] == [
+        "synthetic-in-range",
+        "synthetic-outside",
+        "synthetic-no-date",
+    ]
     assert not first.coverage.complete and first.cursor
-    assert any("1 event(s) with no start time" in note for note in first.coverage.notes)
 
     second = await calendar.search_events("synthetic event", cursor=first.cursor)
     assert [event.id for event in second.events] == ["synthetic-next-page"]
@@ -151,8 +152,6 @@ async def test_calendar_search_does_not_emit_cursor_past_offset_limit() -> None:
         page_size=25,
         cvid="00000000-0000-0000-0000-000000000001",
         logical_id="00000000-0000-0000-0000-000000000002",
-        since=None,
-        until=None,
     )
 
     result = await calendar.search_events("synthetic query", cursor=cursor)
@@ -170,8 +169,6 @@ async def test_calendar_search_refuses_a_cursor_at_the_offset_limit() -> None:
         page_size=25,
         cvid="00000000-0000-0000-0000-000000000001",
         logical_id="00000000-0000-0000-0000-000000000002",
-        since=None,
-        until=None,
     )
     calendar = Calendar(SearchStub([]), ItemsStub())
     with pytest.raises(InvalidRequest, match="invalid offset"):
@@ -198,8 +195,6 @@ async def test_calendar_search_keeps_a_last_page_that_runs_past_the_limit() -> N
         page_size=24,
         cvid="00000000-0000-0000-0000-000000000001",
         logical_id="00000000-0000-0000-0000-000000000002",
-        since=None,
-        until=None,
     )
 
     result = await calendar.search_events("synthetic query", limit=24, cursor=cursor)
