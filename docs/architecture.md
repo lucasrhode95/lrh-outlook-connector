@@ -334,13 +334,12 @@ Outlook owns the event, its schedule, its invitees and any join link. `lrh-teams
 
 #### `search_calendar_events`
 
-Searches Exchange calendar events online through Microsoft Search v2, for words up to 512 characters. Each page holds `limit` events (1–25, default 25). `since` and `until` bound the event start time. They are applied to each page as it arrives, so an empty page can still have a `cursor`. `coverage` gives `complete`, `offset`, `page_size`, `more_results_available` and `notes`.
+Searches Exchange calendar events online through Microsoft Search v2, for words up to 512 characters. Each page holds `limit` events (1–25, default 25), from any date. `coverage` gives `complete`, `offset`, `page_size`, `more_results_available` and `notes`.
 
 - Follow `cursor` only while more matches help. Search v2 refuses a page that starts at offset 1,000 or later. A page that starts earlier can return results past 1,000, and no cursor follows it; `notes` says so (research [§3.19](api-research.md#319-review-gap-live-checks-2026-10-13)).
 - Totals for recurring events are not reported, because Search v2 totals were inconsistent in testing.
-- Events with no start time are dropped when a bound is set. `notes` counts them.
 - Results without an Outlook item id cannot be hydrated by `get_calendar_event`. `notes` says so.
-- `since` and `until` do not reach the server: date terms in the query returned no result set (research [§3.19](api-research.md#319-review-gap-live-checks-2026-10-13)), so the bounds filter the pages fetched, and a window's events may lie beyond the first 1,000 results. For a date range, use `list_calendar_events`, which lists by window.
+- It takes no date bounds. Search v2 did not restrict event dates through query terms (research [§3.19](api-research.md#319-review-gap-live-checks-2026-10-13)), and filtering pages after they arrive could miss a window's events beyond the first 1,000 results. For a date range, use `list_calendar_events`, which reads the window and matches text with `contains`.
 - It does not search Teams recaps, transcripts or chats.
 
 #### `get_calendar_event`
