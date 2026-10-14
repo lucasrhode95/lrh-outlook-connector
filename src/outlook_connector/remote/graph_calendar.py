@@ -1,4 +1,4 @@
-"""Graph calendar view: the default calendar's events, occurrences expanded (research §3.18).
+"""Graph calendar view: the default calendar's events, occurrences expanded (research §3.17).
 
 Read-only and Graph first. The token is the calendar profile the Graph client was built with
 (``config.CALENDAR_PROFILE``); the Outlook Graph profile has no calendar scope. Times are requested in
@@ -30,7 +30,7 @@ VIEW_FIELDS = (
 )
 PREFER_UTC = 'outlook.timezone="UTC"'
 # Graph does not return the view in start order on its own, and its pages follow that order. Ordering on
-# the server keeps every next link in time order (live check 2026-10-12, research §3.19).
+# the server keeps every next link in time order (live check 2026-10-12, research §3.18).
 ORDER_BY = "start/dateTime asc"
 RESPONSE_NAMES = {  # Graph's responseStatus.response -> the MyResponseType that Outlook Web reports
     "accepted": "Accept",

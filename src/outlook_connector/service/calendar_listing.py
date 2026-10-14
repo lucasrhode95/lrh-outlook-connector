@@ -1,4 +1,4 @@
-"""Calendar listing: the events in a window, Graph first, Outlook Web only when Graph fails (research §3.18).
+"""Calendar listing: the events in a window, Graph first, Outlook Web only when Graph fails (research §3.17).
 
 The listing reads the default calendar's occurrences for a window, in time order. ``contains`` and the
 descriptions need Graph, because the Outlook Web fallback carries no descriptions. The fallback answers

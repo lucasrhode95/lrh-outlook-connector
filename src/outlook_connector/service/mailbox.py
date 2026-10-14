@@ -1,4 +1,4 @@
-"""Folders, message listing, message content and search (requirements v4 §7–§9).
+"""Folders, message listing, message content and search (requirements §7–§9).
 
 Remote first: every call asks Outlook (Graph). The local store caches the folder list only; no
 message data is kept locally, so a message deleted on the server is gone here too.
@@ -620,7 +620,7 @@ class Mailbox:
         scope: Scope = DEFAULT_SCOPE,
         detail: Detail = "full",
     ) -> SearchResult:
-        """Server-side search, hits grouped by conversation (requirements v4 §8).
+        """Server-side search, hits grouped by conversation (requirements §8).
 
         Entry point: normalize naive dates as UTC and aware dates to UTC; validate scope, query, limit,
         folder and cursor. The web and MCP search routes pass dates through unchecked.

@@ -1,4 +1,4 @@
-"""Output packaging (requirements v4 §10): exactly one download.
+"""Output packaging (requirements §10): exactly one download.
 
 A flat file (.txt or .jsonl) only when the result is a single text file with no attachment files.
 Otherwise one .zip: text files at the root, each text file's attachments in a sibling folder

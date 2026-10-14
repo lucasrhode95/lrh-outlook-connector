@@ -41,10 +41,11 @@ regeneration and redaction machinery in the repository. Probes must work without
 
 A local connector for one user's Exchange Online mailbox: an MCP server for agents and a small local web UI. Core mail-data reads go through Microsoft Graph. Outlook Web Service (OWS) handles mail changes and inbox-rule access; Outlook Cloud Settings handles native signature settings.
 
-- What it must do: `docs/outlook-requirements-v4.md`
+- Documentation index: `docs/README.md`
+- What it must do: `docs/requirements.md`
 - How it is built: `docs/architecture.md`
-- What Microsoft allows (evidence): `docs/outlook-api-research.md`
-- Work register and status: `docs/outlook-roadmap.md`
+- What Microsoft allows (evidence): `docs/api-research.md`
+- Work register and status: `docs/roadmap.md`
 
 Layers: `surfaces/` (MCP, web) → `service/` (every domain decision) → `remote/` (Graph, OWS; the only code that knows wire formats and ids) and `store/` (SQLite). The service depends on the ports in `remote/ports.py`, never on a concrete adapter.
 

@@ -2,7 +2,7 @@
 
 One process per agent session. Nothing touches the network until the first tool call.
 Reads never change the mailbox (not even read state). The write tools save drafts, send mail
-(only with the user's confirmation of the exact message, requirements v4 §11.1) and change
+(only with the user's confirmation of the exact message, requirements §11.1) and change
 messages named by id (§11.2), each with a result per message.
 """
 

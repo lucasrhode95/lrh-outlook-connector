@@ -7,7 +7,7 @@
 2026-10-11 (Graph attachment and file search endpoint comparison; shared-auth profile/photo check) ·
 2026-10-12 (calendar adapter implementation record and search measurement consolidation)
 
-**Product scope:** [Requirements v4](outlook-requirements-v4.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md) · **Cross-product search routes:** [findings](m365-search-findings.md)
+**Product scope:** [Requirements v4](requirements.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md)
 
 This records tenant-specific access, live observations, unresolved questions and private API
 contracts for the tested environment's single-user connector. Microsoft's official documentation is the
@@ -38,34 +38,7 @@ should configure and rerun the probes before adopting the routing choices below.
 
 ## 2. Authentication (STANDALONE)
 
-The [MSAL token-acquisition guide](https://learn.microsoft.com/en-us/entra/msal/python/getting-started/acquiring-tokens)
-describes the public authentication flow. The evidence below establishes which Microsoft-owned
-clients are preauthorized in this tenant; those grants cannot be inferred from Graph's permission
-reference alone. Probes used the `organizations` authority.
-
-| Client | Resource / scope | Result |
-|---|---|---|
-| **C** Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Graph `Mail.Read` (`.default`: 18 scopes) | **Granted.** The only mail scopes are `Mail.Read` and `Mail.Read.Shared`. Silent refresh works. The set also includes `User.Read` (checked 2026-10-04): `/me` and `/me/photos/48x48/$value` work with this sign-in, so the UI shows the user's name and photo without new permissions. |
-| C | Graph `Mail.Send`, `Mail.ReadWrite`, `Mail.ReadWrite.Shared` | **Denied: AADSTS65002** |
-| **A** One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | `https://outlook.office.com/.default` | **Granted.** Includes `Mail.ReadWrite(.All/.Shared)` and `Mail.Send(.Shared)` for the Outlook resource. |
-| A | `https://outlook.office.com/search/.default` | **Granted** silently from A's refresh token. Audience `66a88757-258c-4c72-893c-3e8bed4d6899`, scope `SubstrateSearch-Internal.ReadWrite`. This is the same client and scope Outlook Web uses (BROWSER). |
-| A | Graph `Mail.Read`, `Mail.ReadWrite`, `Mail.Send` (`.default`: 26 scopes, none `Mail.*`) | **Denied: AADSTS65002** |
-| **B** Outlook desktop / M365 `d3590ed6-52b3-4102-aeff-aad2292ab01c` | Graph `Mail.Read` | **Denied: AADSTS65002** |
-| D older Outlook Web `bc59ab01-8403-45c6-8796-ac3ef710b3e3` | — | Not tested |
-
-- [`AADSTS65002`](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes) means the client is not preauthorized for that resource. The recorded denial applies to the tested client/resource configuration at that time. The production baseline preserves its denied pairs; portable probes skip only pairs configured locally for the current environment.
-- **Conclusion for the tested environment:** none of the tested usable clients could write mail through Graph. The Graph/OWS split in [architecture §6](architecture.md) follows from this table and must be re-derived for another tenant.
-
-**Shared profile contract (2026-10-11):** `lrh-m365-auth` now explicitly requests Graph `Mail.Read`
-and `User.Read` in `outlook.graph`. This preserves the mailbox reads and the `/me` profile and photo
-capabilities that were previously verified with the broader granted token above. Microsoft documents
-[`User.Read` as the least-privileged delegated permission for the signed-in profile](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0).
-For [reading a user's photo](https://learn.microsoft.com/en-us/graph/api/profilephoto-get?view=graph-rest-1.0),
-the permission reference lists `ProfilePhoto.Read.All` as least privileged and `User.Read` as an
-accepted higher delegated permission. On 2026-10-11, silent token acquisition through the
-consolidated profile and live `/me` profile/photo reads succeeded from the existing shared cache
-without a device-code flow. This validates the existing account's grants, not a fresh account's
-consent outcome.
+Which Microsoft clients are granted which permissions in the tested tenant, and the `AADSTS65002` denials, are recorded in the shared [sign-in research](https://github.com/lucasrhode95/lrh-m365-auth/blob/main/docs/api-research.md). For this connector the conclusion is: none of the tested usable clients could write mail through Graph, so mail changes, inbox rules and signatures use the Outlook profile. The Graph/OWS split in [architecture §6](architecture.md#6-capability-routing-and-portability) follows from that table and must be re-derived for another tenant.
 
 ## 3. Microsoft Graph: mail-data reads and verification (STANDALONE, client C)
 
@@ -204,45 +177,7 @@ Snapshot taken before the §4.2 mutations, checked after them.
 | Archive | 0 | The round trip netted out. Delta reports net state, not history. |
 | Deleted Items | 2× added | The same immutable ids, so moves are matched by id |
 
-### 3.7 File and cross-category search feasibility (2026-10-07)
-
-Public contracts: [site resolution](https://learn.microsoft.com/en-us/graph/api/site-getbypath?view=graph-rest-1.0),
-[file download](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0),
-[sharing links](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0),
-[file search and filters](https://learn.microsoft.com/en-us/graph/search-concept-files),
-[search request parameters](https://learn.microsoft.com/en-us/graph/api/resources/searchrequest?view=graph-rest-1.0),
-[mail search limitations](https://learn.microsoft.com/en-us/graph/search-concept-messages),
-[people search](https://learn.microsoft.com/en-us/graph/search-concept-person)
-and [calendar search](https://learn.microsoft.com/en-us/graph/search-concept-events).
-Use those for request/response schemas, pagination, query filters and redirect handling.
-
-**Authentication evidence:** the existing encrypted Outlook `graph` sign-in resolved an
-owner-supplied workbook, obtained its metadata, and read the beginning of its download with
-HTTP 200 and an XLSX-compatible header. No new scopes or interactive sign-in were required.
-The full file was not downloaded, so complete-content integrity is unverified.
-
-| Probe with the same sign-in | Observed result | Remaining uncertainty |
-|---|---|---|
-| Known workbook filename search (`driveItem`) | HTTP 200; expected workbook found | No exhaustive recall or pagination test |
-| Generic file search without a location restriction | HTTP 200; results from multiple SharePoint sites and OneDrive | No proof of complete coverage of all accessible files |
-| Known colleague name (`person`) | HTTP 200; two hits | Wider person/group coverage untested |
-| Mail keyword, subject and body searches | HTTP 200; hits returned | Product folder exclusions were not applied; use official count limitations |
-| Calendar event search (`event`) | HTTP 403 `Forbidden`, requiring `Calendars.Read` or `Calendars.ReadWrite` | Current Graph token lacks these scopes; another approved auth route is unproven |
-| Site search and a folder-only file query | HTTP 200; zero hits | No known-hit validation; zero hits establish neither complete coverage nor lack of support |
-
-The sharing-link resolver was not tested: the workbook was addressed through its site/library
-path. Do not infer that arbitrary sharing URLs, guest resources or other tenants work.
-No file, sharing permission or mailbox was changed; credentials and private results were not
-retained in Git.
-
-**Related evidence:** the Teams roadmap records successful Graph OneDrive reads and
-`driveItem` search on 2026-10-01 (`lrh-teams-connector/docs/teams-connector-roadmap.md`, G1).
-This is evidence from that repo, not a repeated Teams sign-in test. Its heterogeneous private
-Substrate Search v2 discovery remains pending; Graph results do not validate that contract.
-Product scope and implementation decisions for general OneDrive/SharePoint files belong in the
-[SharePoint connector roadmap](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md).
-
-### 3.8 Microsoft 365 Search API coverage review (2026-10-10)
+### 3.7 Microsoft 365 Search API coverage review (2026-10-10)
 
 **Evidence:** DOCUMENTED in current Microsoft Graph v1.0 documentation. This is a documentation
 review, not a new live request or browser-capture observation. See the [Search API overview](https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview?view=graph-rest-1.0),
@@ -255,17 +190,14 @@ and [organizer transcript listing](https://learn.microsoft.com/en-us/graph/api/o
 
 | Area | Documented Graph capability | Connector decision or remaining gap |
 |---|---|---|
-| SharePoint and OneDrive | Microsoft Search accepts `driveItem`, `listItem`, `list` and `site`; an all-content query is scoped to content the signed-in user can read. File queries support KQL such as `path:` and `filetype:`. | “Whole organization” must not mean content outside the signed-in user's access. The earlier known-file result does not prove content-only matching, exhaustive recall, personal/shared scope parity, or arbitrary share-link resolution. |
 | Mail and attachments | `message` search covers sender, subject, message body and supported attachment contents in the signed-in user's mailbox. | Search returns a message resource. The documented response does not identify which attachment matched, so report a parent-message hit unless a provider supplies attachment-level evidence. Delegated-mailbox search is unsupported. |
-| Teams messages | `chatMessage` search is available on v1.0. Microsoft documents it searches message bodies and attachments, with supported file types matching SharePoint Online search. Results are limited to messages the signed-in user is in, omit some `chatMessage` fields, cannot be combined with other entity types, and do not support sorting. The returned total is page-local. | Hydrate selected hits through the documented Teams resource APIs. The tested profile's Graph search was denied; live attachment recall, matched-attachment identity, hosted-file linkage, and parity with the captured Files filter remain unverified. |
 | Calendar events | `event` search targets the signed-in user's primary calendar. Event pages are limited to 25; sorting is unsupported and the returned total is page-local. | The current Graph profile still lacks `Calendars.Read`; the earlier 403 remains an authentication blocker. Primary-calendar documentation does not establish coverage of delegated or other calendars, and meeting/chat identity links still need evidence. |
-| Meeting transcripts | Per-meeting transcript listing and content retrieval are separate from Search. Delegated transcript reads use `OnlineMeetingTranscript.Read.All` and are subject to tenant settings. `getAllTranscripts` is application-only and organizer-scoped; it does not cover channel meetings. | The documented Microsoft Search v1.0 entity list has no transcript entity, while transcript APIs document listing/content retrieval. **Inference:** classify Graph transcript support as retrieval only; online full-text discovery remains unproven, not disproven for every Microsoft provider. |
 
 **Shared bounds.** Microsoft Search requests run in the signed-in user's delegated context and enforce source access controls. The documented default page size is 25; message and event requests cannot exceed 25 per page, while SharePoint/OneDrive allow up to 1,000. Use `moreResultsAvailable` for continuation and never present message, event or Teams page totals as complete result totals.
 
-**Status after bounded checks (2026-10-12).** Later sections record synthetic mail known hits (§3.12), OneDrive/SharePoint file search, selected-item hydration and paging (§3.12.1), the browser route map (§3.9), and standalone calendar/Teams-message replay (§3.14). The tested Graph `chatMessage` request was denied, while the Teams connector now uses a separate captured Search v2 route. Remaining questions include attachment-only match attribution, broad recall and minimum permissions, a same-query Outlook mail-route timing comparison, and transcript/recap discovery or full-text search. A prior mail-route timing attempt stopped before sending HTTP because the research probe lacked a configured client/scope pair; this was a probe-configuration failure, not an endpoint denial. Product-owned follow-ups are in the [Outlook](outlook-roadmap.md), [Teams](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-connector-roadmap.md), and [SharePoint](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md) roadmaps; cross-product route relationships are in [Microsoft 365 search findings](m365-search-findings.md).
+**Status after bounded checks (2026-10-12).** Later sections record synthetic mail known hits (§3.12), OneDrive/SharePoint file search, selected-item hydration and paging (now in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#sharepoint-connector-follow-up-live-file-hydration-and-scope-2026-10-11)), the browser route map (§3.9), and standalone calendar/Teams-message replay (§3.14). The tested Graph `chatMessage` request was denied, while the Teams connector now uses a separate captured Search v2 route. Remaining questions include attachment-only match attribution, broad recall and minimum permissions, a same-query Outlook mail-route timing comparison, and transcript/recap discovery or full-text search. A prior mail-route timing attempt stopped before sending HTTP because the research probe lacked a configured client/scope pair; this was a probe-configuration failure, not an endpoint denial. Product-owned follow-ups are in the [Outlook](roadmap.md), [Teams](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/roadmap.md), and [SharePoint](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md) roadmaps.
 
-### 3.15 Attachment and file discovery endpoint confirmation (2026-10-11)
+### 3.8 Attachment and file discovery endpoint confirmation (2026-10-11)
 
 **Shared Graph transport, different entity types.** Microsoft Search in Graph uses `POST /v1.0/search/query`; `requests[].entityTypes` selects the content source. The endpoint is shared by Outlook `message`, Teams `chatMessage`, and OneDrive/SharePoint `driveItem` searches. Microsoft documents that `chatMessage` cannot be combined with other entity types, so Teams message search must be a separate request. This is different from the Outlook connector's existing `GET /v1.0/me/messages?$search=...` route and from the private browser search routes in §3.9.
 
@@ -273,12 +205,6 @@ and [organizer transcript listing](https://learn.microsoft.com/en-us/graph/api/o
 |---|---|---|
 | Email body and attachment contents | `POST /v1.0/search/query`, `entityTypes=["message"]` | Searches the signed-in user's own mailbox, including supported attachment contents. Microsoft lists `Mail.Read` for message Search API. The result is a message resource; it does not identify which attachment matched. Our live known-hit checks covered message subject/body terms, not attachment-only content. |
 | Email attachment filenames using the existing mail collection route | `GET /v1.0/me/messages?$search="attachment:<name>"` | Graph `$search` supports the KQL `attachment:` property for attached-file names. An unfielded query searches sender, subject, and body by default; this is the route used by `graph_mail.search()` today. It is not the documented full-text attachment-content route. |
-| Teams message body and attachment contents | `POST /v1.0/search/query`, `entityTypes=["chatMessage"]` | Microsoft documents body-plus-attachment search for supported file types. The response is a Teams message hit and the API omits some message fields; the tested profile's live call was denied, so tenant access and actual recall still need validation. |
-| OneDrive and SharePoint files/folders | `POST /v1.0/search/query`, `entityTypes=["driveItem"]` | Same Graph Search endpoint and entity type for both storage locations; results are restricted to items the signed-in user can read. The current profile returned a known filename hit, a known content-term hit, and broad results from multiple SharePoint sites and OneDrive. Those samples do not establish exhaustive coverage or a permission minimum. |
-
-**Other file route, narrower scope.** Microsoft also documents DriveItem search routes such as `GET /me/drive/root/search(q='...')` for a drive hierarchy and `GET /me/drive/search(q='...')` to search more broadly for items accessible to the user. These are separate GET routes from Microsoft Search `POST /search/query`; they are useful when an explicitly drive-scoped search is desired, but were not benchmarked here.
-
-**Implementation and validation status (2026-10-12).** The separate read-only SharePoint connector now implements `driveItem` search, explicit offset paging, returned drive/item identity mapping, selected metadata hydration, and bounded user-selected downloads. Live checks covered filename-only and content-only hits in personal OneDrive and a shared SharePoint library, selected-item metadata/download, a negative marker, and two distinct result pages. This does not establish exhaustive recall or minimum permissions: the account's existing file/site grants exceed the connector's requested Graph scopes. The connector's deployment-specific results and remaining limits are in the [SharePoint roadmap](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md). Microsoft documents up to 1,000 file results per page and recommends smaller pages for latency; no indexing-time guarantee was found. Keep downloads user-selected rather than fetching a corpus during search.
 
 **Primary references:** [Outlook message Search API](https://learn.microsoft.com/en-us/graph/search-concept-messages), [Teams message Search API](https://learn.microsoft.com/en-us/graph/search-concept-chat-messages), [OneDrive and SharePoint Search API](https://learn.microsoft.com/en-us/graph/search-concept-files), [Search API permissions and paging](https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview?view=graph-rest-1.0), [`$search` mail properties](https://learn.microsoft.com/en-us/graph/search-query-parameter), and [drive-scoped DriveItem search](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
 
@@ -291,16 +217,9 @@ connector can use those private routes with app-owned authentication.
 
 | Surface | Captured/source contract | What remains unproven |
 |---|---|---|
-| OneDrive Files UI | Two submitted file searches used `POST /search/api/v2/query` with `EntityRequests[].EntityType=File`, query text, `From=0`, `Size=8`, content sources, sort and fields. Two additional SharePoint REST proxy searches used `POST /_api/sp.searchresultitemcollection.getsearchresultsasstream?scenario=...&textDecorations=...` with a JSON `payload`. All four returned HTTP 200 and Search-shaped envelopes with `EntitySets[].ResultSets[].Results`; paging fields included `Total` and `MoreResultsAvailable`. | This browser surface uses Substrate plus a SharePoint proxy; neither path is Graph Search API. Result-to-Graph identity mapping, complete scope, and an advancing page request remain unproven. |
-| Company SharePoint search page | Four submitted requests used `POST /searchservice/api/v2/query`; captured entity requests included `File` and `People`. Three HTTP 200 responses had result sets and one returned only `ApiVersion`, `SearchTerms`, and `Instrumentation`. The page also used `GET /search/api/v1/suggestions`, `GET /search/api/v2/init`, `GET /search/api/v2/resources`, and `POST /search/api/v1/userconfig`. | A separate Substrate-backed SharePoint page flow. Suggestion/init/config calls are not submitted-result calls. Search scope and result-to-Graph identity mapping remain unproven. |
-| SharePoint result preview | `GET /api/v1/documents/searchpreview` was called 24 times with query-key names `documentType`, `listId`, `siteId`, `spWebUrl`, `uniqueId`, and `webId`; all returned `image/jpeg`. | Each preview request's `uniqueId`, `siteId`, `webId`, and `listId` matched those fields in a captured Search result `Source` record in the same HAR. This proves item-level preview/result identity, but not that a user clicked each item, that the preview is file content, or that the SharePoint IDs map to Graph drive/item IDs. |
 | Outlook global search | The Outlook capture submitted one `POST /searchservice/api/v2/query` request for `Conversation`/`Exchange`. Separate `POST /search/api/v1/suggestions` requests asked for combinations of `People`, `File`, `Event`, and `Message`; `POST /search/api/v1/recommendations` returned an HTML-type recommendation response. | Suggestions/recommendations do not establish that Outlook submitted a file-, event-, or attachment-search request. Result-click behavior remains uncaptured. |
 | Outlook people/persona companion routes | Captures also include `GET /api/v1/livepersonacard/configuration` (3×200), `GET /api/v1/peopleInsights/owareadingpane` (3×200), `GET /api/v2/personaphoto` (23×200, 3×404), and `POST /api/v2/personacards/preparePersona` (3×200). | These are profile/persona configuration, photo, or reading-pane support calls. Their response contracts and correlation to any particular suggestion or result activation were not established; they are not submitted search requests. |
 | Outlook GraphQL meeting-support calls | In the Teams Recaps browser capture, Outlook Web also sent ten HTTP 200 POSTs to `/outlookgatewayb2/graphql?cv=...&n=...`. Operations were `SyncTeammatesCalendarGroup` (3), `TabsAndEntitlements` (1), `WorkingHours` (4), `getUserAuthSettings` (1), and `useGetMeetingResponseQuery` (1). Each response was a one-element array with `data` and `extensions`; observed data roots included `syncTeammatesCalendarGroup`, `appEntitlements`, `listTabs`, `flexibleWorkingHoursView`, `getUserAuthSettings`, and `getSchedulingServiceMeeting`. | This is Outlook's private GraphQL service, not Microsoft Graph and not a global search provider. It shows adjacent calendar, tab, working-hours, and meeting-response data calls. No standalone replay or full response contract was established. |
-| Teams global search | Captures used `POST /searchservice/api/v2/query`; request shapes include `EntityRequests` and, in some flows, `AnswerEntityRequests`. Teams also submitted three `POST /search/api/v2/query` Transcript requests and five `POST /search/api/v1/recommendations` recap requests. | See the Teams API research for request/result details and click-navigation source. Browser success does not prove standalone auth; continuation and transcript-search completeness remain open. |
-| Teams Meet search | SOURCE maps `MEETINGDOMAIN` to `Event`; `MEETING_SEARCH.DEFAULT_REQUEST_BODY` uses `Event`, `Exchange`, and supported/preferred result-source-format hints. A separate Meet-app `searchEvents` builder posts to `/search/api/v2/query` with lowercase `entityRequests[]`, date bounds, proximity sort, `from=0`, `size=30`; its parser reads `EntitySets[0].ResultSets[0].Results[].Source`. | The separate Meet-app builder has not been tied to the global Teams Meetings tab captured in the HAR. Source page-size settings are UI defaults, not server guarantees; standalone usability remains open. |
-| Meeting recap | Captured recap calls returned `EntitySets[].MeetingInsights`. SOURCE identifies `getMeetingRecapCatchupItems` and `getMeetingRecapCallSummary` request builders with `QueryParameters` fields for entity type/id/context and optional start/end times, top count and meeting-thread filter. The parser reads recording, summary, points-of-interest, speaker and timing fields; recommendations can expose `PaginationSessionId`. | The caller path that would reuse that pagination id has not been established; recap search coverage is not equivalent to calendar event search. |
-| Transcripts | CAPTURED ODSP transcript GET path: `/_api_cached/v2.1/drives/{drive}/items/{item}/cdnmedia/transcripts` (three HTTP 200 responses), with query keys `cTag`, `P1`–`P4`, `isformatjson`, `transcriptkey`, `applyhighlights`, `applymediaedits` and `kid`. SOURCE also shows legacy AMS `/v1/objects/{object}/views/transcript` and `/status`, Meeting Intelligence `/MeetingIntelligence/TranscriptService/storage/{storage}/scope/{scope}/`, and ODSP `/drives/{drive}/items/{item}/media/transcripts/{transcript}/content`. The storage/scope builder sets `isChannel=true` for channel meetings. | Retrieval does not prove global text search. The captured ODSP keys' semantics and continuation role are unverified; `applymediaedits=true` in the source builder is a content-control flag. View and download permissions remain distinct. |
 
 **Outlook web source bundle audit (2026-10-10).** A targeted read of the supplied
 `outlook.cloud.microsoft.zip` found `SubstrateSearch-Internal.ReadWrite` in OWA's scope catalog
@@ -312,60 +231,11 @@ that a live OWA token requests or receives the scope, or that OWA itself sends t
 Keep the Teams HAR and Teams client source as the evidence for those contracts; standalone
 connector authentication remains unproven.
 
-**Captured response and paging details (2026-10-10).** The OneDrive Files UI flow had four
-successful submitted searches: two `POST /search/api/v2/query` calls with `From=0`, `Size=8`, then
-two SharePoint proxy POSTs under `/{site}/{scope}/_api/{operation}` with `From=0`, `Size=25`.
-Observed result counts were 8, 8, 13 and 25. The later requests used SharePoint; the last also
-requested OneDriveBusiness. Responses used `EntitySets[].ResultSets[].Results` and exposed `Total`
-and `MoreResultsAvailable`. These are captured request/response facts, not evidence that the
-private route is portable or that each item can be downloaded.
-
-The Outlook Files capture had eight suggestion calls, but its only submitted Search v2 request was
+**Captured response and paging details (2026-10-10).** The Outlook Files capture had eight suggestion calls, but its only submitted Search v2 request was
 Conversation/Exchange with `From=0`, `Size=25` and zero hits. The capture does not show a submitted
 attachment-only search. In the broader Teams capture, a File-only request returned 25 hits and an
 Event-only answer request returned 25; response fields and total/page caveats are in
-`lrh-teams-connector/docs/teams-api-research.md`.
-
-**Additional endpoint reconciliation (2026-10-11, October 10 HARs).** In the OneDrive Files UI,
-the two SharePoint REST `getSearchResultsAsStream` calls are distinct from the two Search API
-`/search/api/v2/query` calls. Six `SP.List.GetListDataAsStream` calls and two
-`RenderListDataAsStream` calls also loaded list content; these are list/browse hydration, not
-additional global searches. The company SharePoint search page instead submitted through
-`/searchservice/api/v2/query`, with `GET /search/api/v1/suggestions` for suggestions. Its
-`/search/api/v1/events` requests are telemetry, and `/search/api/v1/userconfig` plus
-`/search/api/v2/init` are setup/configuration calls. The `GET /search/api/v2/resources` responses
-were resource payloads, not result pages.
-
-The SharePoint page's 24 successful `GET /api/v1/documents/searchpreview` responses were JPEG
-images. For all 24 requests, the query values for `uniqueId`, `siteId`, `webId`, and `listId` matched
-the corresponding four fields on a Search result `Source` record in that same HAR. This links each
-preview to a specific search-result item. It does not prove a user click caused the request (the
-page may preload previews), expose a file-content/open route, or map those SharePoint IDs to Graph
-drive/item IDs.
-Similarly, the OneDrive REST proxy search responses had `MoreResultsAvailable` in the envelope,
-but every observed submitted offset remained zero and no next-page request was captured. These
-routes are separate from Graph `POST /v1.0/search/query` with `entityTypes=["driveItem"]`.
-
-**SharePoint client-source pagination and result identity (2026-10-11).** The supplied SharePoint
-client assets contain two Search v2 request builders. `fetchScopedQueryAPI` builds a File request
-to Substrate `/search/api/v2/query` with `From=0`, `Size=5`, selected fields, highlighting, sort,
-merge and content-source settings; its client cache is keyed by `searchText` and has a 600,000 ms
-item lifetime. A separate Lists Home provider builds File requests with `Size=24` and
-`From=startRow`; its UI advances `startRow` by 24 when `MoreResultsAvailable` is true, and its
-response parser reads `EntitySets[0].ResultSets[0]`. The HAR showed only offset-zero submitted
-requests, so offset continuation is established in source but not exercised on the wire. The
-source callers have not been traced one-to-one to individual HAR entries, and the captured company
-SharePoint page's submitted result calls used `/searchservice/api/v2/query`; do not conflate that
-route with these source-built `/search/api/v2/query` requests. The cache duration describes this
-client cache, not server indexing delay or request latency.
-
-The Lists Home result parser preserves SharePoint fields including `AccessUrl`, `SPWebUrl`,
-`SpoUniqueId`, `SiteId`, `WebId`, `ListId`, and `ParentLink`; browser navigation can use `AccessUrl`
-or combine the SharePoint URL with the unique item ID. This identifies a result within SharePoint,
-but does not establish a mapping to Graph `driveId`/`itemId`. The `searchpreview` source builder
-uses a dynamic API host, the observed site/list/item identity keys, a `ClientScenario` header, and
-returns an image blob through an object URL. That source explains preview hydration; it does not
-establish that every preview request follows a user click or that it returns file content.
+`lrh-teams-connector/docs/api-research.md`.
 
 The Recaps HAR also records Outlook's `/outlookgatewayb2/graphql` operations above. One response
 root is `getSchedulingServiceMeeting`, and another operation returns `listTabs`/`appEntitlements`;
@@ -396,9 +266,9 @@ describe continuation as exercised. Some successful responses contained only `Ap
 **Interpretation.** Microsoft Graph documentation remains the connector contract where a documented
 route and usable app-owned authentication exist. The captured browser routes are private and
 service-specific; keep them as investigation evidence rather than adopting them as product APIs.
-The Teams-specific route and field notes are maintained in
-`lrh-teams-connector/docs/teams-api-research.md` and its roadmap. Cross-product endpoint and
-workflow relationships are summarized in [Microsoft 365 search findings](m365-search-findings.md).
+The Teams-specific route and field notes are maintained in the
+[Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md) and its roadmap; SharePoint and OneDrive
+routes are in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md).
 
 ### 3.10 Bounded Graph message-search probe (2026-10-10)
 
@@ -412,7 +282,7 @@ message content, and it made no mailbox changes.
 This confirms the documented Graph route accepted this bounded request through the current
 app-owned authentication. Because the synthetic marker had no match, this is only a route and
 response-shape check; it establishes neither matching recall nor content/attachment search
-coverage. Earlier §3.7 probes recorded HTTP 200 hits for mail keyword, subject and body searches,
+coverage. Earlier probes ([SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#file-and-cross-category-search-feasibility-2026-10-07)) recorded HTTP 200 hits for mail keyword, subject and body searches,
 but their query values and result details are intentionally absent, so they do not form a
 controlled content-only or attachment-attribution comparison.
 
@@ -471,36 +341,7 @@ document the request, result and permission model. The pages reviewed specify no
 time guarantee: the hits show the terms were searchable by the later request, not how long indexing
 took.
 
-### 3.12.1 SharePoint connector follow-up: live file hydration and scope (2026-10-11)
-
-The later shared-auth validation completed the file checks that were open in the earlier note above.
-For a synthetic file in personal OneDrive and another in the shared company SharePoint library,
-the same POST /v1.0/search/query request with entityTypes=["driveItem"] returned one filename
-hit and one content-only hit per location. The shared-library file was initially absent from Search
-and appeared after additional indexing time; this example does not establish an indexing SLA.
-A random negative marker returned zero.
-
-For both results, the resource's parentReference.driveId and id hydrated the selected item through
-GET /v1.0/drives/{drive-id}/items/{item-id} and downloaded its 13-byte synthetic content through
-GET /v1.0/drives/{drive-id}/items/{item-id}/content. The bytes matched the local test files.
-Representative path: KQL scopes returned the known hit for both the OneDrive parent and shared
-SharePoint parent. This validates those examples for this account, not every path form or tenant.
-
-A bounded five-result query returned five distinct resources at offsets 0 and 5, with
-moreResultsAvailable=true. Sample operation timings were approximately 0.5–1.8 seconds for each
-filename/content search, metadata lookup, selected download and known-hit scoped search. One second
-page call took 24.9 seconds; an immediate direct repeat took 2.5 seconds and returned no
-Retry-After header. That isolated latency outlier does not establish throttling or a stable
-performance distribution.
-
-These live requests used the shared outlook.graph profile. The profile requests Mail.Read and
-User.Read; the current account's token grants include broader file/site permissions recorded in
-§3.1. Successful file reads therefore prove this account's current capability, not a minimum
-permission set or that either requested scope authorizes Microsoft Search files. Search remains
-limited to accessible items and non-exhaustive. No file names, markers, IDs, URLs or content were
-retained.
-
-### 3.13 Calendar events, meeting recaps and transcripts are required search sources (2026-10-10)
+### 3.13 Calendar event search through Graph and the calendar permission (2026-10-10)
 
 **Calendar events (DOCUMENTED + STANDALONE denial):** Microsoft Graph Search supports `event` at
 `POST /v1.0/search/query` with `entityTypes=["event"]`; the documented scope is the signed-in
@@ -522,28 +363,6 @@ remains untested; Microsoft documents `AADSTS65002` when a first-party client/re
 API-owner preauthorization. This is a candidate procedure, not an established grant.
 [Permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference?view=graph-rest-1.0),
 [AADSTS65002](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes).
-
-**Meeting recaps (CAPTURED + SOURCE):** Teams web returned `MeetingInsights` in recap responses,
-and its client source contains separate recap catch-up/summary request builders. This remains
-distinct from Event Search and transcript retrieval. `PaginationSessionId` appears in recap data,
-but a working continuation path and standalone authentication have not been proven; see §3.9 and
-the Teams API research.
-
-**Transcripts (DOCUMENTED, retrieval only):** Graph can list transcripts for a scheduled
-calendar-backed `onlineMeeting` and retrieve content through a separate `/transcripts/{id}/content`
-request. Delegated listing requires `OnlineMeetingTranscript.Read.All`; tenant settings gate access,
-meetings expire, and the documented API excludes live events and meetings created without a
-calendar event. Transcript content is returned as bytes; the documented content formats include
-speaker-attributed WebVTT and timestamped text without speaker tags. Bulk `getAllTranscripts` is
-application-only and requires an application access policy, with organizer scope. The Graph Search
-entity list contains no transcript type. These contracts make discovery, per-meeting retrieval,
-and transcript-text Search separate checks; transcript keyword Search remains unproven, not
-disproven for every provider. [List transcripts](https://learn.microsoft.com/en-us/graph/api/onlinemeeting-list-transcripts?view=graph-rest-1.0),
-[get transcript content](https://learn.microsoft.com/en-us/graph/api/calltranscript-get?view=graph-rest-1.0),
-[organizer transcript listing](https://learn.microsoft.com/en-us/graph/api/onlinemeeting-getalltranscripts?view=graph-rest-1.0).
-The permissions reference marks delegated `OnlineMeetingTranscript.Read.All` as requiring admin
-consent, and tenant Graph transcript access must also be enabled; a fresh user login alone may not
-be sufficient. [Permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference?view=graph-rest-1.0).
 
 ### 3.14 OWA Search v2 calendar and Teams-message replay (2026-10-10)
 
@@ -614,7 +433,7 @@ synthetic tests. No live call through the connector or fresh-account consent was
 change; the endpoint evidence above remains the standalone replay, and transcript/recap routes remain
 unresolved.
 
-### 3.16 Outlook mail-search timing and route comparison (2026-10-10)
+### 3.15 Outlook mail-search timing and route comparison (2026-10-10)
 
 Three sequential one-hit calls to the connector's `search_messages` operation returned one
 conversation and one message each. End-to-end times were 3,409 ms, 760 ms, and 784 ms. Every call
@@ -626,10 +445,10 @@ controlled subject/body checks showed that Graph Search API `POST /v1.0/search/q
 mail hits, but the same terms, limits, hydration, and elapsed-time boundaries were not compared.
 There is no evidence from these measurements to replace the connector's current route or remove its
 conversation-size lookup and immutable-ID translation, which support response and identity
-contracts. The [cross-product findings](m365-search-findings.md#measurement-and-provenance) summarize
-how these results compare with Teams and file-search measurements.
+contracts. Teams measurements are in the [Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#cross-product-search-ledger-teams-2026-10-12)
+and file-search timings in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#sharepoint-connector-follow-up-live-file-hydration-and-scope-2026-10-11).
 
-### 3.17 Live Outlook connector MCP calendar check (2026-10-12)
+### 3.16 Live Outlook connector MCP calendar check (2026-10-12)
 
 **Evidence: live, read-only MCP calls** through the current signed-in Outlook connector. `auth_status`
 reported `client_credential_cached=true` for the `m365.search` profile. No sign-in, consent, or
@@ -668,7 +487,7 @@ This closes the live connector-path check for the current account. Fresh-account
 unverified. The Graph calendar scope remains a separate unresolved alternative; transcript and
 recap search remain outside this Outlook workflow.
 
-### 3.18 Calendar range listing and description search through the Teams-client Graph profile (2026-10-12)
+### 3.17 Calendar range listing and description search through the Teams-client Graph profile (2026-10-12)
 
 **LIVE, read-only:** a weekly schedule request exposed the limitation of the current Outlook MCP
 calendar search. The broad keyword query required 40 pages of 25 upstream rows to return 15
@@ -706,7 +525,7 @@ the `https://substrate.office.com` resource. Its lower-camel `entityRequests[]` 
 scenario name. The parser reads `EntitySets[0].ResultSets[0].Results[].Source`. These are source
 contracts; server enforcement, empty-query listing, and continuation were not replayed. This
 search builder is not proof of the endpoint used for Teams Calendar week navigation. See
-[Teams Meet research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/teams-api-research.md#meet-search-and-recap).
+[Teams Meet research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#meet-search-and-recap).
 
 **Implementation direction:** Outlook should expose a calendar-range listing independent of a
 keyword query, expand occurrences through `calendarView`, and return optional agenda text in
@@ -715,7 +534,7 @@ calendar-capable client, followed by event hydration. The shared auth package sh
 purpose-named calendar profile using that client/resource pair; Outlook need not depend on
 Teams connector code. Fresh-account grants and other-calendar access remain unverified.
 
-### 3.19 `list_calendar_events` live check (2026-10-12)
+### 3.18 `list_calendar_events` live check (2026-10-12)
 
 **LIVE, read-only, counts only.** The Graph-first calendar listing was run against the signed-in account for
 one week (2026-10-12 03:00Z to 2026-10-19 03:00Z, a local UTC−3 week). Results:
@@ -750,7 +569,7 @@ than UTC (the request asks for UTC and refuses other zones); and the MCP tool th
 the running server still held the previous tool list when this check ran. No subjects, attendees, identifiers,
 descriptions or tokens are retained here.
 
-### 3.20 Review gap live checks (2026-10-13)
+### 3.19 Review gap live checks (2026-10-13)
 
 Read-only checks against the signed-in account, run through the connector's service layer. The outputs were counts, minute differences and HTTP status codes; no subjects, addresses, identifiers, descriptions or bodies were kept. The test machine's local clock was not on UTC.
 
@@ -765,7 +584,7 @@ Read-only checks against the signed-in account, run through the connector's serv
 
 A fresh Cvid/LogicalId for every request returned HTTP 400 after the first page, as the reuse rule in §5 already records.
 
-### 3.21 Unfinished markup on save (2026-10-13)
+### 3.20 Unfinished markup on save (2026-10-13)
 
 One authorized test, with one synthetic draft. It was written through the mail writer directly, because the connector's checker now refuses unfinished markup. The draft was never sent. Its HTML was a synthetic body ending in an unfinished `img` tag with an `onerror` attribute, followed by a synthetic signature block, which is what the pre-fix composition produced. The draft was read back as HTML through Graph, then moved to Deleted Items once with the connector's delete path (result: one item, done). Nothing was retried.
 
@@ -775,7 +594,7 @@ One authorized test, with one synthetic draft. It was written through the mail w
 
 In this test Outlook removed the event handler on save, so the join did not keep an active handler. It did damage the signature structure. The connector's refusal remains the contract, and the refusal also prevents the structural damage. One account and one client were tested; other attributes and other clients were not. The draft remains in Deleted Items until Outlook empties that folder.
 
-### 3.22 Conversation listing paging check (2026-10-13)
+### 3.21 Conversation listing paging check (2026-10-13)
 
 A read-only check on the signed-in account. It took the most-populated conversation among the first 100 messages of the mailbox (five messages across folders) and read it through the connector's conversation read. It then requested the same conversation with one-message pages, following next links to the end. Both reads returned all five messages with no truncation.
 

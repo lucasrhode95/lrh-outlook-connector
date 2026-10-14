@@ -256,7 +256,7 @@ class CalendarSearchResult(Compact):
 
 class CalendarListCoverage(Compact):
     """What a calendar listing covers. ``source`` says which Microsoft service answered: Graph, or Outlook
-    Web when the Graph read failed (research §3.18)."""
+    Web when the Graph read failed (research §3.17)."""
 
     complete: bool
     source: Literal["graph", "outlook"]
@@ -375,7 +375,7 @@ class ExportArtifact(Compact):
     error_summary: str | None = None  # the file header's "Export errors: ..." line
 
 
-# ---------------------------------------------------------------- writes (requirements v4 §11)
+# ---------------------------------------------------------------- writes (requirements §11)
 
 MAX_RECIPIENTS = 100
 MAX_BODY_CHARS = 100_000

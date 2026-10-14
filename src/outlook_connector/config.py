@@ -1,7 +1,7 @@
 """Static configuration: first-party client profiles, denied pairs and local paths.
 
 The profiles encode the tenant-specific capability split established in
-docs/outlook-api-research.md §2 (Graph and Outlook API profiles). To adapt to a
+docs/api-research.md §2 (Graph and Outlook API profiles). To adapt to a
 tenant with different Graph availability, change the profiles here; see
 docs/architecture.md §6.
 """
@@ -16,7 +16,7 @@ CLI_NAME = "outlook-connector"
 
 # Shared-cache profile whose Graph token carries calendar read scopes (Calendars.Read). The Outlook
 # Graph profile has none. Calendar reads still belong to Outlook; this only chooses the token.
-# Verified live 2026-10-12 (docs/outlook-api-research.md §3.18).
+# Verified live 2026-10-12 (docs/api-research.md §3.17).
 CALENDAR_PROFILE = "teams.graph"
 
 

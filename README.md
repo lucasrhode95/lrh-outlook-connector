@@ -136,7 +136,7 @@ uv run pytest
 node --test tests/surfaces/message_reader.test.cjs
 ```
 
-Project references: [requirements](docs/outlook-requirements-v4.md) · [architecture](docs/architecture.md) · [API research](docs/outlook-api-research.md) · [open roadmap](docs/outlook-roadmap.md).
+Project references: [documentation index](docs/README.md) · [requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [API research](docs/api-research.md) · [open roadmap](docs/roadmap.md).
 
 ## Disclaimer
 
