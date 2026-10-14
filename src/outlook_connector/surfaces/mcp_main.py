@@ -62,10 +62,11 @@ carry the conversation's message_count. Results are compact by default (detail="
 recipients, categories and Internet ids).
 - Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
 order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
-between these dates", and for text in subjects or descriptions within those dates (contains; \
-include_body returns the description). Graph answers first; Outlook Web answers only when the Graph \
-read fails, and then it has no descriptions, so contains and include_body fail. coverage.source says \
-which service answered. Follow the cursor while coverage.complete is false.
+between these dates", and for text in subjects or descriptions within those dates (contains: a list \
+of literal terms, any of which matches; include_body returns the description). Graph answers first; \
+Outlook Web answers only when the Graph read fails, and then it has no descriptions, so contains and \
+include_body fail. coverage.source says which service answered. Follow the cursor while \
+coverage.complete is false.
 - Calendar: search_calendar_events discovers Exchange events by words across the calendar, not Teams \
 recaps or transcripts; its date bounds apply after each page, so use list_calendar_events for a date \
 range. Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
@@ -317,10 +318,12 @@ def build_server(context: AppContext) -> FastMCP:
             datetime, Field(description="Window end (ISO 8601), after since; at most 366 days after it.")
         ],
         contains: Annotated[
-            str | None,
+            list[str] | None,
             Field(
-                description="Literal text to find in each event's subject or description, case- and "
-                "accent-insensitive."
+                description="Terms to find in each event's subject or description (1 to 20, each up to "
+                "200 characters). An event matches when ANY term appears (OR). Each term is matched "
+                "literally as one phrase, case- and accent-insensitive, and is never split on spaces: "
+                "['budget review'] needs that exact phrase, while ['budget', 'review'] matches either word."
             ),
         ] = None,
         include_body: Annotated[

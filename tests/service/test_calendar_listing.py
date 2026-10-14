@@ -131,15 +131,15 @@ async def test_contains_matches_subject_and_description_case_and_accent_insensit
     graph = GraphStub([CalendarViewPage(events=events)])
     listing = CalendarListing(graph_view=graph, outlook_view=OutlookStub())
 
-    found = await listing.list_events(since=SINCE, until=UNTIL, contains="KEYCLOAK", limit=10)
+    found = await listing.list_events(since=SINCE, until=UNTIL, contains=["KEYCLOAK"], limit=10)
     assert [event.id for event in found.events] == ["subject-hit"]
 
     accented = await listing.list_events(
-        since=SINCE, until=UNTIL, contains="revisao", limit=10, include_body=True
+        since=SINCE, until=UNTIL, contains=["revisao"], limit=10, include_body=True
     )
     assert [event.id for event in accented.events] == ["subject-hit"]
 
-    described = await listing.list_events(since=SINCE, until=UNTIL, contains="pen   tests", limit=10)
+    described = await listing.list_events(since=SINCE, until=UNTIL, contains=["pen   tests"], limit=10)
     assert [event.id for event in described.events] == ["body-hit"]
     assert all(event.body_text is None for event in described.events)
     assert graph.calls[-1]["include_body"] is True  # descriptions are read to match, not returned
@@ -154,7 +154,7 @@ async def test_a_filtered_listing_keeps_reading_pages_until_it_has_matches() -> 
     )
     listing = CalendarListing(graph_view=graph, outlook_view=OutlookStub())
 
-    result = await listing.list_events(since=SINCE, until=UNTIL, contains="keyword", limit=1)
+    result = await listing.list_events(since=SINCE, until=UNTIL, contains=["keyword"], limit=1)
 
     assert [event.id for event in result.events] == ["yes"]
     assert result.coverage.complete and result.coverage.scanned == 2
@@ -165,7 +165,7 @@ async def test_a_call_that_spends_its_read_budget_says_so() -> None:
     graph = GraphStub([CalendarViewPage(events=[_event("no", 9)], next_link=LINK_2)])
     listing = CalendarListing(graph_view=graph, outlook_view=OutlookStub())
 
-    result = await listing.list_events(since=SINCE, until=UNTIL, contains="keyword", limit=1)
+    result = await listing.list_events(since=SINCE, until=UNTIL, contains=["keyword"], limit=1)
 
     assert result.events == [] and result.cursor is not None and not result.coverage.complete
     assert len(graph.calls) == MAX_GRAPH_PAGES
@@ -268,7 +268,7 @@ async def test_contains_and_descriptions_cannot_fall_back_because_outlook_web_ha
     listing = CalendarListing(graph_view=GraphStub(error=Upstream("synthetic outage")), outlook_view=outlook)
 
     with pytest.raises(Upstream, match="cannot run now"):
-        await listing.list_events(since=SINCE, until=UNTIL, contains="keyword")
+        await listing.list_events(since=SINCE, until=UNTIL, contains=["keyword"])
     with pytest.raises(Upstream, match="cannot run now"):
         await listing.list_events(since=SINCE, until=UNTIL, include_body=True)
 
@@ -334,10 +334,14 @@ async def test_window_limit_and_filter_inputs_are_checked_at_the_entry_point() -
         await listing.list_events(since=SINCE, until=UNTIL, limit=0)
     with pytest.raises(InvalidRequest, match="limit must be between 1 and 200"):
         await listing.list_events(since=SINCE, until=UNTIL, limit=201)
-    with pytest.raises(InvalidRequest, match="must not be empty"):
-        await listing.list_events(since=SINCE, until=UNTIL, contains="   ")
+    with pytest.raises(InvalidRequest, match="non-empty text"):
+        await listing.list_events(since=SINCE, until=UNTIL, contains=["   "])
     with pytest.raises(InvalidRequest, match="at most 200 characters"):
-        await listing.list_events(since=SINCE, until=UNTIL, contains="x" * 201)
+        await listing.list_events(since=SINCE, until=UNTIL, contains=["x" * 201])
+    with pytest.raises(InvalidRequest, match="list of 1 to 20 terms"):
+        await listing.list_events(since=SINCE, until=UNTIL, contains=[])
+    with pytest.raises(InvalidRequest, match="list of 1 to 20 terms"):
+        await listing.list_events(since=SINCE, until=UNTIL, contains=[f"t{n}" for n in range(21)])
 
 
 async def test_malformed_and_tampered_calendar_cursors_are_refused() -> None:
@@ -346,7 +350,12 @@ async def test_malformed_and_tampered_calendar_cursors_are_refused() -> None:
 
     unknown_source = cursors.encode(CURSOR_KIND, source="elsewhere", contains=None, **base)
     outlook_with_filter = cursors.encode(
-        CURSOR_KIND, source="outlook", after_start=SINCE.isoformat(), after_id="a", contains="keyword", **base
+        CURSOR_KIND,
+        source="outlook",
+        after_start=SINCE.isoformat(),
+        after_id="a",
+        contains=["keyword"],
+        **base,
     )
     bad_key = cursors.encode(
         CURSOR_KIND, source="outlook", after_start="not a time", after_id="a", contains=None, **base
@@ -364,7 +373,7 @@ async def test_contains_matches_each_field_on_its_own() -> None:
         graph_view=GraphStub([CalendarViewPage(events=[split])]), outlook_view=OutlookStub()
     )
 
-    across = await listing.list_events(since=SINCE, until=UNTIL, contains="project alpha")
+    across = await listing.list_events(since=SINCE, until=UNTIL, contains=["project alpha"])
     assert across.events == []  # neither field contains the phrase, so the join must not create one
 
     whole = _event("whole", 9, subject="Project alpha", body="Other text")
@@ -372,8 +381,42 @@ async def test_contains_matches_each_field_on_its_own() -> None:
         graph_view=GraphStub([CalendarViewPage(events=[whole])]), outlook_view=OutlookStub()
     )
 
-    within = await listing.list_events(since=SINCE, until=UNTIL, contains="project alpha")
+    within = await listing.list_events(since=SINCE, until=UNTIL, contains=["project alpha"])
     assert [event.id for event in within.events] == ["whole"]
+
+
+async def test_contains_matches_any_term_and_never_splits_a_term() -> None:
+    events = [
+        _event("budget", 9, subject="Budget planning"),
+        _event("review", 10, subject="Design review"),
+        _event("phrase", 11, subject="Weekly", body="The budget review is moved"),
+        _event("neither", 12, subject="Lunch"),
+    ]
+    graph = GraphStub([CalendarViewPage(events=events, next_link=LINK_2), CalendarViewPage(events=[])])
+    listing = CalendarListing(graph_view=graph, outlook_view=OutlookStub())
+
+    either = await listing.list_events(since=SINCE, until=UNTIL, contains=["budget", "review"], limit=10)
+    assert [event.id for event in either.events] == ["budget", "review", "phrase"]
+
+    graph.pages = [CalendarViewPage(events=events)]
+    phrase = await listing.list_events(since=SINCE, until=UNTIL, contains=["budget review"], limit=10)
+    assert [event.id for event in phrase.events] == ["phrase"]
+
+
+async def test_the_cursor_keeps_every_contains_term() -> None:
+    graph = GraphStub(
+        [
+            CalendarViewPage(events=[_event("alpha", 9, subject="Alpha sync")], next_link=LINK_2),
+            CalendarViewPage(events=[_event("beta", 10, subject="Beta sync"), _event("other", 11)]),
+        ]
+    )
+    listing = CalendarListing(graph_view=graph, outlook_view=OutlookStub())
+
+    first = await listing.list_events(since=SINCE, until=UNTIL, contains=["alpha", "beta"], limit=1)
+    assert [event.id for event in first.events] == ["alpha"] and first.cursor is not None
+
+    second = await listing.list_events(since=SINCE, until=UNTIL, contains=["ignored"], cursor=first.cursor)
+    assert [event.id for event in second.events] == ["beta"] and second.coverage.complete
 
 
 async def test_a_cursor_cannot_widen_the_window_or_the_filter() -> None:
@@ -394,7 +437,7 @@ async def test_a_cursor_cannot_widen_the_window_or_the_filter() -> None:
         link=LINK_2,
         since=SINCE.isoformat(),
         until=UNTIL.isoformat(),
-        contains="x" * 201,
+        contains=["x" * 201],
         include_body=False,
     )
     blank_filter = cursors.encode(
@@ -403,14 +446,14 @@ async def test_a_cursor_cannot_widen_the_window_or_the_filter() -> None:
         link=LINK_2,
         since=SINCE.isoformat(),
         until=UNTIL.isoformat(),
-        contains="   ",
+        contains=["   "],
         include_body=False,
     )
 
     for cursor, message in (
         (too_wide, "at most 366 days"),
         (long_filter, "at most 200 characters"),
-        (blank_filter, "must not be empty"),
+        (blank_filter, "non-empty text"),
     ):
         with pytest.raises(InvalidRequest, match=message):
             await listing.list_events(since=SINCE, until=UNTIL, cursor=cursor)

@@ -315,7 +315,7 @@ Calendar events belong to Outlook: the schedule, invitees, agenda and Teams join
 
 Lists the events that overlap `since` to `until`, in time order, with recurring meetings expanded per occurrence. The window is at most 366 days. Times are UTC, and a time without a zone is read as UTC. An event that starts before `since` and runs into the window is included.
 
-- `contains`: literal text to find in each event's subject and in its description, case- and accent-insensitive, up to 200 characters. Each field is matched on its own, so a phrase cannot span both.
+- `contains`: a list of 1 to 20 terms, each up to 200 characters. An event matches when any term appears in its subject or its description (OR). Each term is one literal phrase, case- and accent-insensitive, and is never split on its spaces: `["budget review"]` needs that phrase, while `["budget", "review"]` matches either word. Each field is matched on its own, so a term cannot span both.
 - `include_body`: returns each description, cut to 4,000 characters. `body_truncated` marks a cut.
 - `limit`: matching events to collect before the call stops (1–200, default 50). A page can hold a few more.
 - `cursor`: continues the listing. With a cursor, the window and filters come from the cursor, and the other arguments are ignored.

@@ -20,7 +20,8 @@ from outlook_connector.service import cursors
 
 MAX_WINDOW = timedelta(days=366)
 MAX_LIMIT = 200
-MAX_CONTAINS_CHARS = 200
+MAX_CONTAINS_CHARS = 200  # per term
+MAX_CONTAINS_TERMS = 20
 GRAPH_PAGE_SIZE = 100
 MAX_GRAPH_PAGES = 10  # pages read per call; a filtered listing may need several to fill its limit
 MAX_LISTED_ATTENDEES = 15  # per list (required, optional); attendee_count gives the total
@@ -48,7 +49,7 @@ class CalendarListing:
         *,
         since: datetime,
         until: datetime,
-        contains: str | None = None,
+        contains: list[str] | None = None,
         include_body: bool = False,
         limit: int = 50,
         cursor: str | None = None,
@@ -58,6 +59,8 @@ class CalendarListing:
         Events overlap the window: one that started before ``since`` and runs into it is included. With a
         cursor, the window and the filters come from the cursor and the other arguments are ignored.
         ``limit`` is how many matching events to collect before stopping, so a page may hold a few more.
+        ``contains`` is a list of terms: an event matches when any term appears in its subject or description.
+        A term is matched whole, never split on its spaces.
         """
         if not 1 <= limit <= MAX_LIMIT:
             raise InvalidRequest(f"limit must be between 1 and {MAX_LIMIT}.")
@@ -74,13 +77,13 @@ class CalendarListing:
         )
 
     async def _first_page(
-        self, start: datetime, end: datetime, limit: int, text: str | None, include_body: bool
+        self, start: datetime, end: datetime, limit: int, terms: list[str] | None, include_body: bool
     ) -> CalendarListResult:
         """The first page: Graph, and Outlook Web only when Graph fails for a service reason."""
         try:
-            return await self._list_graph(start, end, limit, text, include_body, link=None)
+            return await self._list_graph(start, end, limit, terms, include_body, link=None)
         except GRAPH_FAILURES as graph_error:
-            if text or include_body:
+            if terms or include_body:
                 raise Upstream(
                     f"The Graph calendar read failed ({_reason(graph_error)}). The Outlook Web fallback "
                     "has no event descriptions, so this search cannot run now; try again later, or list "
@@ -93,13 +96,13 @@ class CalendarListing:
         start: datetime,
         end: datetime,
         limit: int,
-        text: str | None,
+        terms: list[str] | None,
         include_body: bool,
         link: str | None,
     ) -> CalendarListResult:
         """Graph's view page by page, until ``limit`` events match, the window ends or the budget is spent."""
-        needle = _fold(text) if text else None
-        page_size = GRAPH_PAGE_SIZE if needle else min(limit, GRAPH_PAGE_SIZE)
+        needles = [_fold(term) for term in terms] if terms else None
+        page_size = GRAPH_PAGE_SIZE if needles else min(limit, GRAPH_PAGE_SIZE)
         matched: list[CalendarEvent] = []
         scanned = 0
         pages = 0
@@ -109,21 +112,21 @@ class CalendarListing:
                 until=end,
                 page_size=page_size,
                 page=link,
-                include_body=include_body or needle is not None,
+                include_body=include_body or needles is not None,
             )
             pages += 1
             scanned += len(page.events)
-            matched.extend(event for event in page.events if _matches(event, needle))
+            matched.extend(event for event in page.events if _matches(event, needles))
             link = page.next_link
             if link is None or len(matched) >= limit or pages >= MAX_GRAPH_PAGES:
                 break
         complete = link is None
         events = _listed(sorted(matched, key=_start_key), include_body=include_body)
         notes = ["Times are UTC. Events overlap the window; recurring meetings are expanded per occurrence."]
-        if needle is not None:
+        if needles is not None:
             notes.append(
-                f"contains matched literally, case- and accent-insensitive, in each subject and description "
-                f"({scanned} event(s) read)."
+                f"contains matched each term literally (any term matches), case- and accent-insensitive, in "
+                f"each subject and description ({scanned} event(s) read)."
             )
         if any(event.body_truncated for event in events):
             notes.append(
@@ -148,7 +151,7 @@ class CalendarListing:
                 link=link,
                 since=start.isoformat(),
                 until=end.isoformat(),
-                contains=text,
+                contains=terms,
                 include_body=include_body,
             ),
             coverage=CalendarListCoverage(complete=complete, source="graph", scanned=scanned, notes=notes),
@@ -218,15 +221,21 @@ def _window(since: datetime, until: datetime) -> tuple[datetime, datetime]:
     return start, end
 
 
-def _contains(value: str | None) -> str | None:
+def _contains(value: object) -> list[str] | None:
+    """The ``contains`` terms, each stripped and kept whole: a term is never split on its spaces."""
     if value is None:
         return None
-    text = value.strip()
-    if not text:
-        raise InvalidRequest("contains must not be empty.")
-    if len(text) > MAX_CONTAINS_CHARS:
-        raise InvalidRequest(f"contains must be at most {MAX_CONTAINS_CHARS} characters.")
-    return text
+    if not isinstance(value, list) or not 1 <= len(value) <= MAX_CONTAINS_TERMS:
+        raise InvalidRequest(f"contains must be a list of 1 to {MAX_CONTAINS_TERMS} terms.")
+    terms: list[str] = []
+    for term in value:
+        text = term.strip() if isinstance(term, str) else ""
+        if not text:
+            raise InvalidRequest("Each contains term must be non-empty text.")
+        if len(text) > MAX_CONTAINS_CHARS:
+            raise InvalidRequest(f"Each contains term must be at most {MAX_CONTAINS_CHARS} characters.")
+        terms.append(text)
+    return list(dict.fromkeys(terms))
 
 
 def _decode(cursor: str) -> dict[str, Any]:
@@ -240,7 +249,7 @@ def _decode(cursor: str) -> dict[str, Any]:
     graph_ok = source == "graph" and isinstance(state.get("link"), str)
     after = _decode_after(state) if source == "outlook" else None
     outlook_ok = source == "outlook" and after is not None and contains is None and not include_body
-    if not (graph_ok and (contains is None or isinstance(contains, str)) or outlook_ok):
+    if not (graph_ok and (contains is None or isinstance(contains, list)) or outlook_ok):
         raise InvalidRequest(INVALID_CURSOR)
     start, end = _window(since, until)
     return {
@@ -278,11 +287,13 @@ def _fold(value: str) -> str:
     return " ".join(unmarked.casefold().split())
 
 
-def _matches(event: CalendarEvent, needle: str | None) -> bool:
-    """Each field is matched on its own, so a phrase cannot span the subject and description boundary."""
-    if needle is None:
+def _matches(event: CalendarEvent, needles: list[str] | None) -> bool:
+    """Any term in any field. Each field is matched on its own, so a term cannot span the subject and
+    description boundary."""
+    if needles is None:
         return True
-    return any(needle in _fold(part) for part in (event.subject, event.body_text) if part)
+    fields = [_fold(part) for part in (event.subject, event.body_text) if part]
+    return any(needle in field for needle in needles for field in fields)
 
 
 def _listed(events: list[CalendarEvent], *, include_body: bool) -> list[CalendarEvent]:
