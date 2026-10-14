@@ -7,7 +7,6 @@ Snapshot **2026-10-13**.
 
 ## Decisions
 
-- **One message-listing tool.** Merging `list_messages` and `search_messages` needs one response shape. A list returns flat messages in date order; search returns conversation groups in rank order. Options: one tool whose result carries a `mode` field, or one flat shape for both (search would lose conversation grouping and `message_count`). Routing is simple: an empty query lists, and a query searches. Folder, date and scope apply to both. Renaming the tools would break existing agent configurations.
 - **`search_calendar_events` date bounds.** Date terms in the query returned no result set ([research §3.19](api-research.md#319-review-gap-live-checks-2026-10-13)), so `since` and `until` only filter the pages fetched. Keep the bounds with the documented limit, or remove them so window questions go to `list_calendar_events`.
 - **Conversation read budget.** `get_conversation` reads at most 1,000 messages of a conversation, and `notes` reports the cap. Graph pages conversation listings ([research §3.21](api-research.md#321-conversation-listing-paging-check-2026-10-13)), so the cap is the connector's own budget. Keep it, or raise it?
 - **Default conversation scope (O4).** `get_conversation` leaves out Deleted Items and Junk unless `scope.deleted_items=true`. Confirm or change.
