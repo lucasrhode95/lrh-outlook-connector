@@ -116,6 +116,7 @@ pairs are never requested again.
 - `get_message` returns metadata plus a bounded full body with continuation, and attachment metadata, including inline-only attachments.
 - The local UI reader shows the whole chosen body from one server read; a failure never shows part of it as complete.
 - **Attachments are returned as raw files** for the agent's client to read. No server-side text extraction. Attachment and MIME downloads have a local 150 MB limit; larger files are downloaded from Outlook.
+- **Attachments by name** (decided 2026-10-15, [roadmap](roadmap.md#enhancements)): the design shared with the Teams connector. One text extraction serves reads and exports; files and inline images appear in the text as markers named from the message; `download_attachment` fetches the named files of one message to local paths and fetches each attachment once; exports write each file under its marker name. Until it is built, the rules below and in [architecture §8.6–8.7](architecture.md#86-attachments-and-saved-files) describe the current behavior.
 - MIME is delivered as a file, never inside JSON.
 - **Read tools never change mailbox state, including read state.** They are annotated `readOnlyHint=true`.
 

@@ -598,7 +598,11 @@ In this test Outlook removed the event handler on save, so the join did not keep
 
 A read-only check on the signed-in account. It took the most-populated conversation among the first 100 messages of the mailbox (five messages across folders) and read it through the connector's conversation read. It then requested the same conversation with one-message pages, following next links to the end. Both reads returned all five messages with no truncation.
 
-Graph pages conversation listings. The check does not reach the 1,000-message cap, because this account has no conversation that long. The cap in `get_conversation` is therefore the connector's own read budget (`MAX_CONVERSATION` in `remote/graph_mail.py`), not a Graph limit.
+Graph pages conversation listings. The check does not reach the 1,000-message cap, because this account has no conversation that long. The cap in `get_conversation` is therefore the connector's own read budget (`MAX_CONVERSATION` in `remote/graph_mail.py`), not a Graph limit. The connector removed the cap on 2026-10-14 and now reads every page.
+
+### 3.22 Inline images in the text body (2026-10-15)
+
+A read-only check of one self-sent synthetic message whose HTML body holds one inline image, `<img alt="synthetic pixel" src="cid:signature-…@outlook-connector">`, attached inline with the matching `content_id`. The text body Graph returns shows the image as its alt text in brackets at its place: `[synthetic pixel]`. The image has no other trace in the text, and the message reports `hasAttachments=false`. An image without alt text was not checked.
 
 ## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
 
