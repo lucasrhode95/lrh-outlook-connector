@@ -1,5 +1,5 @@
 """Outlook Web Service calendar reads: event hydration for Search v2 pointers, and the calendar window
-that answers ``list_events`` when the Graph calendar view fails (research §3.17)."""
+that answers ``list_events`` when the Graph calendar view fails (research §3.8)."""
 
 from __future__ import annotations
 

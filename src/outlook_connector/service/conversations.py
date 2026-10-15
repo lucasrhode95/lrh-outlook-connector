@@ -1,4 +1,4 @@
-"""Conversation retrieval (requirements §8, research §3.4).
+"""Conversation retrieval (requirements §8, research §3.5).
 
 A conversation is an Exchange conversation: every message with one conversationId across all folders.
 Graph cannot sort that query, so messages are sorted here. Copies of one message are shown once

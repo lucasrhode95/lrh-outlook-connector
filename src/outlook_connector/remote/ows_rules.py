@@ -37,7 +37,7 @@ METADATA = {
     "DescriptionTimeZone",
 }
 # The value OWS reports for each inactive condition/action on every rule (live 2026-10-07, research
-# §4.5): this exact value means "not set". Any other value is active behavior the connector does
+# §4.4): this exact value means "not set". Any other value is active behavior the connector does
 # not manage, so the rule stays read-only.
 INACTIVE = {
     "FlaggedForAction": "NullInboxRuleMessageFlag",
@@ -74,7 +74,7 @@ class OwsRules(RuleWriter):
         """Assumes (not re-checked here): supported, validated, confirmed fields and bound account.
 
         Returns the identity Outlook reports for the new rule. Live, it can differ from the identity
-        fresh ``GetInboxRule`` reports (research §4.5), so the service reconciles it against read-back.
+        fresh ``GetInboxRule`` reports (research §4.4), so the service reconciles it against read-back.
         """
         answer = await self.ows.call_request("NewInboxRule", {"InboxRule": _fields(changes, folder)})
         value = answer.get("InboxRule")

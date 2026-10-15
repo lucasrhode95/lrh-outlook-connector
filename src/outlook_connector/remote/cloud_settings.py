@@ -1,4 +1,4 @@
-"""Native roaming signatures over Outlook Cloud Settings (research §4.7–4.8)."""
+"""Native roaming signatures over Outlook Cloud Settings (research §5.2–5.3)."""
 
 from __future__ import annotations
 

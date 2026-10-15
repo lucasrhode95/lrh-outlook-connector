@@ -1,4 +1,4 @@
-"""Attachment selection policy and safe file names (requirements §10, research §3.5).
+"""Attachment selection policy and safe file names (requirements §10, research §3.6).
 
 - Non-inline file attachments are exported.
 - Item attachments (forwarded mail) are exported as .eml.

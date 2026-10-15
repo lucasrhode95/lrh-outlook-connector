@@ -183,7 +183,7 @@ class GraphMailReader(MailReader):
 
     @_named("listing a conversation")
     async def conversation(self, conversation_id: str) -> list[MessageSummary]:
-        # $orderby cannot be combined with this filter (InefficientFilter, research §3.4): sort locally.
+        # $orderby cannot be combined with this filter (InefficientFilter, research §3.5): sort locally.
         params = {
             "$filter": f"conversationId eq {_odata_string(conversation_id)}",
             "$select": mapping.SUMMARY_FIELDS,
