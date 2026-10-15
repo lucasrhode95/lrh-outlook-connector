@@ -26,7 +26,6 @@ is the reference for routes, parameters and schemas.
    [mail](#63-mail-conversations-parked), [Teams](#64-teams-messages-and-transcripts),
    [other routes](#65-other-search-routes-seen-in-outlook-web)
 7. [Rejected alternatives and identifiers](#7-rejected-alternatives-and-identifiers)
-8. [Mailbox side effects of research](#8-mailbox-side-effects-of-research)
 
 **How to read it.** Every finding carries its evidence and date:
 
@@ -39,8 +38,8 @@ is the reference for routes, parameters and schemas.
 This is an anonymized record of one tested account and tenant, not a capability matrix. Tenant policy, grants,
 clients and Microsoft endpoints change; rerun the probes in `research/` before adopting a routing choice
 elsewhere, and keep a missing permission, a bad request shape, a transport failure and an empty result apart.
-Probes are read-only unless the owner authorized a write for its exact target and content; the writes made
-are listed in §8. No tokens, cookies, message text, addresses or real ids are kept here.
+Probes are read-only unless the owner authorized a write for its exact target and content. No tokens,
+cookies, message text, addresses or real ids are kept here.
 
 ## 1. Summary
 
@@ -534,19 +533,3 @@ Browser and Source, 2026-10-10:
 - `ab0455a0-8d03-46b9-b18b-df2f57b9e44c` appears in Outlook Web's consumer-auth configuration; unverified, do
   not use.
 - Outlook Web deep links (Browser): `/mail/inbox/id/<id>` and `/owa/?viewmodel=ReadMessageItem&ItemID=<id>`.
-
-## 8. Mailbox side effects of research
-
-What research left in the tested mailbox. Nothing was permanently deleted, no write was retried, and no probe
-used a browser cookie, token or canary.
-
-| Date | Writes |
-|---|---|
-| 2026-10-01 | One synthetic self-send. |
-| 2026-10-02 | On four user-named Inbox messages: read and flag toggles, a category set and cleared, a conversation read toggle, a move round trip, two soft deletes (two messages remain in Deleted Items). |
-| 2026-10-04 | One throwaway inbox rule created, edited, renamed, disabled, enabled, reordered and removed; the rule list ended as it started. |
-| 2026-10-07 | Four test messages sent, with personal recipients as authorized; sent and received copies remain. Five HTML test messages sent to the work mailbox and Gmail; copies remain, read states restored. 105 drafts moved to Deleted Items. One throwaway rule created and removed; the original rules unchanged. Four synthetic signatures created and deleted; defaults switched and restored. |
-| 2026-10-08 | Six synthetic signatures created and removed, defaults restored. One synthetic self-send. Synthetic drafts moved to Deleted Items. |
-| 2026-10-10 | One synthetic self-send for the signature-image check; one copy remains in Inbox and one in Sent Items. One synthetic self-send for the search checks. |
-| 2026-10-13 | One synthetic draft with unfinished markup, never sent, moved to Deleted Items. |
-| 2026-10-15 | Size-limit check (§4.6): three synthetic self-drafts with random-byte attachments saved. Two were sent to the owner's address (1 MiB delivered, 35.3 MiB bounced with an NDR); the third draft, both Sent Items copies, the received copy and the NDR were moved to Deleted Items. Four oversized saves were refused and left nothing. |
