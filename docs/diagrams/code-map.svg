@@ -198,7 +198,7 @@
 <rect x="100" y="1831" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="1866"><tspan class="code">Calendar</tspan><tspan class="detail" dx="12">calendar.py</tspan></text>
 <text class="group-title" x="118" y="1903">Methods</text>
-<g><title>Exchange events by words through Search v2; one bounded page and a cursor. The optional date bounds filter each page as it arrives.</title><text class="detail" x="118" y="1933">• <tspan class="code">search_events(query, ...)</tspan></text></g>
+<g><title>Exchange events by words through Search v2, across all dates; one bounded page and a cursor.</title><text class="detail" x="118" y="1933">• <tspan class="code">search_events(query, ...)</tspan></text></g>
 <g><title>One event read through Outlook Web GetItem: agenda verbatim, attendees, join URL, attachment metadata.</title><text class="detail" x="118" y="1960">• <tspan class="code">get_event(event_id)</tspan></text></g>
 <text class="group-title" x="118" y="1999">Rules</text>
 <text class="detail" x="118" y="2029">no totals; no cursor at offset 1,000</text>
