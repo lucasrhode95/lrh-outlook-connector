@@ -229,7 +229,7 @@ Outlook Web's private JSON RPC, with the One Outlook Web token. Live unless stat
 
 ### 4.2 Item writes
 
-Live, 2026-10-02 to 2026-10-06: a self-send, four user-named Inbox messages and synthetic drafts; every result
+Live, 2026-10-02 to 2026-10-07: self-sends, four user-named Inbox messages and synthetic drafts; every result
 read back through Graph.
 
 | Operation | Request | Result |
