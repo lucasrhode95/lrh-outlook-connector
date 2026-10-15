@@ -445,7 +445,7 @@ controlled subject/body checks showed that Graph Search API `POST /v1.0/search/q
 mail hits, but the same terms, limits, hydration, and elapsed-time boundaries were not compared.
 There is no evidence from these measurements to replace the connector's current route or remove its
 conversation-size lookup and immutable-ID translation, which support response and identity
-contracts. Teams measurements are in the [Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#cross-product-search-ledger-teams-2026-10-12)
+contracts. Teams message search is in the [Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#message-search)
 and file-search timings in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#sharepoint-connector-follow-up-live-file-hydration-and-scope-2026-10-11).
 
 ### 3.16 Live Outlook connector MCP calendar check (2026-10-12)
@@ -525,7 +525,7 @@ the `https://substrate.office.com` resource. Its lower-camel `entityRequests[]` 
 scenario name. The parser reads `EntitySets[0].ResultSets[0].Results[].Source`. These are source
 contracts; server enforcement, empty-query listing, and continuation were not replayed. This
 search builder is not proof of the endpoint used for Teams Calendar week navigation. See
-[Teams Meet research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#meet-search-and-recap).
+[Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#other-search-routes-not-used-by-the-connector).
 
 **Implementation direction:** Outlook should expose a calendar-range listing independent of a
 keyword query, expand occurrences through `calendarView`, and return optional agenda text in
