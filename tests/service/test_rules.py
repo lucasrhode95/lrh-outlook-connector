@@ -216,7 +216,7 @@ async def test_live_rule_shapes_stay_supported_and_creation_id_is_reconciled(
     rules: Rules, fake: FakeGraph
 ) -> None:
     """Live 2026-10-07: every rule carries description metadata and inactive enum values, and
-    NewInboxRule reports an identity that fresh GetInboxRule does not (research §4.5)."""
+    NewInboxRule reports an identity that fresh GetInboxRule does not (research §4.4)."""
     rid = await create(rules)
     (listed,) = await rules.list_rules()
     assert listed.id == rid == fake.inbox_rules[0]["Identity"]["RawIdentity"]

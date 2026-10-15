@@ -26,7 +26,7 @@ from outlook_connector.remote.urls import GRAPH_ROOT
 REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
 
-# Fields every live GetInboxRule answer carries (research §4.5, 2026-10-07): description metadata
+# Fields every live GetInboxRule answer carries (research §4.4, 2026-10-07): description metadata
 # and the "nothing set" value of each inactive condition/action.
 LIVE_RULE_EXTRAS: dict[str, Any] = {
     "DescriptionTimeFormat": "h:mm tt",
@@ -333,7 +333,7 @@ class FakeGraph:
         return httpx.Response(200, json=answer)
 
     def _rule_action(self, action: str, request: dict[str, Any]) -> dict[str, Any]:
-        """OWS inbox-rule actions, with the shapes seen live (research §4.4–4.5)."""
+        """OWS inbox-rule actions, with the shapes seen live (research §4.4)."""
         import copy
 
         answer: dict[str, Any] = {"WasSuccessful": True, "ErrorCode": 0}
@@ -346,7 +346,7 @@ class FakeGraph:
                 "DisplayName": rule["Name"],
             }
             rule["Enabled"] = True
-            rule |= LIVE_RULE_EXTRAS  # what GetInboxRule returns on every live rule (research §4.5)
+            rule |= LIVE_RULE_EXTRAS  # what GetInboxRule returns on every live rule (research §4.4)
             self.inbox_rules.insert(0, rule)
             answer["InboxRule"] = copy.deepcopy(rule)
             # live: the creation answer's identity differs from the one fresh GetInboxRule reports

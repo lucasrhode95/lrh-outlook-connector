@@ -61,11 +61,11 @@ SharePoint. Its profile catalog includes these Outlook client/resource pairs:
 | Capability | Client / profile | Backend | Status |
 |---|---|---|---|
 | Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `outlook.graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Live through shared silent auth; fresh-account consent not tested |
-| Calendar event discovery and hydration | `m365.search` · One Outlook Web; `outlook.api` · One Outlook Web | Search v2 `Event` / `Exchange`; OWS `GetItem` | Live connector check 2026-10-12 (research §3.16); fresh-account consent not tested |
-| Calendar windows | `teams.graph` (carries `Calendars.Read`) · One Teams client; `outlook.api` | Graph `/me/calendarView`; OWS `GetCalendarView` (fallback) | Live 2026-10-12 (research §3.18); fresh-account consent not tested |
+| Calendar event discovery and hydration | `m365.search` · One Outlook Web; `outlook.api` · One Outlook Web | Search v2 `Event` / `Exchange`; OWS `GetItem` | Live connector check 2026-10-12 (research §6.2); fresh-account consent not tested |
+| Calendar windows | `teams.graph` (carries `Calendars.Read`) · One Teams client; `outlook.api` | Graph `/me/calendarView`; OWS `GetCalendarView` (fallback) | Live 2026-10-12 (research §3.8); fresh-account consent not tested |
 | Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook.api` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
 | Inbox rules | `outlook.api` | OWS `GetInboxRule` and rule actions | Proven (research §4.4) |
-| Native roaming signatures | `outlook.api` | Outlook Cloud Settings | Proven (research §§4.7–4.8) |
+| Native roaming signatures | `outlook.api` | Outlook Cloud Settings | Proven (research §§5.2–5.3) |
 
 Graph mail write/send scopes are denied (`AADSTS65002`) to the tested clients (research §2). The
 `outlook.graph` profile also lacks `MailboxSettings.*`, so inbox-rule access uses OWS. Denied scope
@@ -106,8 +106,8 @@ pairs are never requested again.
 - **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.
 - **Times without a zone are UTC**, normalized once in the service for every caller.
 - **List:** folder-scoped or mailbox-wide, newest first, with an inclusive window, always from the server.
-- **Conversation:** every message with one `conversationId` across all folders, copies once, oldest first, bounded with continuation. Messages you forgot to file still belong to the conversation. Graph rejects `$orderby` with the `conversationId` filter, so the connector sorts (research §3.4). A conversation is exactly Exchange's conversation.
-- **Search is online only.** Graph `$search` has the same recall as Outlook's top-bar search, folds accents and supports field scoping (`subject:`, `from:`, `to:`) (research §3.3). Hits are grouped into conversations locally. No total is reported: Microsoft Search counts with a different engine and without the connector's folder rules. The UI adds an instant in-memory filter over what is loaded.
+- **Conversation:** every message with one `conversationId` across all folders, copies once, oldest first, bounded with continuation. Messages you forgot to file still belong to the conversation. Graph rejects `$orderby` with the `conversationId` filter, so the connector sorts (research §3.5). A conversation is exactly Exchange's conversation.
+- **Search is online only.** Graph `$search` has the same recall as Outlook's top-bar search, folds accents and supports field scoping (`subject:`, `from:`, `to:`) (research §3.4). Hits are grouped into conversations locally. No total is reported: Microsoft Search counts with a different engine and without the connector's folder rules. The UI adds an instant in-memory filter over what is loaded.
 - **Calendar is a separate domain.** Window listing (`list_calendar_events`) reads Graph first and falls back to Outlook Web only when the Graph read fails; topic search across the calendar (`search_calendar_events`) uses Search v2; `get_calendar_event` hydrates one event. Neither searches Teams chats, recaps, recordings or transcripts.
 - Every result reports coverage: whether more follow (a cursor), what the folder rules left out, and partial flags.
 

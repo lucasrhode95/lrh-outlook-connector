@@ -1,1278 +1,552 @@
 # Outlook API research
 
-**Evidence dates:** 2026-10-01 (first standalone probes) · 2026-10-02 (browser capture review, probe suite) ·
-2026-10-04 (inbox-rule replay, H7 live check, read-only probes) · 2026-10-06 (version-bound draft sends) ·
-2026-10-07 (connector HTML/replies, inbox-rule blockers, bulk/partial failures, signature capture analysis) ·
-2026-10-10 (W8 recipient-side rendering and image save; Microsoft 365 Search documentation, capture/source and Outlook Web source audit) ·
-2026-10-11 (Graph attachment and file search endpoint comparison; shared-auth profile/photo check) ·
-2026-10-12 (calendar adapter implementation record and search measurement consolidation)
+What Microsoft does not document about the services this connector uses, or documents too vaguely to build
+on without testing: which clients may do what, Outlook Web's private services (OWS, Cloud Settings, Search
+v2), and the places where Microsoft Graph behaved differently from its documentation. Documented Graph
+behavior is not repeated here; [Microsoft's Graph documentation](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0)
+is the reference for routes, parameters and schemas.
 
-**Product scope:** [Requirements v4](requirements.md) · **How it is built:** [Architecture](architecture.md) · **Probes:** [`research/`](../research/README.md)
+**Product scope:** [requirements](requirements.md) · **How it is built:** [architecture](architecture.md) ·
+**Probes:** [`research/`](../research/README.md)
 
-This records tenant-specific access, live observations, unresolved questions and private API
-contracts for the tested environment's single-user connector. Microsoft's official documentation is the
-authority for public Graph routes, parameters and response schemas; links below replace local
-copies of that reference material. A successful documented call belongs here only when it
-settles an authentication, integration or coverage question. How to re-run probes and take
-captures is in `research/README.md`.
+## Contents
 
-This is an anonymized compendium from a tested environment, not a universal capability
-matrix. Tenant policy, account grants, clients and Microsoft endpoints can change. Forks
-should configure and rerun the probes before adopting the routing choices below.
+1. [Summary](#1-summary)
+2. [Sign-in and clients](#2-sign-in-and-clients)
+3. [Microsoft Graph](#3-microsoft-graph): [ids](#31-ids), [mailbox size](#32-mailbox-size-and-listing-cost),
+   [counts](#33-counts-and-batches), [mail search](#34-mail-search), [conversations](#35-conversations),
+   [attachments](#36-attachments-and-inline-images), [delta](#37-delta-after-moves-and-deletes),
+   [calendar](#38-calendar-through-the-teams-client-graph-profile)
+4. [OWS](#4-ows-owaservicesvc): [transport](#41-transport), [item writes](#42-item-writes),
+   [reads and other actions](#43-reads-and-other-actions), [inbox rules](#44-inbox-rules),
+   [saved HTML](#45-what-outlook-keeps-of-saved-html), [message size limits](#46-message-size-limits)
+5. [Native signatures](#5-native-signatures-outlook-cloud-settings): [the block in a draft](#51-the-signature-block-in-a-draft),
+   [reads](#52-reads), [writes](#53-writes-and-lifecycle), [corporate add-in](#54-corporate-signature-add-in-not-used)
+6. [Search v2](#6-search-v2-substrate): [request and paging](#61-request-and-paging), [events](#62-events),
+   [mail](#63-mail-conversations-parked), [Teams](#64-teams-messages-and-transcripts),
+   [other routes](#65-other-search-routes-seen-in-outlook-web)
+7. [Rejected alternatives and identifiers](#7-rejected-alternatives-and-identifiers)
+8. [Mailbox side effects of research](#8-mailbox-side-effects-of-research)
+
+**How to read it.** Every finding carries its evidence and date:
 
 | Label | Meaning |
 |---|---|
-| **STANDALONE** | Called by our own process with app-owned tokens. No browser credentials. |
-| **BROWSER** | Seen in an Outlook Web capture. Request/response observations are identified separately where material. |
-| **SOURCE** | Present in Outlook Web JavaScript. Not proof of use. |
+| **Live** | Called by our own process with app-owned tokens; no browser credentials. |
+| **Browser** | Seen in an Outlook Web capture taken around a controlled action. The capture is not kept. |
+| **Source** | Present in Outlook Web JavaScript. Not proof of use. |
+
+This is an anonymized record of one tested account and tenant, not a capability matrix. Tenant policy, grants,
+clients and Microsoft endpoints change; rerun the probes in `research/` before adopting a routing choice
+elsewhere, and keep a missing permission, a bad request shape, a transport failure and an empty result apart.
+Probes are read-only unless the owner authorized a write for its exact target and content; the writes made
+are listed in §8. No tokens, cookies, message text, addresses or real ids are kept here.
 
 ## 1. Summary
 
-- **Core mail-data reads and attachment downloads → Microsoft Graph** via the Outlook Mobile client (`Mail.Read`). Graph also reads back selected OWS changes to verify them. These routes are documented in §3.
-- **Mail changes and inbox-rule access → OWS** (Outlook Web's private JSON RPC) via the One Outlook Web client. Graph mail write/send scopes are denied to the tested clients, and the Graph profile lacks `MailboxSettings.*`; OWS therefore handles mail mutations and both reads and writes for rules (§4).
-- **Native signatures → Outlook Cloud Settings** via the Outlook profile. Signature settings and contents are read there; signature changes are also written there (§4.7–4.8). This is a separate service from OWS mail/rule actions.
-- **Search → Graph `$search`.** It matched Outlook's own top-bar search (Substrate) on recall. Substrate works with our token, but it is parked (§3.3, §5).
-- **Cache folders only.** The mailbox has 25.6k items, two thirds of them Junk, and a full metadata mirror takes about 12 minutes (§3.2).
-- **The id model is simple.** Graph immutable ids survive moves, and they become OWS ids by a base64 alphabet swap (§4.2). Exception: `$search` returns regular ids; they need `translateExchangeIds` (§3.1).
-- **Delta `@removed` with `reason: "deleted"` is also reported for soft deletes.** Resolve it with a GET by id. Only a 404 means the item is gone (§3.6).
+- **Mail reads → Graph** with the Outlook Mobile client (`Mail.Read`); Graph also reads back OWS changes to
+  verify them (§3).
+- **Mail changes and inbox rules → OWS**, Outlook Web's private JSON RPC, with the One Outlook Web client.
+  The tested clients cannot write mail through Graph, and the Graph profile has no `MailboxSettings.*` (§2, §4).
+- **Native signatures → Outlook Cloud Settings**, with the same Outlook profile (§5).
+- **Calendar → Graph `calendarView`** with the Teams client's Graph token, which carries `Calendars.*`; OWS
+  `GetCalendarView` is the fallback and Search v2 finds events by topic (§3.8, §6.2).
+- **Mail search → Graph `$search`**, which matched Outlook's own top-bar search on recall (§3.4).
+- **Folders only are cached.** 25.6k items, two thirds in Junk; a full metadata mirror takes about
+  12 minutes (§3.2).
+- **One id model.** Graph immutable ids survive moves and become OWS ids by a base64 alphabet swap (§4.2);
+  `$search` hits are the exception and need `translateExchangeIds` (§3.1).
+- **Delta reports a soft delete as `deleted`.** Only a 404 on a GET by id means the item is gone (§3.7).
 
-## 2. Authentication (STANDALONE)
+## 2. Sign-in and clients
 
-Which Microsoft clients are granted which permissions in the tested tenant, and the `AADSTS65002` denials, are recorded in the shared [sign-in research](https://github.com/lucasrhode95/lrh-m365-auth/blob/main/docs/api-research.md). For this connector the conclusion is: none of the tested usable clients could write mail through Graph, so mail changes, inbox rules and signatures use the Outlook profile. The Graph/OWS split in [architecture §6](architecture.md#6-capability-routing-and-portability) follows from that table and must be re-derived for another tenant.
+Which Microsoft clients are granted which permissions, and the `AADSTS65002` refusals, are in the shared
+[sign-in research](https://github.com/lucasrhode95/lrh-m365-auth/blob/main/docs/api-research.md). For this
+connector, none of the tested usable clients could write mail through Graph, so mail changes, inbox rules and
+signatures use the Outlook profile. The split in
+[architecture §6](architecture.md#6-capability-routing-and-portability) follows from that and must be
+re-derived for another tenant.
 
-## 3. Microsoft Graph: mail-data reads and verification (STANDALONE, client C)
+Live, 2026-10-03 and 2026-10-04:
 
-Public contracts: [mail overview](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0),
-[list/filter messages](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0),
-[read messages and MIME](https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0),
-[attachments](https://learn.microsoft.com/en-us/graph/api/message-list-attachments?view=graph-rest-1.0),
-[search](https://learn.microsoft.com/en-us/graph/search-query-parameter),
-[immutable IDs](https://learn.microsoft.com/en-us/graph/outlook-immutable-id),
-[ID translation](https://learn.microsoft.com/en-us/graph/api/user-translateexchangeids?view=graph-rest-1.0),
-[folder delta](https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0),
-[message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0)
-and [batching](https://learn.microsoft.com/en-us/graph/json-batching).
-Use those references for route syntax, query ordering, pagination and standard response fields.
-The tested product mail-data routes succeeded with client C; the findings below capture integration
-details and exceptions. The product uses Graph for folders, messages, conversations, search,
-attachment metadata/bytes, MIME, and the account profile/photo. It also reads drafts and mailbox
-state back after selected OWS operations; this verifies a write but does not make the Graph adapter
-a mail writer. Probes requested immutable IDs unless otherwise noted.
+- The Graph token (Outlook Mobile) carried 18 scopes: `Mail.Read`, `Mail.Read.Shared`, `Files.ReadWrite.All`,
+  `Sites.ReadWrite.All`, `People.Read(.All)`, `Presence.Read.All`, `User.Read(.All)`, `User.ReadBasic.All` and
+  others, but **no `Calendars.*`** and no `MailboxSettings.*`.
+- The Outlook token (One Outlook Web) carried 74 Outlook scopes, among them `Mail.ReadWrite(.All/.Shared)`,
+  `Mail.Send(.Shared)` and `MailboxSettings.ReadWrite`.
+- The two clients do not share a sign-in: each needs its own device code.
+- The Search v2 token (One Outlook Web, `https://outlook.office.com/search/.default`) carried
+  `SubstrateSearch-Internal.ReadWrite` (2026-10-10).
+- The Teams client's Graph token (`teams.graph`) carried `Calendars.Read`, `Calendars.Read.Shared`,
+  `Calendars.ReadWrite` and `Calendars.ReadWrite.Shared` (2026-10-12); see §3.8.
 
-### 3.1 Live compatibility findings
+Not tested: shared mailboxes, and an Online Archive (the account reports `HasArchive=false`).
 
-- **Search ID exception (2026-10-03/04):** `$search` ignored the immutable-ID preference and
-  returned regular IDs. GET by a regular ID also left it unchanged. Explicit translation from
-  `restId` to `restImmutableEntryId` worked with the Graph sign-in and matched listing IDs (3/3).
-  Passing an already immutable ID as `restId` failed the whole translation call with HTTP 400
-  `InvalidArgument` (expected `EntryId`). Translate only search IDs; OWS acceptance is in §4.2.
-- **Folder-count optimization (2026-10-04, H30):** combining each folder's date-window count
-  and newest message in one Graph batch worked for 16/16 folders in 0.9 s. All five nonempty
-  responses supplied the newest date. The documented operations can replace a second count
-  pass in this tenant; timing is a sample, not a service guarantee.
-- **Meeting-mail count gap (2026-10-04, H28):** `not isof('microsoft.graph.eventMessage')`
-  failed with `ErrorInvalidUrlQueryFilter`; `meetingMessageType eq 'none'` was not a property
-  of `message`. Adding a date window did not help. Neither attempted filter yields a count
-  excluding meeting mail; no alternative server-side filter is proven.
+## 3. Microsoft Graph
 
-**Sign-in (live 2026-10-03):** `auth outlook` asked for its own device code right after `auth graph`: One Outlook Web does not reuse Outlook Mobile's sign-in, so two sign-ins are needed. The Graph token carries 18 Graph scopes (mail: `Mail.Read`, `Mail.Read.Shared`; re-checked 2026-10-04: `Content.Process.User`, `Family.Read`, `FileStorageContainer.Selected`, `Files.ReadWrite.All`, `Mail.Read`, `Mail.Read.Shared`, `People.Read`, `People.Read.All`, `Presence.Read.All`, `ProtectionScopes.Compute.User`, `Sites.ReadWrite.All`, `User.Read`, `User.Read.All`, `User.ReadBasic.All`, `UserAuthenticationMethod.ReadWrite`, `email`, `openid`, `profile`; **no `Calendars.*`**, so `/me/calendarView` was not tried, roadmap X10); the Outlook token 74 Outlook scopes (mail: `Mail.ReadWrite(.All/.Shared)`, `Mail.Send(.Shared)`).
+The connector reads folders, messages, conversations, search hits, attachments, MIME and the profile through
+Graph with immutable ids requested. Below are only the places where Graph needed something its documentation
+does not say.
 
-Not tested: shared mailboxes (no target supplied). The account reports `HasArchive=false`, so
-there is no tenant-specific Online Archive evidence; consult the public mail limitations.
+### 3.1 Ids
 
-### 3.2 Mailbox size and catalog cost (`catalog.py`)
+Live, 2026-10-03 and 2026-10-04:
+
+- `$search` ignores the immutable-id preference and returns regular ids; a GET by a regular id keeps it regular.
+- `translateExchangeIds` from `restId` to `restImmutableEntryId` turns them into the ids listings return
+  (3 of 3). Passing an id that is already immutable fails the whole call with 400 `InvalidArgument`, so
+  translate only search ids.
+- Graph's `changeKey` is accepted as the OWS change key (§4.2).
+
+### 3.2 Mailbox size and listing cost
+
+Live, 2026-10-02 to 2026-10-04, on the tested mailbox:
 
 | Measure | Result |
 |---|---|
-| Folders | 23 (1 hidden). Folder delta returns 22; the missing one is a hidden, empty, top-level folder. |
-| Items | 25,607: Junk 16,837 · Deleted 5,170 · Sent 1,205 · Archive 1,036 · Inbox 139 · 18 custom ≈ 1,220. `$count` gives 25,466 (likely non-message items). |
-| Metadata walk (`$top=500`, 17 fields) | 37 records/s, ~1.7 KB/record → full mirror ≈ 11.5 min, ≈ 45 MB |
-| Inbox delta bootstrap | 139 records, 1 page, 1.6 s |
+| Folders | 23, one hidden. Folder delta returns 22; the missing one is hidden, empty and top-level. |
+| Items | 25,607: Junk 16,837, Deleted Items 5,170, Sent Items 1,205, Archive 1,036, Inbox 139, 18 others about 1,220. `$count` gives 25,466. |
+| Metadata walk (`$top=500`, 17 fields) | 37 records/s, about 1.7 KB each: a full mirror takes about 11.5 minutes and 45 MB |
+| Inbox delta bootstrap | 139 records, one page, 1.6 s |
 
-**Conclusion:** cache folders only, and fetch message metadata on demand.
+So only folders are cached, and message metadata is read on demand.
 
-**Mailbox-wide paging (H7, 2026-10-04, read-only).** Listing without a folder means `/me/messages`, newest first, Junk and Deleted Items included (86% of the mailbox); the connector drops them after paging. One page of 100, compared with counting first (one `$count` `$batch` for the window) and then listing only the in-scope folders with mail in parallel, merged newest first:
+**Listing without a folder.** `/me/messages` pages newest first across every folder, Junk and Deleted Items
+included (86% of this mailbox), so filtering after paging kept 13 of 100 rows. Counting first (one `$batch` of
+per-folder counts for the window) and then listing the in-scope folders that have mail, merged newest first,
+filled every page: with 100 per page and no window, 96 messages in 4.7 s (four copies of self-sent mail folded
+into one) against 13 in 1.0 s, and a 30-day JSONL export in 11.1 s against 28.3 s. Both methods returned the
+same ids in the same order.
 
-| Window | `/me/messages`, filter after paging | Count first, then per folder |
-|---|---|---|
-| Last 7 days | 13 of 100 kept (83 Junk/Deleted dropped), 1.3 s | 87 of 87, 2.7 s, 5 of 16 folders |
-| Last 30 days | 13 of 100, 1.3 s | 100 of 100, 4.1 s, 9 folders |
-| No window | 13 of 100, 1.0 s | 100 of 100, 10.7 s, 13 folders |
-| No window, 25 per page | 2 of 25, 0.4 s | 25 of 25, 2.6 s, 13 folders |
+### 3.3 Counts and batches
 
-**Conclusion:** counting first fills every page, and per message delivered it is faster (filtering after paging needs about 8 pages for 100 messages), but each page is slower, most of all without a window. The cursor design across folders is still open (roadmap H7).
+Live, 2026-10-04:
 
-**Live check of the built per-folder listing (H7, 2026-10-04, read-only).** Service layer, default scope; Junk, Deleted Items and hidden folders hold 86.1% of the mailbox (threshold 66%). Whole-mailbox forced with `PER_FOLDER_SHARE = 2.0`. Graph requests counted at the transport (`$batch` = 1, its sub-requests in brackets):
+- One `$batch` holding each folder's date-window count and newest message answered for 16 of 16 folders in
+  0.9 s.
+- No filter excludes meeting mail from a count: `not isof('microsoft.graph.eventMessage')` failed with
+  `ErrorInvalidUrlQueryFilter`, and `meetingMessageType` is not a property of `message`.
 
-| Case | Per folder: time, items, complete, requests | Whole mailbox, first page | Whole mailbox, paged to the same items |
+### 3.4 Mail search
+
+Live, 2026-10-02, three pages of 25 per backend:
+
+| Query | Graph `$search` | Graph `/search/query` | Search v2 (§6.3) |
 |---|---|---|---|
-| 25, no window | 3.2 s, 21, no, 15 (+16) | 0.4 s, 5, 1 | 5 pages, 2.5 s |
-| 100, no window | 4.7 s, 96, no, 18 (+16) | 1.0 s, 13, 1 | 6 pages, 7.5 s |
-| 25, last 7 days | 2.1 s, 21, no, 7 (+16) | 0.4 s, 5, 1 | 5 pages, 2.5 s |
-| 100, last 7 days | 2.6 s, 75, yes, 8 (+16) | 0.8 s, 13, 1 | 5 pages, 3.9 s |
-| JSONL folder/date-window export, last 30 days | 11.1 s, 185 messages, 22 (+214) | | 28.3 s, 185 messages, 20 (+198) |
+| `relatório be` | 75 messages → 52 conversations, more available | total 238 | 75 conversations, total 340 |
+| `subject:relatório` (complete) | 63 messages → **50 conversations** | total 65 | **50 conversations**, total 65 |
 
-Both methods return the same message ids in the same order in all four cases (0 positions differ). Pages hold 21 of 25 and 96 of 100 because 4 copies (self-sent mail in Inbox and Sent Items) are folded into `also_in`, the same for both methods. The per-folder note names the left-out share and the biggest folders. A first run measured the same within 0.5 s (export 10.8 s vs 36.6 s).
+- All three fold accents (`relatório` matches `relatorio`).
+- After resolving Search v2's `ImmutableId`s through Graph, `subject:relatório` returned the identical 50
+  conversations from Graph `$search` and Search v2; all 52 `$search` conversations for `relatório be` were in
+  Search v2's top 75.
+- `/search/query` is not used: its total comes from another engine and ignores the folder rules.
+- `$search` takes KQL `attachment:<name>` for attachment file names. Attachment *content* is searched only by
+  `/search/query` with `entityTypes=["message"]`, whose hits do not say which attachment matched.
+- `/search/query` with `message` found a synthetic marker in its subject and, separately, in its body (2 hits
+  each, consistent with the Sent Items and Inbox copies, 2026-10-10).
+- Three one-hit `search_messages` calls took 3.4 s, 0.8 s and 0.8 s end to end (2026-10-10). `$search` and
+  `/search/query` have not been timed on identical queries.
 
-### 3.3 Search (`search.py`)
+### 3.5 Conversations
 
-Three pages of 25 per backend.
+Live, 2026-10-02, 25 recent conversations with 192 messages; and 2026-10-13:
 
-| Query | Graph `$search` | Graph `/search/query` | Substrate (§5) |
-|---|---|---|---|
-| `relatório be` | 75 msgs → 52 conversations, more available | total 238 | 75 conversations, total 340 |
-| `subject:relatório` (complete set) | 63 msgs → **50 conversations** | total 65 | **50 conversations**, total 65 |
+- The `conversationId` filter returns every folder (21 of 25 conversations spanned 2–4 folders).
+- Adding `$orderby` answers **400 `InefficientFilter`**, so the connector sorts.
+- Graph pages a conversation listing; one-message pages followed to the end returned the same five messages as
+  one read (2026-10-13).
+- Sizes: median 4, maximum 40 messages.
+- Headers: `Message-ID` on 137, `Thread-Index` 136, `In-Reply-To`/`References` 113; 55 messages (drafts and the
+  user's own) have none. 6 of 25 conversations branch; 9 parents are not in the mailbox.
+- `uniqueBody` is a median 10% of `body`.
 
-- All three backends fold accents (`relatório` ≡ `relatorio`).
-- After resolving Substrate's `ImmutableId`s through Graph, `subject:relatório` returned the **identical 50 conversations** from both. For `relatório be`, all 52 `$search` conversations appear in Substrate's top 75.
-- **Conclusion:** adopt Graph `$search`, and group hits by `conversationId` locally. `/search/query` is not used: its total comes from another engine and ignores the folder rules.
+### 3.6 Attachments and inline images
 
-### 3.4 Conversations and reply headers (`conversations.py`)
+Live, 2026-10-02, 40 messages and 176 attachments; and later checks:
 
-Sample: 25 recent conversations, 192 messages.
+- Types: `fileAttachment` 168, `itemAttachment` 8, `referenceAttachment` 0. Sizes: median 11 KB, maximum
+  27.5 MB.
+- 125 of 168 file attachments are inline. All are referenced as `cid:` in `body`, but only 47 in
+  `uniqueBody`.
+- Selecting `microsoft.graph.fileAttachment/contentId` in the attachment listing returns every inline file's
+  content id, in an ordinary request and inside a `$batch` alike, so no per-image lookup is needed
+  (2026-10-08).
+- The text body Graph returns shows an inline image as its alt text in brackets at its place
+  (`[synthetic pixel]`), and a message whose only attachment is inline reports `hasAttachments=false`
+  (2026-10-15). An image without alt text was not checked.
 
-| Measure | Result |
-|---|---|
-| Conversation filter | Returns every folder: 21 of 25 conversations span 2–4 folders |
-| + `$orderby` | **400 `InefficientFilter`** → sort locally |
-| Size | median 4, max 40 messages |
-| Headers | `Message-ID` 137, `Thread-Index` 136, `In-Reply-To`/`References` 113. **55 messages have no headers at all** (drafts and the user's own messages). |
-| Reply tree | 6 of 25 conversations branch (18 branch points). 9 parents are not in the mailbox. |
-| `uniqueBody` / `body` | median length ratio 0.10 |
+### 3.7 Delta after moves and deletes
 
-**Conclusion:** `get_conversation` = conversation filter + local sort. Branch detection is feasible for received mail. The user's own messages need a fallback.
-
-### 3.5 Attachments (`attachments.py`)
-
-40 messages, 176 attachments.
-
-| Measure | Result |
-|---|---|
-| Types | `fileAttachment` 168, `itemAttachment` 8, `referenceAttachment` 0 |
-| Inline | 125 of 168 file attachments. All are referenced as `cid:` in the full body; only 47 in `uniqueBody`. |
-| Sizes | median 11 KB, max 27.5 MB |
-
-**Conclusion:** export non-inline attachments by default. Include inline images only when a readable
-body is known to reference their CID. If either the attachment content id or rendered body is
-unavailable, include the image rather than silently dropping it.
-
-**Listing integration check (2026-10-04; initial).** A one-message probe confirmed that the typed
-file-attachment cast returned its inline content id in the normal listing (1/1), but it did not check
-the batch listing path.
-
-**Follow-up (2026-10-08; H19).** A read-only Graph probe of two synthetic messages with inline files
-confirmed that the normal attachment listing and the same listing inside a batch both returned HTTP
-200. Every inline file had a non-empty content id, and the normal and batched values and counts
-matched. The selected field can replace per-image lookups. Broader attachment-type coverage remains
-as shown in the table above. See the public [fileAttachment schema](https://learn.microsoft.com/en-us/graph/api/resources/fileattachment?view=graph-rest-1.0) for the typed field selection.
-
-### 3.6 Delta around moves and deletes (`delta_moves.py`)
-
-Snapshot taken before the §4.2 mutations, checked after them.
+Live, 2026-10-02: a delta snapshot taken before the §4.2 changes and read after them.
 
 | Folder | Delta records | Meaning |
 |---|---|---|
-| Inbox | 2× `@removed`, `reason: "deleted"` | Both were **soft** deletes, still GET-able by id in Deleted Items |
-| Inbox | 2× changed | Property edits, and a move out and back (net: a change) |
-| Archive | 0 | The round trip netted out. Delta reports net state, not history. |
-| Deleted Items | 2× added | The same immutable ids, so moves are matched by id |
+| Inbox | 2 × `@removed`, `reason: "deleted"` | Both were **soft** deletes, still readable by id in Deleted Items |
+| Inbox | 2 × changed | Property edits, and a move out and back |
+| Archive | 0 | The round trip netted out: delta reports net state, not history |
+| Deleted Items | 2 × added | The same immutable ids, so moves match by id |
 
-### 3.7 Microsoft 365 Search API coverage review (2026-10-10)
+### 3.8 Calendar through the Teams client Graph profile
 
-**Evidence:** DOCUMENTED in current Microsoft Graph v1.0 documentation. This is a documentation
-review, not a new live request or browser-capture observation. See the [Search API overview](https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview?view=graph-rest-1.0),
-[SharePoint and OneDrive search](https://learn.microsoft.com/en-us/graph/search-concept-files),
-[mail search](https://learn.microsoft.com/en-us/graph/search-concept-messages),
-[Teams message search](https://learn.microsoft.com/en-us/graph/search-concept-chat-messages),
-[calendar event search](https://learn.microsoft.com/en-us/graph/search-concept-events),
-[transcript listing](https://learn.microsoft.com/en-us/graph/api/onlinemeeting-list-transcripts?view=graph-rest-1.0)
-and [organizer transcript listing](https://learn.microsoft.com/en-us/graph/api/onlinemeeting-getalltranscripts?view=graph-rest-1.0).
+The Outlook Graph profile has no calendar scope; an `event` search with it answered 403 (2026-10-10).
+Adding `Calendars.Read` to that first-party client is untested and may fail with `AADSTS65002`. The Teams
+client's Graph token already carries `Calendars.*` (§2). Live, read-only, 2026-10-12 and 2026-10-13:
 
-| Area | Documented Graph capability | Connector decision or remaining gap |
+- `GET /me/calendarView` with a window, `$top=100`, selected fields and `Prefer: outlook.body-content-type="text"`
+  returned one week in one page: 16 events (11 occurrences, 4 single events, 1 exception), each with attendees
+  and a text body.
+- **Order:** without `$orderby`, `calendarView` is not in start order, not even within one page. With
+  `$orderby=start/dateTime asc` it is, and next links keep that order (page sizes 1, 2, 3 and 100 returned
+  the same 16 events, no duplicates).
+- Graph's immutable event ids, mapped as in §4.2, equal the ids OWS `GetCalendarView` returns for the same
+  week, and hydrate through OWS `GetItem`.
+- Start and end times from `GetItem` and from both listings denote the same instants.
+- `POST /search/query` with `entityTypes=["event"]` and a word from one event's description returned 12 hits
+  in one page; the hydrated hit had the word in its description, not its subject. Whether it can restrict dates
+  or search the description alone is untested.
+- `GET /me/events/{id}?$select=subject,body` read one event. The other detail fields were not compared.
+
+Not tested: shared or delegated calendars (the token carries `Calendars.Read.Shared`), time zones other than
+UTC, and consent on a fresh account.
+
+## 4. OWS (`/owa/service.svc`)
+
+Outlook Web's private JSON RPC, with the One Outlook Web token. Live unless stated.
+
+### 4.1 Transport
+
+- `POST https://outlook.cloud.microsoft/owa/service.svc?action=<Action>&app=Mail`.
+- Envelope: `{"__type": "<Action>JsonRequest:#Exchange", "Header": {"__type": "JsonRequestHeaders:#Exchange",
+  "RequestServerVersion": "V2018_01_08"}, "Body": {"__type": "<Action>Request:#Exchange", …}}`.
+- URL-encoded JSON up to 2,048 characters goes in the `X-OWA-UrlPostData` header with an empty body; longer
+  payloads go in the body.
+- Headers: the bearer token, `Action`, `X-OWA-ActionSource`, correlation ids,
+  `X-AnchorMailbox: AAD-SMTP:<user>`, `Prefer: IdType="ImmutableId"`. **No cookies or canary.**
+- Answers: `Body.ResponseMessages.Items[]` with `ResponseClass` (`Success`, `Warning`, `ClientError`,
+  `ServerError`, `ServerTransientError`, `Throttled`) and `ResponseCode`; some reads answer directly in `Body`.
+  Error headers: `x-owa-error`, `x-owa-returncode`.
+
+### 4.2 Item writes
+
+Live, 2026-10-02 to 2026-10-06: a self-send, four user-named Inbox messages and synthetic drafts; every result
+read back through Graph.
+
+| Operation | Request | Result |
 |---|---|---|
-| Mail and attachments | `message` search covers sender, subject, message body and supported attachment contents in the signed-in user's mailbox. | Search returns a message resource. The documented response does not identify which attachment matched, so report a parent-message hit unless a provider supplies attachment-level evidence. Delegated-mailbox search is unsupported. |
-| Calendar events | `event` search targets the signed-in user's primary calendar. Event pages are limited to 25; sorting is unsupported and the returned total is page-local. | The current Graph profile still lacks `Calendars.Read`; the earlier 403 remains an authentication blocker. Primary-calendar documentation does not establish coverage of delegated or other calendars, and meeting/chat identity links still need evidence. |
-
-**Shared bounds.** Microsoft Search requests run in the signed-in user's delegated context and enforce source access controls. The documented default page size is 25; message and event requests cannot exceed 25 per page, while SharePoint/OneDrive allow up to 1,000. Use `moreResultsAvailable` for continuation and never present message, event or Teams page totals as complete result totals.
-
-**Status after bounded checks (2026-10-12).** Later sections record synthetic mail known hits (§3.12), OneDrive/SharePoint file search, selected-item hydration and paging (now in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#sharepoint-connector-follow-up-live-file-hydration-and-scope-2026-10-11)), the browser route map (§3.9), and standalone calendar/Teams-message replay (§3.14). The tested Graph `chatMessage` request was denied, while the Teams connector now uses a separate captured Search v2 route. Remaining questions include attachment-only match attribution, broad recall and minimum permissions, a same-query Outlook mail-route timing comparison, and transcript/recap discovery or full-text search. A prior mail-route timing attempt stopped before sending HTTP because the research probe lacked a configured client/scope pair; this was a probe-configuration failure, not an endpoint denial. Product-owned follow-ups are in the [Outlook](roadmap.md), [Teams](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/roadmap.md), and [SharePoint](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/roadmap.md) roadmaps.
-
-### 3.8 Attachment and file discovery endpoint confirmation (2026-10-11)
-
-**Shared Graph transport, different entity types.** Microsoft Search in Graph uses `POST /v1.0/search/query`; `requests[].entityTypes` selects the content source. The endpoint is shared by Outlook `message`, Teams `chatMessage`, and OneDrive/SharePoint `driveItem` searches. Microsoft documents that `chatMessage` cannot be combined with other entity types, so Teams message search must be a separate request. This is different from the Outlook connector's existing `GET /v1.0/me/messages?$search=...` route and from the private browser search routes in §3.9.
-
-| Search target | Graph request | Documented coverage and observed limits |
-|---|---|---|
-| Email body and attachment contents | `POST /v1.0/search/query`, `entityTypes=["message"]` | Searches the signed-in user's own mailbox, including supported attachment contents. Microsoft lists `Mail.Read` for message Search API. The result is a message resource; it does not identify which attachment matched. Our live known-hit checks covered message subject/body terms, not attachment-only content. |
-| Email attachment filenames using the existing mail collection route | `GET /v1.0/me/messages?$search="attachment:<name>"` | Graph `$search` supports the KQL `attachment:` property for attached-file names. An unfielded query searches sender, subject, and body by default; this is the route used by `graph_mail.search()` today. It is not the documented full-text attachment-content route. |
-
-**Primary references:** [Outlook message Search API](https://learn.microsoft.com/en-us/graph/search-concept-messages), [Teams message Search API](https://learn.microsoft.com/en-us/graph/search-concept-chat-messages), [OneDrive and SharePoint Search API](https://learn.microsoft.com/en-us/graph/search-concept-files), [Search API permissions and paging](https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview?view=graph-rest-1.0), [`$search` mail properties](https://learn.microsoft.com/en-us/graph/search-query-parameter), and [drive-scoped DriveItem search](https://learn.microsoft.com/en-us/graph/api/driveitem-search?view=graph-rest-1.0).
-
-### 3.9 Microsoft 365 search capture and source route map (2026-10-10)
-
-**Evidence:** CAPTURED from the supplied browser HARs and SOURCE from a targeted scan of the
-Teams web client bundle. This is not a standalone replay of the browser routes. Successful
-responses in a signed-in web client establish observed client behavior only; they do not prove a
-connector can use those private routes with app-owned authentication.
-
-| Surface | Captured/source contract | What remains unproven |
-|---|---|---|
-| Outlook global search | The Outlook capture submitted one `POST /searchservice/api/v2/query` request for `Conversation`/`Exchange`. Separate `POST /search/api/v1/suggestions` requests asked for combinations of `People`, `File`, `Event`, and `Message`; `POST /search/api/v1/recommendations` returned an HTML-type recommendation response. | Suggestions/recommendations do not establish that Outlook submitted a file-, event-, or attachment-search request. Result-click behavior remains uncaptured. |
-| Outlook people/persona companion routes | Captures also include `GET /api/v1/livepersonacard/configuration` (3×200), `GET /api/v1/peopleInsights/owareadingpane` (3×200), `GET /api/v2/personaphoto` (23×200, 3×404), and `POST /api/v2/personacards/preparePersona` (3×200). | These are profile/persona configuration, photo, or reading-pane support calls. Their response contracts and correlation to any particular suggestion or result activation were not established; they are not submitted search requests. |
-| Outlook GraphQL meeting-support calls | In the Teams Recaps browser capture, Outlook Web also sent ten HTTP 200 POSTs to `/outlookgatewayb2/graphql?cv=...&n=...`. Operations were `SyncTeammatesCalendarGroup` (3), `TabsAndEntitlements` (1), `WorkingHours` (4), `getUserAuthSettings` (1), and `useGetMeetingResponseQuery` (1). Each response was a one-element array with `data` and `extensions`; observed data roots included `syncTeammatesCalendarGroup`, `appEntitlements`, `listTabs`, `flexibleWorkingHoursView`, `getUserAuthSettings`, and `getSchedulingServiceMeeting`. | This is Outlook's private GraphQL service, not Microsoft Graph and not a global search provider. It shows adjacent calendar, tab, working-hours, and meeting-response data calls. No standalone replay or full response contract was established. |
-
-**Outlook web source bundle audit (2026-10-10).** A targeted read of the supplied
-`outlook.cloud.microsoft.zip` found `SubstrateSearch-Internal.ReadWrite` in OWA's scope catalog
-and an MCPS service-base configuration under the Teams service. The app bootstrap lists the feature identifiers `meetingcatchup.teams.monarch` and `meetingcatchup.outlook.monarch`, but the archive contains no associated request builders. It did not contain the captured
-Search v2 or MCPS meeting-content route literals, nor builders for Recaps or transcript search.
-The bundle also contains `EntityType` and `Transcript` strings, but no route or request builder
-connecting those strings to transcript discovery. This is static client configuration, not proof
-that a live OWA token requests or receives the scope, or that OWA itself sends those Teams calls.
-Keep the Teams HAR and Teams client source as the evidence for those contracts; standalone
-connector authentication remains unproven.
-
-**Captured response and paging details (2026-10-10).** The Outlook Files capture had eight suggestion calls, but its only submitted Search v2 request was
-Conversation/Exchange with `From=0`, `Size=25` and zero hits. The capture does not show a submitted
-attachment-only search. In the broader Teams capture, a File-only request returned 25 hits and an
-Event-only answer request returned 25; response fields and total/page caveats are in
-`lrh-teams-connector/docs/api-research.md`.
-
-The Recaps HAR also records Outlook's `/outlookgatewayb2/graphql` operations above. One response
-root is `getSchedulingServiceMeeting`, and another operation returns `listTabs`/`appEntitlements`;
-these are adjacent meeting UI data, not proof that Outlook GraphQL powers Teams global search or
-the Recaps transcript viewer. The same capture contains one additional GraphQL-named GET route with
-no identifiable operation or result contract; it remains an unexplained browser request.
-
-Across the UI captures, `/search/api/v1/suggestions` appears as both GET and POST depending on the
-surface; `/searchservice/api/v2/query` is the submitted route for Outlook/Teams global search and
-the captured company SharePoint page, while the OneDrive Files flow submitted `/search/api/v2/query`
-and the SharePoint REST proxy. The route method/body/version are therefore product-surface
-contracts, not interchangeable aliases. Search telemetry and bootstrap calls should not be counted
-as result providers.
-
-The supporting calls in these HARs include `GET /search/api/v2/init` (Outlook, OneDrive and
-SharePoint captures), `GET /search/api/v2/resources`, and SharePoint `POST /search/api/v1/userconfig`.
-The Outlook source bundle separately contains a `/search/api/v1/init` builder; that source string
-and the captured `/search/api/v2/init` calls are not enough to establish version equivalence.
-`POST /search/api/v1/events` is search telemetry. Outlook also made one successful
-`POST /search/api/v1/recommendations` request for an `HTML` entity; the Teams Recaps capture used
-that route family for `MeetingCatchUp`, so the recommendation payloads are surface-specific.
-
-Every explicit search offset observed across these flows was zero. `MoreResultsAvailable=true`
-appeared in some successful file-search responses, but no advancing request was captured; do not
-describe continuation as exercised. Some successful responses contained only `ApiVersion`,
-`SearchTerms` and `Instrumentation`, which is not enough to classify them as zero-hit searches.
-
-**Interpretation.** Microsoft Graph documentation remains the connector contract where a documented
-route and usable app-owned authentication exist. The captured browser routes are private and
-service-specific; keep them as investigation evidence rather than adopting them as product APIs.
-The Teams-specific route and field notes are maintained in the
-[Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md) and its roadmap; SharePoint and OneDrive
-routes are in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md).
-
-### 3.10 Bounded Graph message-search probe (2026-10-10)
-
-**Evidence: STANDALONE.** Using the connector's existing encrypted Graph token cache, a single
-read-only `POST /v1.0/search/query` requested `message` results with `from=0` and `size=1` for a
-synthetic marker. It returned HTTP 200, one result group, zero hits, `total=0`, and
-`moreResultsAvailable=false`; the response exposed the expected top-level context/value and
-result-container keys. The probe did not hydrate a result or print query text, identifiers or
-message content, and it made no mailbox changes.
-
-This confirms the documented Graph route accepted this bounded request through the current
-app-owned authentication. Because the synthetic marker had no match, this is only a route and
-response-shape check; it establishes neither matching recall nor content/attachment search
-coverage. Earlier probes ([SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#file-and-cross-category-search-feasibility-2026-10-07)) recorded HTTP 200 hits for mail keyword, subject and body searches,
-but their query values and result details are intentionally absent, so they do not form a
-controlled content-only or attachment-attribution comparison.
-
-### 3.11 Outlook Web search client source review (2026-10-10)
-
-**Evidence: SOURCE**, from the user-provided `outlook.cloud.microsoft.zip`, read in place. The
-archive was not extracted into the repository and no source bundle or generated index is retained.
-
-The Outlook Web client contains a `SubstrateSearchService` initializer and a Search v2 request
-builder. Its JSON body includes `Cvid`, `EntityRequests`, `Scenario.Name`, optional
-`Scenario.Dimensions`, `TextDecorations`, `TimeZone`, `LogicalId`, and optional `SearchContext`.
-The helper selects its OWA search resource through client configuration; the HAR separately
-confirms the observed submitted-search route as `POST /searchservice/api/v2/query`. The source
-bundle does not establish a portable app-owned authentication contract for this browser service.
-
-Suggestion and initialization calls are separate: the source has `/search/api/v1/suggestions`
-and `/search/api/v1/init` builders. The suggestion body contains `AppName`, `Scenario.Name`,
-`Cvid`, `EntityRequests` and `LogicalId`; it is not the submitted result request. The source also
-reads `MoreResultsAvailable` and validates page context, but this pass did not trace a request
-advancing the result offset or establish its exact continuation fields. All explicit search
-offsets in the supplied HARs remained zero.
-
-### 3.12 Controlled Microsoft Search known-hit checks (2026-10-10)
-
-**Mail (STANDALONE):** After one user-authorized synthetic message was sent to the signed-in
-mailbox, separate bounded `POST /v1.0/search/query` requests for a subject-only term and a
-body-only term used `entityTypes=["message"]`, `from=0` and `size=5`. Both returned HTTP 200,
-two hits, `total=2` and `moreResultsAvailable=false`. No results were hydrated, and query values,
-message text and identifiers were not retained. The two hits are consistent with Sent Items and
-Inbox copies, but their identifiers were not inspected.
-
-The connector's normal `search_messages` operation also returned one grouped conversation match
-for each term at `limit=1`; its coverage was incomplete at that requested bound. Source review
-confirms that product search uses Graph `messages?$search`, while the direct known-hit requests
-above exercised Microsoft Search `/search/query`. Together these checks establish subject and
-body-term matching for this mailbox, but not exhaustive recall, attachment-level attribution or
-all mailbox scopes.
-
-**Files (known hit):** after the user confirmed that the generic text file had uploaded to the
-shared folder, bounded Graph Search requests for `driveItem` returned HTTP 200 with one hit for
-the filename-only term and one hit for the content-only term. No result was hydrated, and no file
-contents, markers or cloud identifiers were retained. Earlier zero-hit responses preceded upload
-confirmation; they do not establish an index delay by themselves. This validates these two known
-hits for the tested account and location, not broad recall, other drives, or a minimum permission
-set. The request shape was `POST /v1.0/search/query` with `entityTypes=["driveItem"]`, a
-`query.queryString`, `from=0`, and `size=5`. Microsoft documents this entity type for files and
-folders and says file-search results are constrained by the signed-in user's access. The Graph
-Search permission table lists `Files.Read.All`, `Files.ReadWrite.All`, `Sites.Read.All`, and
-`Sites.ReadWrite.All` for `driveItem` access. The Outlook Graph profile requests `Mail.Read`, while
-the earlier token inventory in §3.1 records `Files.ReadWrite.All` and `Sites.ReadWrite.All` among
-the Graph token's grants. The exact token claims were not captured alongside this query, so this
-success does not show that `Mail.Read` alone is sufficient or establish a minimum permission set.
-Microsoft's [OneDrive/SharePoint Search examples](https://learn.microsoft.com/en-us/graph/search-concept-files)
-and [Search API overview](https://learn.microsoft.com/en-us/graph/api/resources/search-api-overview?view=graph-rest-1.0)
-document the request, result and permission model. The pages reviewed specify no indexing-visibility
-time guarantee: the hits show the terms were searchable by the later request, not how long indexing
-took.
-
-### 3.13 Calendar event search through Graph and the calendar permission (2026-10-10)
-
-**Calendar events (DOCUMENTED + STANDALONE denial):** Microsoft Graph Search supports `event` at
-`POST /v1.0/search/query` with `entityTypes=["event"]`; the documented scope is the signed-in
-user's primary calendar. Event pages are capped at 25, `hitsContainers.total` is page-local, and
-sorting is unsupported. The Outlook Graph profile lacks `Calendars.Read`; the prior bounded event
-query returned HTTP 403. This is an account/profile blocker, not evidence that event search is
-unsupported. [Event Search documentation](https://learn.microsoft.com/en-us/graph/search-concept-events).
-
-**Shared-auth permission follow-up (reviewed 2026-10-12):** The shared `lrh-m365-auth`
-`outlook.graph` profile in `src/m365_auth/profiles.py` currently requests delegated Graph
-`Mail.Read` and `User.Read`; there is no
-per-profile `auth graph --force` command. The public `outlook-connector auth` command bootstraps
-the configured profiles. The earlier event-search 403 establishes that the tested token lacked
-`Calendars.Read`, not that the permission cannot be requested. A bounded retry would add delegated
-`Calendars.Read` to the shared profile, run `outlook-connector auth`, complete any requested
-device-code/MFA approval, and inspect the resulting token's granted `scp` claim before repeating
-the event query. Preauthorization for this Microsoft first-party client/resource/scope combination
-remains untested; Microsoft documents `AADSTS65002` when a first-party client/resource pair lacks
-API-owner preauthorization. This is a candidate procedure, not an established grant.
-[Permission reference](https://learn.microsoft.com/en-us/graph/permissions-reference?view=graph-rest-1.0),
-[AADSTS65002](https://learn.microsoft.com/en-us/entra/identity-platform/reference-error-codes).
-
-### 3.14 OWA Search v2 calendar and Teams-message replay (2026-10-10)
-
-**Evidence: STANDALONE**, using the One Outlook Web client and its existing encrypted token cache.
-A silent `https://outlook.office.com/search/.default` acquisition carried the expected
-`SubstrateSearch-Internal.ReadWrite` scope. Requests used no browser cookies or captured tokens.
-
-`POST https://outlook.office.com/searchservice/api/v2/query` accepts the Outlook Web envelope
-(`Cvid`, `LogicalId`, `Scenario.Name="owa.react"`, `TimeZone`, `TextDecorations`) with
-`EntityRequests[]`. For `EntityType="Event"`, `ContentSources=["Exchange"]`, a query, `From`,
-and `Size`, the response is `EntitySets[].ResultSets[].Results[]`. A broad meeting-term query
-returned 25 rows per page, `Total=703`, and `MoreResultsAvailable=true`; using `From=5` with the
-same `Cvid` and `LogicalId` returned five distinct references. A requested `Fields` list did not
-add `OnlineMeeting` or `EventConversationId` to the result source. Observed source fields include
-`Subject`, `Start`, `End`, `Organizer`, `DisplayTo`, `Location`, `IsMeeting`, `IsCancelled`,
-`IsAllDayEvent`, `IsOrganizer`, `IsResponseRequested`, `MyResponseType`, `LegacyFreeBusyStatus`,
-`Sensitivity`, `HasAttachments`, `ItemId.Id`, `ImmutableId`, `UID`, and series-master identifiers.
-
-For one user-named recurring event, the service returned `CalendarItemType="Occurrence"` rows.
-Requests at offsets 0 and 5 returned ten distinct item ids tied to one series-master id, while
-each response reported `Total=1` and `MoreResultsAvailable=true`. Treat this `Total` as an
-unresolved count, not a complete count of occurrences. Search rows also reported
-`HasAttachments=false`; hydrating one `Source.ItemId.Id` through OWS `GetItem` succeeded with
-`ResponseClass=Success` and `ResponseCode=NoError`. `BaseShape="Default"`, `BodyType="Text"`,
-and `AdditionalProperties` for `item:Body` and `item:Attachments` returned the event body and one
-attachment, plus 10 required and one optional attendee. Only field names and counts were retained.
-The discrepancy means the Search `HasAttachments` flag should not be used to skip hydration.
-
-**Connector mapping note (2026-10-12):** OWS `BodyType="Text"` is kept verbatim; it is not HTML-
-entity-decoded. The connector maps `Body.IsTruncated` to the optional `body_truncated` result field.
-The default GetItem shape can cap the body at 2,048 characters, so callers must check that flag
-before treating a long agenda as complete. This implementation note adds no new live-response claim.
-
-The separate lower-camel `entityRequests[]` builder also returned Event rows from
-`POST /search/api/v2/query`; this aligns with the source-mapped Meet builder but does not tie that
-route to Teams global Meetings. A minimal Event `AnswerEntityRequests` attempt returned HTTP 500;
-the exact captured Teams payload and result-format hints were not reproduced. The Teams hostname
-`teams.microsoft.com` returned HTTP 405 for the tested Search path; the working route was the
-Outlook host above.
-
-The same Search token also accepts `EntityType="Message"` with `ContentSources=["Teams"]`.
-`ContentSources` is required for the tested request: omitting it, or requesting a Teams
-`Conversation`, returned HTTP 400. Message rows expose `HitHighlightedSummary`, `ReferenceId`,
-`SearchKey` and a `Source` with fields including `ClientConversationId`, `ClientThreadId`,
-`ConversationId.Id`, `ConversationRestId`, `ConversationThreadId`, `ItemId.Id`, `ImmutableId`,
-`Preview`, `Sender`, `Subject`, `DateTimeSent`, `HasAttachments`, and `HasLinkedFile`.
-
-A query for one user-named recap-associated chat returned seven message hits across two pages
-(five then two); both `ClientConversationId` and `ClientThreadId` matched the known chat on all
-seven rows, with no overlap between pages. A second named transcript chat query returned eight
-rows over two pages but none of the tested conversation-id fields matched its known local chat id;
-that linkage remains unresolved. Names, message text, and identifiers were not retained.
-
-Exploratory `EntityType="Transcript"`, `ContentSources=["Teams"]` requests returned HTTP 200 but
-no `EntitySets`, both for a transcript-format marker and for the two named meeting titles. The
-same entity with Exchange, OneDriveBusiness, or SharePoint sources returned HTTP 400; guessed
-`MeetingTranscript` and `MeetingInsights` entity names also returned HTTP 400. These shape tests do
-not establish that transcript search is unsupported. The Outlook client silently acquired Teams
-resource tokens for `api.spaces.skype.com` and `chatsvcagg.teams.microsoft.com`; legacy Teams
-`/v1.0/authz` returned HTTP 410, while both `authzcore` aliases returned HTTP 200 without a Skype
-session token. No transcript artifact URL was followed. Recap retrieval and transcript content
-search remain separate unresolved capabilities.
-
-**Connector implementation note (2026-10-12):** the Outlook connector now wires the standalone
-Event/Exchange request and OWS `GetItem` shape through the shared `m365.search` profile and calendar
-service. Search mapping, page continuation, recurring-total handling and event hydration have
-synthetic tests. No live call through the connector or fresh-account consent was performed for this
-change; the endpoint evidence above remains the standalone replay, and transcript/recap routes remain
-unresolved.
-
-### 3.15 Outlook mail-search timing and route comparison (2026-10-10)
-
-Three sequential one-hit calls to the connector's `search_messages` operation returned one
-conversation and one message each. End-to-end times were 3,409 ms, 760 ms, and 784 ms. Every call
-was incomplete at the one-hit limit. These timings include connector/tool round trips and warm-up;
-they do not isolate Graph latency or the conversation-count batch.
-
-The timed calls used the existing Graph `GET /v1.0/me/messages?$search=...` route. Earlier
-controlled subject/body checks showed that Graph Search API `POST /v1.0/search/query` can return
-mail hits, but the same terms, limits, hydration, and elapsed-time boundaries were not compared.
-There is no evidence from these measurements to replace the connector's current route or remove its
-conversation-size lookup and immutable-ID translation, which support response and identity
-contracts. Teams measurements are in the [Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#cross-product-search-ledger-teams-2026-10-12)
-and file-search timings in the [SharePoint research](https://github.com/lucasrhode95/lrh-sharepoint-connector/blob/main/docs/api-research.md#sharepoint-connector-follow-up-live-file-hydration-and-scope-2026-10-11).
-
-### 3.16 Live Outlook connector MCP calendar check (2026-10-12)
-
-**Evidence: live, read-only MCP calls** through the current signed-in Outlook connector. `auth_status`
-reported `client_credential_cached=true` for the `m365.search` profile. No sign-in, consent, or
-mailbox write was performed.
-
-`search_calendar_events(query="meeting", limit=5)` returned five event references at offset 0 and
-an opaque continuation cursor. Following it returned five more at offset 5. The call remained
-incomplete (`more_results_available=true`). `get_calendar_event` succeeded for one returned id and
-provided structured agenda text, attendee fields, and a `teams_join_url`. The structured event
-fields did not include a Teams chat or conversation id, so the join URL does not yet establish the
-identifier required for automatic handoff to the Teams connector. No event title, attendee identity,
-URL, or item identifier is retained here.
-
-Date bounds are currently applied to each fetched page's event start times after the Search v2
-request. For `query="meeting"`, `limit=25`, and the inclusive UTC range 2026-09-12 through
-2026-11-12, the first two bounded pages (offsets 0 and 25) returned zero visible events while both
-reported more results and exposed a cursor. The first unbounded 25-result page had no event start in
-that range. This confirms an empty page is not a complete negative search; continue through empty
-pages while a cursor is available. If paging stops before coverage is complete, report incomplete
-results rather than no matches. The observed walk stopped after offset 25, so it makes no claim
-about whether later pages contain matches.
-
-**Event attachment metadata and search totals:** a separate read-only pass hydrated five Search v2
-event results; all five succeeded, and one event returned one attachment metadata entry. The mapped
-metadata fields were `id`, `name`, `content_type`, `size`, and `is_inline`; no values or event
-identifiers were retained. This confirms metadata is available through `get_calendar_event`, but the
-MCP surface has no event-attachment content download operation. The existing `download_attachment`
-tool requires a mail `message_id`, and its Graph route is message-scoped, so it does not download an
-event attachment. The calendar search result contract has no `total`; it exposes the event page,
-cursor, and coverage (`complete`, `offset`, `page_size`, `more_results_available`, and `notes`).
-Totals remain omitted because the standalone recurring-event replay showed Search v2 `Total` values
-that did not match the returned occurrence rows. Treat this as the current contract, not a universal
-claim about every account or Search v2 query.
-
-This closes the live connector-path check for the current account. Fresh-account consent remains
-unverified. The Graph calendar scope remains a separate unresolved alternative; transcript and
-recap search remain outside this Outlook workflow.
-
-### 3.17 Calendar range listing and description search through the Teams-client Graph profile (2026-10-12)
-
-**LIVE, read-only:** a weekly schedule request exposed the limitation of the current Outlook MCP
-calendar search. The broad keyword query required 40 pages of 25 upstream rows to return 15
-in-window matches. The next request at offset 1,000 returned HTTP 400 `BadRequest`; this does not
-establish a universal offset ceiling. Date bounds were applied locally, and keyword search could
-not establish a complete calendar inventory. Fifteen selected event hydrations succeeded.
-
-The shared encrypted cache's existing `teams.graph` profile silently supplied a Graph token with
-`Calendars.Read`, `Calendars.Read.Shared`, `Calendars.ReadWrite`, and `Calendars.ReadWrite.Shared`.
-This is distinct from the Outlook Mobile `outlook.graph` profile that lacks calendar scopes.
-No interactive sign-in, consent, calendar write, or auth configuration change was performed.
-
-`GET https://graph.microsoft.com/v1.0/me/calendarView` with `startDateTime`, `endDateTime`,
-`$top=100`, and selected event properties returned HTTP 200, 16 entries, and no `@odata.nextLink`.
-A second bounded read selected `start`, `end`, `isCancelled`, `isAllDay`, `attendees`, `body`,
-`responseStatus`, and `type`, with `Prefer: outlook.body-content-type="text"`. It returned 16
-entries with attendees, zero cancellations, one all-day entry, and 16 nonempty text bodies. The
-second HTTP call took approximately 950 ms, including client connection setup and excluding
-token acquisition; this single measurement is not a latency benchmark. These are calendar
-entries, not a reconciliation against the earlier 15 keyword matches. No event content,
-identities, links, or identifiers are retained.
-
-`POST https://graph.microsoft.com/v1.0/search/query` with `entityTypes=["event"]`, a known
-description keyword, `from=0`, and `size=25` returned HTTP 200, 12 hits, and
-`moreResultsAvailable=false`. Hydrating one hit with `GET /me/events/{id}?$select=subject,body`
-returned HTTP 200; the term was absent from its subject and present in its description. This
-establishes a description match for that result, not a body-only query contract or semantic
-search guarantee. Field restrictions and date-filter query semantics remain to be verified.
-
-**SOURCE recheck:** the Teams Meet `searchEvents` builder uses
-`POST https://substrate.office.com/search/api/v2/query` (configurable base URL), authorizing for
-the `https://substrate.office.com` resource. Its lower-camel `entityRequests[]` contains `query`,
-`entityType="Event"`, `startDateTime`, `endDateTime`, `from=0`, `size=30`,
-`contentSources=["Exchange"]`, and `sort=[{"Time":"Proximity"}]`, plus a top-level `cvid` and
-scenario name. The parser reads `EntitySets[0].ResultSets[0].Results[].Source`. These are source
-contracts; server enforcement, empty-query listing, and continuation were not replayed. This
-search builder is not proof of the endpoint used for Teams Calendar week navigation. See
-[Teams Meet research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#meet-search-and-recap).
-
-**Implementation direction:** Outlook should expose a calendar-range listing independent of a
-keyword query, expand occurrences through `calendarView`, and return optional agenda text in
-the same bounded request. Global keyword search can use Graph event Search under the verified
-calendar-capable client, followed by event hydration. The shared auth package should own a
-purpose-named calendar profile using that client/resource pair; Outlook need not depend on
-Teams connector code. Fresh-account grants and other-calendar access remain unverified.
-
-### 3.18 `list_calendar_events` live check (2026-10-12)
-
-**LIVE, read-only, counts only.** The Graph-first calendar listing was run against the signed-in account for
-one week (2026-10-12 03:00Z to 2026-10-19 03:00Z, a local UTC−3 week). Results:
-
-- Graph calendar view (`teams.graph` profile): complete in one call with 16 events, in time order, with
-  UTC-aware times. Item types were 11 occurrences, 4 single events and 1 exception, so recurrence expansion is
-  visible. 15 events carried a Teams join link. Attendee lists were longer than the 15-name cap for 11 events;
-  each reported its total.
-- A cursor walk at `limit=3` returned the same 16 identifiers as one call.
-- A forced fallback to OWS `GetCalendarView` for the same window returned 16 events, complete. After the
-  standard id mapping, the Graph immutable identifiers and the OWS identifiers agree exactly, with no event on
-  only one side. The fallback carries no descriptions, as designed.
-- `include_body=true` returned a description for all 16 events; some were cut at 4,000 characters
-  (`body_truncated`).
-- `contains` with a common word matched 15 of 16 events, in subjects and descriptions combined.
-- `get_calendar_event` with a Graph-listed identifier, converted to the Outlook Web form, returned the event
-  with its start time.
-
-Ordering correction (2026-10-12): the checks above sorted results inside the connector, so they did not show
-Graph's own order. A cursor walk through the MCP tool then showed that a later Graph page could begin earlier
-than the previous page ended. A direct check found that Graph's calendar view, without `$orderby`, is not in
-start order even within one 100-event page; with `$orderby=start/dateTime asc`, next-link paging at page sizes 3
-and 100 returned the 16 events in start order, and the request is accepted without error. The connector now
-sends that order on the first request, and the next links keep it.
-
-Interpretation: one Graph request now answers the week that earlier needed up to 40 Search v2 pages, and the
-OWS fallback returns the same event set. Listed identifiers hydrate through the existing OWS path, so no second
-identifier scheme is needed.
-
-Not proven: consent for the calendar scopes on a fresh account; shared or delegated calendars; time zones other
-than UTC (the request asks for UTC and refuses other zones); and the MCP tool through a restarted server, since
-the running server still held the previous tool list when this check ran. No subjects, attendees, identifiers,
-descriptions or tokens are retained here.
-
-### 3.19 Review gap live checks (2026-10-13)
-
-Read-only checks against the signed-in account, run through the connector's service layer. The outputs were counts, minute differences and HTTP status codes; no subjects, addresses, identifiers, descriptions or bodies were kept. The test machine's local clock was not on UTC.
-
-- **Event detail times.** `get_calendar_event` start and end matched the UTC listing for the four timed events checked (0 minutes of difference). The Outlook Web listing matched the Graph listing for all 16 events in the test week (0 minutes). The answers already denote the same instants, so no change was needed.
-- **Calendar paging.** The Graph listing returned the same event set at page limits 1, 2 and 3, with no duplicates. Two start times were each shared by two events. The Outlook Web listing returned the same order on two reads. Changes between pages were not tested, because that needs writes to the calendar.
-- **Search v2 date terms.** `start:`, `meeting start:` and `meeting received:` with the test week returned no result set; the query `meeting` as a control returned rows. The server does not restrict event dates for these forms.
-- **Search v2 date bounds in the connector.** A bounded `search_calendar_events` walk of 12 calls returned no events from the window within its first 300 results, and every page carried a cursor. Bounds therefore filter pages after they arrive.
-- **Search v2 offset limit.** One search session (one Cvid/LogicalId pair) answered page starts up to 975 with 25 rows per page, and refused a page starting at 1,000 with HTTP 400. A page starting at 990 with 25 rows was answered, so the rule concerns where a page starts. The connector assumed a limit of 100,000, so a cursor for offset 1,000 failed with HTTP 400. After the fix, a full walk ended after 40 calls with 1,000 results and no cursor, and the coverage note said why.
-- **Naive window times.** A message listing with a naive `since` and an aware `until` succeeded after the fix. Before it, the service compared the two directly; Python raises `TypeError` for that comparison (from the code, not run live).
-- **Hidden folders.** The mailbox has one hidden folder, with no messages in its first page, so get-by-id reads of hidden items could not be tested.
-- **Not tested.** What Outlook keeps for a draft that contains unfinished markup (this needs a test draft, which changes the mailbox); calendar fallback paging while the calendar changes; conversations longer than 1,000 messages.
-
-A fresh Cvid/LogicalId for every request returned HTTP 400 after the first page, as the reuse rule in §5 already records.
-
-### 3.20 Unfinished markup on save (2026-10-13)
-
-One authorized test, with one synthetic draft. It was written through the mail writer directly, because the connector's checker now refuses unfinished markup. The draft was never sent. Its HTML was a synthetic body ending in an unfinished `img` tag with an `onerror` attribute, followed by a synthetic signature block, which is what the pre-fix composition produced. The draft was read back as HTML through Graph, then moved to Deleted Items once with the connector's delete path (result: one item, done). Nothing was retried.
-
-- The body text was kept.
-- The `onerror` attribute and the `alert(1)` text were not in the saved HTML.
-- The unfinished `img` absorbed the signature block's opening `div` tag. The signature's `id` and `data-signature-name` attributes moved onto an `img` element, the signature text became a paragraph, and the signature's closing tag became an empty `div`.
-
-In this test Outlook removed the event handler on save, so the join did not keep an active handler. It did damage the signature structure. The connector's refusal remains the contract, and the refusal also prevents the structural damage. One account and one client were tested; other attributes and other clients were not. The draft remains in Deleted Items until Outlook empties that folder.
-
-### 3.21 Conversation listing paging check (2026-10-13)
-
-A read-only check on the signed-in account. It took the most-populated conversation among the first 100 messages of the mailbox (five messages across folders) and read it through the connector's conversation read. It then requested the same conversation with one-message pages, following next links to the end. Both reads returned all five messages with no truncation.
-
-Graph pages conversation listings. The check does not reach the 1,000-message cap, because this account has no conversation that long. The cap in `get_conversation` is therefore the connector's own read budget (`MAX_CONVERSATION` in `remote/graph_mail.py`), not a Graph limit. The connector removed the cap on 2026-10-14 and now reads every page.
-
-### 3.22 Inline images in the text body (2026-10-15)
-
-A read-only check of one self-sent synthetic message whose HTML body holds one inline image, `<img alt="synthetic pixel" src="cid:signature-…@outlook-connector">`, attached inline with the matching `content_id`. The text body Graph returns shows the image as its alt text in brackets at its place: `[synthetic pixel]`. The image has no other trace in the text, and the message reports `hasAttachments=false`. An image without alt text was not checked.
-
-## 4. OWS (`/owa/service.svc`): mail changes and inbox-rule access (STANDALONE, client A)
-
-### 4.1 Transport contract
-
-- Route: `POST https://outlook.cloud.microsoft/owa/service.svc?action=<Action>&app=Mail`.
-- Envelope: `{"__type":"<Action>JsonRequest:#Exchange","Header":{"__type":"JsonRequestHeaders:#Exchange","RequestServerVersion":"V2018_01_08"},"Body":{"__type":"<Action>Request:#Exchange",…}}`.
-- If the URL-encoded JSON is ≤ 2,048 characters, it goes in the `X-OWA-UrlPostData` header with an empty body. Otherwise it goes in the body.
-- Required headers: bearer token, `Action`, `X-OWA-ActionSource`, correlation ids, `X-AnchorMailbox: AAD-SMTP:<user>`, `Prefer: IdType="ImmutableId"`. **No cookies or canary.**
-- Response: `Body.ResponseMessages.Items[]` with `ResponseClass` / `ResponseCode`. Some read actions return results directly in `Body`.
-- Error headers: `x-owa-error`, `x-owa-returncode`. Result classes: `Success`, `ClientError`, `ServerError`, `ServerTransientError`, `Throttled`.
-- Writes are never retried after an ambiguous result.
-
-### 4.2 Proven write contracts
-
-The send is a self-send. The mutations ran on four user-named Inbox messages. Every result was verified through Graph.
-
-| Operation | Request essentials | Result |
-|---|---|---|
-| Id mapping | Graph immutable id with `-`→`/`, `_`→`+` is accepted as the OWS `ItemId`. The same applies to `conversationId`. | Accepted on all four, and ids survive moves |
-| Send | `CreateItem`, `MessageDisposition:"SendAndSaveCopy"`, `ComposeOperation:"newMail"` (full body in `research/probes/common.py` `ows_message`) | `NoError`. One copy in Sent Items, as requested |
-| Reply with history (2026-10-04) | `CreateItem` `ReplyToItem` with `NewBodyContent` `BodyType:"HTML"`, `SaveOnly` | The draft quotes the original's HTML (lists, tables, bold kept) and carries its inline images with the same bytes; no `[cid:…]` text. A `Text` body makes Exchange flatten the quoted original instead. |
-| Send an existing draft (2026-10-04) | `SendItem` | **Not supported over OWS:** HTTP 500 `OwaOperationNotSupportedException`; nothing sent. |
-| Send an existing draft (2026-10-04) | `UpdateItem` on the draft, one `SetItemField` (its subject), `MessageDisposition:"SendAndSaveCopy"`, `SavedItemFolderId` Sent Items | `NoError`. That exact draft is sent; the copy lands in Sent Items and the draft leaves Drafts. |
-| Send an existing draft, unchanged and bound to the version read (2026-10-06, self-sends) | `UpdateItem` with **no field updates** (`Updates: []`), the draft's Graph `changeKey` as the `ItemId`'s `ChangeKey`, `ConflictResolution:"NeverOverwrite"`, `SendAndSaveCopy`, `SavedItemFolderId` Sent Items | Current change key: `NoError`, sent, the copy in Sent Items (also with one subject `SetItemField`). Graph's `changeKey` is accepted as the OWS change key. After the draft's subject was changed: `ErrorIrresolvableConflict` with `NeverOverwrite` and with `AutoResolve`, with or without a field update; nothing sent, the draft and its new subject kept. |
-| Clear draft recipients (2026-10-06) | `UpdateItem` / `SaveOnly`, `SetItemField` `message:CcRecipients` (then `message:BccRecipients`) with an empty list | `NoError`; Graph reads both back empty. `DeleteItemField` is not needed. |
-| Read state | `UpdateItem`, `SetItemField`, `FieldURI:"message:IsRead"`, `ConflictResolution:"AlwaysOverwrite"`, `MessageDisposition:"SaveOnly"`, `SuppressReadReceipts:true` | `NoError` |
-| Flag | `UpdateItem`, `FieldURI:"item:Flag"`, `Flag:{__type:"FlagType:#Exchange",FlagStatus:"Flagged"\|"NotFlagged"}` | `NoError` |
-| Categories | `UpdateItem`, `FieldURI:"item:Categories"`, `Categories:[…]` | `NoError` |
-| Conversation read state | `ApplyConversationAction`, `Action:"SetReadState"`, `ContextFolderId` = a distinguished folder | `NoError` |
-| Move | `MoveItem`, `ToFolderId` = `DistinguishedFolderId` (or a folder id), `ReturnNewItemIds:true` | `NoError`. The Graph immutable id is unchanged. |
-| Delete (soft) | `DeleteItem`, `DeleteType:"MoveToDeletedItems"` (or `MoveItem` to `deleteditems`) | `NoError`. The item is in Deleted Items under the same id. |
-
-### 4.3 Other OWS knowledge (for the "no Graph" scenario)
-
-- **Other read actions proven STANDALONE (2026-10-01), not used for ordinary mail data:** `FindFolder`, `GetFolder`, `FindItem`, `FindConversation`, `GetItem` (`Default` shape caps the body at 2,048 characters), `GetConversationItems`, `GetTimeZone`. Production mail-data reads use Graph (§3); inbox-rule reads use OWS `GetInboxRule` (§4.4). `ExecuteSearch` returned 400 with the variants tried. Search uses Graph `$search`; Substrate remains parked (§5).
-- **BROWSER:** `FindConversation` rows carry cross-folder `GlobalItemIds` / `GlobalMessageCount`, and search results page through a server search folder.
-- **Other routes:**
-  - `CreateAttachmentFromLocalFile` uploads draft attachments (BROWSER). It is relevant only if send-with-attachments is added.
-  - The B2 route `/messageservice/ows/…` returned 500 and is not usable.
-  - `/outlookgatewayb2/graphql` is Outlook's internal GraphQL, not Microsoft Graph.
-- **Inbox rules (2026-10-04, read attempts only, nothing changed):** the Graph sign-in (Graph) has no `MailboxSettings.*` scope, so Graph's `messageRules` is out of reach. The Outlook sign-in's Outlook token carries `MailboxSettings.ReadWrite`. Over OWS, `GetInboxRules` (the EWS name) returned `OwaOperationNotSupportedException`; `GetInboxRule` (the name Outlook Web's settings use) exists but returned `NullReferenceException` with an empty request body, because the rule actions use a different envelope (captured 2026-10-04, §4.4).
-
-### 4.4 Inbox rules (captured 2026-10-04 in Outlook on the web; owner's throwaway rule only)
-
-Two captures (2026-10-04). In the first, the owner captured Outlook on the web's rules page (`Settings → Mail → Rules`) while creating, editing, disabling and deleting a throwaway rule ("ZZ connector test rule": From `nobody@example.invalid`, Subject includes `zz-connector-test`, Move to a folder, Mark as read, Stop processing more rules), then reordering two rules and back. In the second, two more throwaway rules: Sent to, Subject includes, Move to Archive; disabled, re-enabled, conditions cleared, moved to a user folder, renamed, deleted. Shapes below are from that capture with every value redacted; the capture itself (it held tokens) was deleted after analysis. **Replayed by the connector on 2026-10-04 (STANDALONE, Outlook token): every action works as captured** (see "Replay" at the end of this section).
-
-**A different envelope from item actions (§4.1–4.2).** The rule actions send the request object itself, with no `…JsonRequest` wrapper and no `Body`:
+| Ids | A Graph immutable id with `-`→`/` and `_`→`+` is the OWS `ItemId`; the same for `conversationId` | Accepted on all, and ids survive moves |
+| New mail | `CreateItem`, `MessageDisposition: "SendAndSaveCopy"`, `ComposeOperation: "newMail"` | Sent; one copy in Sent Items |
+| Draft | `CreateItem`, `SaveOnly`; inline images as `Attachments` of `FileAttachment:#Exchange` (`Content` base64, `ContentType`, `ContentId`, `IsInline`) | Saved in Drafts with its inline attachments (2026-10-07) |
+| Reply with history | `CreateItem` `ReplyToItem` / `ReplyAllToItem` with `NewBodyContent` `BodyType: "HTML"`, `SaveOnly` | The draft quotes the original's HTML (lists, tables, bold) and carries its inline images byte for byte. A `Text` body makes Exchange flatten the quoted original. |
+| Send an existing draft | `SendItem` | **Not supported:** HTTP 500 `OwaOperationNotSupportedException`, nothing sent |
+| Send an existing draft unchanged | `UpdateItem` with `Updates: []`, the draft's Graph `changeKey` as `ChangeKey`, `ConflictResolution: "NeverOverwrite"`, `SendAndSaveCopy`, `SavedItemFolderId` Sent Items | Sent, copy in Sent Items. If the draft changed after it was read: `ErrorIrresolvableConflict` (also with `AutoResolve`), nothing sent, the draft kept. |
+| Clear Cc/Bcc | `UpdateItem` `SaveOnly`, `SetItemField` `message:CcRecipients` / `message:BccRecipients` with an empty list | Both read back empty |
+| Read state | `UpdateItem`, `SetItemField` `message:IsRead`, `ConflictResolution: "AlwaysOverwrite"`, `SaveOnly`, `SuppressReadReceipts: true` | Done |
+| Flag | `SetItemField` `item:Flag`, `Flag: {"__type": "FlagType:#Exchange", "FlagStatus": "Flagged" or "NotFlagged"}` | Done |
+| Categories | `SetItemField` `item:Categories` | Done |
+| Conversation read state | `ApplyConversationAction`, `Action: "SetReadState"`, `ContextFolderId` a distinguished folder | Done (the connector sets it per message instead) |
+| Move | `MoveItem`, `ToFolderId` a `DistinguishedFolderId` or folder id, `ReturnNewItemIds: true` | Done; the Graph immutable id is unchanged |
+| Soft delete | `DeleteItem`, `DeleteType: "MoveToDeletedItems"` | In Deleted Items under the same id |
+
+A message saved through OWS reads back through Graph with a trailing CRLF on its text (2026-10-08).
+
+### 4.3 Reads and other actions
+
+- Proven but unused for ordinary mail data (2026-10-01): `FindFolder`, `GetFolder`, `FindItem`,
+  `FindConversation`, `GetConversationItems`, `GetTimeZone`. `ExecuteSearch` answered 400 for every variant
+  tried.
+- `GetItem` hydrates calendar events: `BaseShape: "Default"`, `BodyType: "Text"` and `AdditionalProperties`
+  `item:Body` and `item:Attachments` return the agenda, attachment metadata and required and optional attendees
+  (2026-10-10). The default shape caps the body at 2,048 characters and says so in `Body.IsTruncated`. The text
+  body is not HTML-entity-decoded.
+- `GetCalendarView` with a UTC `TimeZoneContext` returns a window's events directly in `Body`, without
+  descriptions, and the same events as Graph's `calendarView` (§3.8).
+- `GetOwaUserConfiguration` answers with null legacy signature contents; it is not the modern signature list
+  (§5.2).
+- Browser: `FindConversation` rows carry cross-folder `GlobalItemIds` and `GlobalMessageCount`.
+- **File attachments (Browser, 2026-10-07; untested from our process):** Outlook Web uploads with
+  `POST /owa/service.svc/CreateAttachmentFromLocalFile`. The metadata travels as URL-encoded JSON in
+  `X-OWA-UrlPostData` (`CreateAttachmentJsonRequest:#Exchange` → `CreateAttachmentRequest:#Exchange`:
+  `ParentItemId {Id, ChangeKey}`, `Attachments: [{"__type": "FileAttachment:#Exchange", "Content": "",
+  "ContentType", "IsInline", "Name", "Size"}]`, `IncludeContentIdInResponse: true`, `SliceNumber: 0`,
+  `TotalSlices: 1`); the bytes are the request body. The answer gives `AttachmentId`, `ContentId`,
+  `LastModifiedTime` and `IsInline`.
+- Unusable: the B2 route `/messageservice/ows/…` answered 500. `/outlookgatewayb2/graphql` is Outlook's own
+  GraphQL, not Microsoft Graph.
+
+### 4.4 Inbox rules
+
+Graph's `messageRules` needs `MailboxSettings.*`, which the Graph profile lacks (§2). Over OWS, the EWS name
+`GetInboxRules` answers `OwaOperationNotSupportedException`; Outlook Web's own rule actions work. Captured in
+Outlook on the web on 2026-10-04 (create, edit, disable, enable, reorder and delete throwaway rules), then
+replayed from our process the same day: every action works as captured.
+
+**A different envelope.** Rule actions send the request object itself, without the `…JsonRequest` wrapper and
+`Body`:
 
 ```json
 {"__type": "GetInboxRuleRequest:#Exchange",
- "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": "V2018_01_08",
-            "TimeZoneContext": {"__type": "TimeZoneContext:#Exchange",
-                                "TimeZoneDefinition": {"__type": "TimeZoneDefinitionType:#Exchange", "Id": "<Windows time zone>"}}},
+ "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": "V2018_01_08"},
  "UseServerRulesLoader": true}
 ```
 
-This explains the 2026-10-04 `NullReferenceException`: the connector's `Ows.call` wraps every body in `{"__type": "<Action>JsonRequest", "Header", "Body"}`. The answer is also different: no `ResponseMessages`/`Items`, but `WasSuccessful` (bool), `ErrorCode` (0 on success), `ErrorMessage`, `UserPrompt`, `IsUserError`. Same transport otherwise: `?action=<Action>&app=Mail`, `Action` header, the payload in `X-OWA-UrlPostData` when short (the reorder call, being long, went in the body), `X-AnchorMailbox`, bearer token.
+The answer has no `ResponseMessages`: it carries `WasSuccessful`, `ErrorCode` (0 on success), `ErrorMessage`,
+`UserPrompt` and `IsUserError`. URL, headers and the `X-OWA-UrlPostData` rule are as in §4.1. A
+`TimeZoneContext` in the header is not needed.
 
 | Action | Request (besides `__type` and `Header`) | Answer |
 |---|---|---|
-| `GetInboxRule` | `UseServerRulesLoader: true` | `InboxRuleCollection.InboxRules`: every rule, in priority order (`Priority` 1 = first) |
-| `NewInboxRule` | `InboxRule`: `Name` and only the conditions and actions used, e.g. `From: [{"__type": "PeopleIdentity:#Exchange", "DisplayName", "SmtpAddress", "RoutingType": "SMTP"}]`, `SubjectContainsWords: [..]`, `MoveToFolder: {"DisplayName", "RawIdentity": <folder id>}`, `MarkAsRead: true`, `StopProcessingRules: true` | `InboxRule`: the created rule (all fields, `Identity`, `Priority` 1: a new rule goes first) |
-| `SetInboxRule` | `InboxRule` with `Identity: {"DisplayName": <rule name>, "RawIdentity": <rule id>}` and the fields being set; `Force: false` | `WasSuccessful` … |
-| `DisableInboxRule` / `RemoveInboxRule` | `Identity: {"DisplayName": <rule id>, "RawIdentity": <rule id>}` | `WasSuccessful` … |
-| `SetInboxAndSweepRules` | `EnableDisableInboxRules`: one `{"__type": "EnableDisableInboxRuleRequest:#Exchange", "Header", "Identity", "IsEnabled"}` per rule, **every rule, in the new order** | `WasSuccessful` … |
+| `GetInboxRule` | `UseServerRulesLoader: true` | `InboxRuleCollection.InboxRules`, in priority order (`Priority` 1 first) |
+| `NewInboxRule` | `InboxRule` with `Name` and only the conditions and actions used, for example `From` / `SentTo` as `[{"__type": "PeopleIdentity:#Exchange", "DisplayName", "SmtpAddress", "RoutingType": "SMTP"}]`, `SubjectContainsWords`, `MoveToFolder: {"DisplayName", "RawIdentity": <folder id>}`, `MarkAsRead`, `StopProcessingRules` | The created rule, `Priority` 1 (a new rule goes first) |
+| `SetInboxRule` | `InboxRule` with `Identity: {"DisplayName": <name>, "RawIdentity": <rule id>}` and the fields to set; `Force: false` | `WasSuccessful` |
+| `EnableInboxRule`, `DisableInboxRule`, `RemoveInboxRule` | `Identity` only | `WasSuccessful` |
+| `SetInboxAndSweepRules` | `EnableDisableInboxRules`: one `{"__type": "EnableDisableInboxRuleRequest:#Exchange", "Header", "Identity", "IsEnabled"}` per rule, **every rule, in the new order** | `WasSuccessful`; priorities renumbered |
 
-Observed semantics:
+- **Rule id:** `<mailbox GUID>\<20-digit number>`, stable across edits and renames (a rename sends the new name
+  in `Identity.DisplayName` with the same `RawIdentity`).
+- **Edits are partial:** fields left out are kept; a field sent as `null` is cleared. Outlook always resends
+  `Name`, the sender or recipient condition, `StopProcessingRules` and `Identity`.
+- **Order** has no `Priority` field: it is the order of `SetInboxAndSweepRules`, which also carries each
+  rule's `IsEnabled`.
+- **Folders:** a request's `MoveToFolder.RawIdentity` takes the Graph folder id as is. An answer gives a
+  different form, `<organisation path>/<mailbox GUID>:\<folder name>`, so a rule's target is matched by name.
+- **A rule has 90 fields** (conditions, `ExceptIf…` exceptions, actions, descriptions, `InError`,
+  `SupportedByTask`, `RuleProvider`). Inactive ones are not null but carry sentinel values
+  (2026-10-07): `NullInboxRuleMessageFlag` (`FlaggedForAction`, `RequestedAction` and exceptions),
+  `NullInboxRuleMessageType` (`MessageTypeMatches`), `NullImportance` (`MarkImportance`, `WithImportance`),
+  `NullSensitivity` (`WithSensitivity`), plus `DescriptionTimeFormat` and `DescriptionTimeZone` metadata.
+- **Creation reports a different identity:** the `RawIdentity` in the `NewInboxRule` answer did not match the
+  same rule in a fresh `GetInboxRule` (2026-10-07). Find a created rule by reading the list back.
+- Outlook Web's toggle can send `DisableInboxRule` twice; harmless. It also calls `GetMailboxByIdentity` and
+  `/ows/v1.0/OutlookOptions/MailForwardingNotification`, neither needed for rules.
 
-- **Rule id:** `<mailbox GUID>\<20-digit number>`, stable across edits, including a rename (`SetInboxRule` with a new `Name`, `Identity.DisplayName` set to the new name, the same `RawIdentity`).
-- **Edit is partial:** the `SetInboxRule` request carried `Name`, `From`, `SubjectContainsWords`, `StopProcessingRules` and `Identity`, but not `MoveToFolder` or `MarkAsRead`; the rule read back afterwards still had both. Fields left out are kept. **A field sent as `null` is cleared** (second capture: `SubjectContainsWords: null` and later `SubjectOrBodyContainsWords: null` each removed that condition, read back as null). Outlook always resends `Name`, the sender/recipient condition, `StopProcessingRules` and `Identity`, plus the fields that changed.
-- **Order:** reordering sends `SetInboxAndSweepRules` with all rules in the new order; there is no `Priority` field in the request. It also carries each rule's `IsEnabled`, so the same call can enable or disable rules.
-- **Enable:** `EnableInboxRule`, the same shape as `DisableInboxRule` (`Identity` only); read back `Enabled: true` (second capture). Outlook's toggle sometimes sends `DisableInboxRule` twice in a row (both captures); harmless, the rule stays disabled.
-- **Folders:** in requests, `MoveToFolder.RawIdentity` is a base64 folder id starting `AQMk` (116–120 characters; Archive and a user folder), the same family as the regular ids `$search` returns (H12); **the Graph folder id that `list_folders` returns is accepted as is** (replay 2026-10-04; in this mailbox all 18 folder ids are `AQMk…` with no `-` or `_`, so their OWS form (§4.2) is the same string and was not a separate case). In answers, `MoveToFolder.RawIdentity` is a different form: `<organisation path>/<mailbox GUID>:\<folder name>` (136–140 characters, the folder's own name only, e.g. `:\Archive`), so reading a rule's target folder means matching by name (ambiguous when two folders share a name) or by `DisplayName`.
-- **Other conditions and flags (second capture):** `SentTo` has the same `PeopleIdentity` shape as `From` (read back with `Address` and `AddressOrigin` added). `NewInboxRule` from the UI also carried `DisplayAlert: "Default"` or `PlaySound: "Default"` depending on the options shown; neither is needed.
-- **A rule has 90 fields** (conditions, `ExceptIf…` exceptions, actions, `Description` texts, `InError`, `SupportedByTask`, `RuleProvider`). The owner's 8 rules use only `MoveToFolder` (8), `SentTo` (6), `SubjectContainsWords` (5), `From` (1), `SubjectOrBodyContainsWords` (1), all with `StopProcessingRules`, all enabled, none in error.
-- Outlook also calls `GetMailboxByIdentity` after each change and `/ows/v1.0/OutlookOptions/MailForwardingNotification` on the rules page; neither is needed to manage rules.
+### 4.5 What Outlook keeps of saved HTML
 
-**Replay (2026-10-04, STANDALONE, `Ows.call_request`; one throwaway rule, no other rule touched).** Same URL and headers as the item actions, bearer Outlook token, no cookies.
+Live, 2026-10-07 and 2026-10-13, synthetic messages sent to the owner's mailbox and an authorized personal
+address; read back through Graph and inspected in Outlook Web, Gmail and (by the owner) Outlook desktop:
 
-- `GetInboxRule` with `UseServerRulesLoader: true`: `WasSuccessful: true`, `ErrorCode: 0`; answer keys `ErrorCode`, `ErrorMessage`, `Header`, `InboxRuleCollection`, `IsUserError`, `UserPrompt`, `WasSuccessful`. 8 rules, 90 fields each (`Identity` is `{DisplayName, RawIdentity}`; `Enabled`, `Priority`). **`TimeZoneContext` is not needed:** without it, the same 8 rules in the same order.
-- `NewInboxRule` (`Name`, `SentTo` one `PeopleIdentity`, `SubjectContainsWords`, `MoveToFolder: {DisplayName, RawIdentity: <Graph folder id of Archive>}`, `StopProcessingRules: true`; no `__type` on `InboxRule`): success in 2.3 s; the answer also carries `InboxRule`. Read back: 9 rules, the new one `Priority` 1, enabled, its target folder returned as `…:\<folder name>`.
-- `SetInboxRule` (`Identity`, `Name`, `SentTo`, `StopProcessingRules`, `SubjectContainsWords: null`, `SubjectOrBodyContainsWords: [..]`, `Force: false`): the subject condition cleared, the subject-or-body one set; `MoveToFolder`, `StopProcessingRules` and `SentTo` unchanged.
-- `SetInboxRule` renaming it (`Identity.DisplayName` = new name, same `RawIdentity`): renamed, **id unchanged**, other fields kept.
-- `DisableInboxRule`, then `EnableInboxRule` (`Identity` only): read back `Enabled` false, then true.
-- `SetInboxAndSweepRules` with all 9 rules (each `{__type: EnableDisableInboxRuleRequest, Header, Identity, IsEnabled}`, payload in the body), the test rule last, then first: 0.7–0.8 s each; read back in exactly that order, `Priority` renumbered 1…9, every other rule's relative order and `Enabled` kept.
-- `RemoveInboxRule`: gone. The final list equals the starting one: 8 rules, same ids, order, priorities and enabled states.
-- Every write was sent once and answered `WasSuccessful: true`; no unclear answer, nothing retried.
+- A fragment and the equivalent full document saved to the same 548-character HTML.
+- Unclosed paragraphs, lists and tables were repaired; all text kept.
+- Inline styles, `<head>` style rules and classes persisted; Outlook Web's dark theme changes displayed colors.
+- A remote HTTPS image kept its URL and loaded in both clients (Gmail through its image proxy); no attachment
+  was made.
+- Tables, lists, links, accented and Japanese text survived draft, Sent Items and received copies.
+- An external copy gained the organization's disclaimer, absent from the work-mailbox copies: a transport
+  footer.
+- **Unfinished markup** (2026-10-13, one synthetic draft never sent): a body ending in an unfinished `img` tag
+  with an `onerror` attribute, followed by a signature block. Outlook dropped the `onerror` attribute and the
+  script text, but the unfinished tag absorbed the signature's opening `div`: its `id` and
+  `data-signature-name` moved onto the `img`, and the signature's closing tag became an empty `div`.
+- A signature image whose bytes were a valid PNG rendered and saved in Outlook ("Save as Picture",
+  2026-10-10); an earlier red X came from a malformed 26-byte PNG, not from a missing image.
 
-### 4.5 Connector live validation (2026-10-07)
+### 4.6 Message size limits
 
-Owner-authorized dedicated test messages, self-sends and two personal recipient addresses. The
-production MCP tools and connector service/transport were used with the app's encrypted token cache;
-no browser credentials or plaintext probe-token cache. Live harness output recorded counts, statuses, field names
-and verification booleans only. Private recovery ids were kept in an encrypted, ignored local file.
+Live, 2026-10-15: synthetic self-drafts, each carrying non-inline `FileAttachment:#Exchange` files of random
+bytes (`IsInline: false`), saved through the connector's own OWS client. Two of them were sent to the
+owner's address.
 
-**W7 — HTML and replies.**
+- **Request size.** One OWS request body holds about 30,000,000 bytes. A `CreateItem` carrying a 21.3 MiB
+  file (about 29.8 MB of base64) saved. One carrying 21.5 MiB (about 30.1 MB) failed with **HTTP 500**,
+  `Microsoft.AspNetCore.Http.BadHttpRequestException` or no error code at all, and saved nothing (checked
+  through Graph). The 500 looks like an unknown outcome, but nothing was saved: the request was refused
+  before Exchange read it. Larger sizes (23, 30 MiB) failed the same way.
+- **Adding files to a draft.** `CreateAttachment` with `ParentItemId {Id, ChangeKey}` and `Attachments: [...]`
+  (the same `FileAttachment` shape, `Content` base64) adds a file to an existing draft and returns the new
+  `RootItemChangeKey` in `Attachments[0].AttachmentId`. The same request-size cap applies to each call.
+- **Stored size.** Adding 20 MiB to a 21.3 MiB draft failed with `ErrorMessageSizeExceeded` ("The message
+  exceeds the maximum supported size.", "Cannot save changes made to an item to store."). The draft kept its
+  earlier state. Adding 14 MiB (35.3 MiB in total) saved. Graph's stored size (`Integer 0x0E08`) matched the
+  file sizes.
+- **Send.** Sending the 35.3 MiB draft (`UpdateItem` with `SendAndSaveCopy`) was accepted at once. Two seconds
+  later a non-delivery report reached the Inbox: too large, "The limit is 35 MB. Your message is 36 MB." A
+  copy stayed in Sent Items. The send limit is therefore learned from a later NDR, not from the send call.
+  A 1 MiB attachment sent and arrived normally.
+- **MailTips.** Graph `POST /me/getMailTips` with `MailTipsOptions: "maxMessageSize"` for the user's own
+  address returned 37,748,736 bytes (36 MiB), using the Graph mail profile. That figure matches the
+  stored-size limit rather than the 35 MB that the NDR states.
 
-- HTML fragment draft creation and body editing passed mandatory Graph read-back without findings.
-  Tables, lists, links, line breaks, accented and Japanese text were retained in the saved draft,
-  Sent Items and received self-copy. Existing-draft sends returned `sent`, without reconstruction.
-- A dedicated inline-image fixture was saved through `Ows.call("CreateItem", ...)`, using the
-  production new-message mapping plus an `Attachments` array containing a synthetic PNG
-  `FileAttachment:#Exchange` (`Content`, `ContentType`, `ContentId`, `IsInline`). Graph confirmed one
-  inline attachment and the expected body CID. This was fixture setup, not a newly implemented
-  attachment-upload tool. Recipient-only changes retained the inline attachment without findings.
-- Text reply and HTML reply-all drafts through `create_draft` both returned `verified: true` and
-  `history_intact: true`. The connector's existing checks confirmed quoted structure and inline-image
-  bytes. Default reply recipients selected the original's personal To recipient; reply-all also kept
-  its personal Cc recipient and omitted the sending account. The work account was explicitly added
-  back for self-copy inspection before both drafts were sent.
-- All four sent copies and all four received self-copies retained tables and lists. The inline
-  original and both replies in each folder retained matching CIDs and PNG bytes identical to the
-  fixture. The text reply retained a literal angle-bracket expression; the HTML reply retained its
-  own ordered list in addition to the quoted history.
-- The owner subsequently confirmed on 2026-10-07 that the received test emails looked correct and
-  HTML rendered properly. Individual recipient/client combinations were not specified. Automated
-  recipient-side inspection was unavailable: the Gmail connector was unauthenticated and browser
-  automation failed to initialize. Fragment/full-document comparisons, malformed accepted HTML,
-  CSS and remote images remain deferred research. No claim of pixel-for-pixel rendering equivalence
-  is made.
+## 5. Native signatures (Outlook Cloud Settings)
 
-**W8 — signature discovery.** Minimal text, repeated minimal HTML and empty HTML drafts returned
-only the submitted text or an empty body, with no extra signature text or images. The empty draft
-was saved and correctly flagged as empty. Automatic signature extraction through server draft
-creation was not demonstrated. The subsequent owner-supplied Web capture establishes that signature
-HTML and images were supplied by the compose client (§4.6). It also exposes the corporate template
-source and add-in insertion code. Native signature list/default/content retrieval was subsequently
-proved with app-owned authentication (§4.7). Automatic draft integration remains unimplemented.
+Graph has no documented signature API
+([mailboxSettings](https://learn.microsoft.com/en-us/graph/api/resources/mailboxsettings?view=graph-rest-1.0),
+[roaming signatures](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater)),
+so signatures use Outlook Cloud Settings with the Outlook profile. No extra scopes or vendor tokens are needed.
 
-**W9 — real rule shapes expose two implementation blockers.**
+### 5.1 The signature block in a draft
 
-- `list_rules` marked all eight baseline rules read-only. An authorized throwaway rule with an
-  invalid sender, unique subject marker, Archive destination and stop-processing action was created
-  once and appeared in fresh read-back with the intended conditions and destination.
-- OWS supplies description metadata (`DescriptionTimeFormat`, `DescriptionTimeZone`) and inactive
-  enum strings: `NullInboxRuleMessageFlag` for `FlaggedForAction`, `RequestedAction` and their
-  `ExceptIf` counterparts; `NullInboxRuleMessageType` for `MessageTypeMatches` and its exception;
-  `NullImportance` for `MarkImportance`, `WithImportance` and its exception; `NullSensitivity` for
-  `WithSensitivity` and its exception. The adapter currently treats all 13 fields as unsupported
-  behavior. The throwaway rule therefore became read-only too, preventing its tool update lifecycle.
-- The `NewInboxRule` answer's `RawIdentity` differed from the same rule's `GetInboxRule` identity.
-  `create_rule` retained the creation identity, could not find it in read-back, and returned `failed`
-  even though the rule existed. The write was not retried. Creation needs reconciliation against
-  fresh list identity when the reported identity does not match, not only when no id is returned.
-- Replaying the now-stale creation confirmation was rejected without another write. Reordering the
-  unsupported collection was refused. Complete public-tool edit/clear, disable/enable, delete and
-  successful reorder validation remains pending the fixes.
-- Cleanup removed only the newly created rule through `OwsRules.delete_rule`. Fresh read-back
-  confirmed the original eight rules' ids, relative order, priorities, enabled states and full
-  revisions exactly matched the starting snapshot. Existing rules were never rewritten.
+Source, from the Outlook Web bundles of 2026-10-07 (minified names change between releases; the constants
+below are what matter):
 
-**H21 — conversation expansion beyond 100 messages.** 101 unsent reply drafts plus two original
-copies formed a 103-message conversation. `set_read_state` through the MCP surface returned
-`done: 103` for unread and then read, with zero ordinary detailed results and one compact-results
-note each time. Independent Graph summaries confirmed all 103 states, and initial states were
-restored. No truncation occurred; the 1,000-message boundary remains synthetic coverage.
+- The block is a client convention: an element with id `Signature`, selector `#Signature` and the attribute
+  `data-signature-name`, which the editor reads into its model and writes back. Outlook Web's own drafts
+  carried `<div id="Signature">`.
+- The current signature is the **first** `Signature` container. Inserting a signature replaces that block in
+  place; without one it goes at the start of the body for new mail and replies, else at the cursor, wrapped as
+  `<div id='Signature'><div>{html}</div></div>`. Plain-text bodies get it after two newlines.
+- A `Signature` container left with one empty paragraph loses its id.
+- Received HTML has its ids prefixed `x_` (`x_Signature`). In a reply, the prefix is stripped only before the
+  reply header (`divRplyFwdMsg`), so the quoted sender's signature never matches.
+- `<div id=appendonsend></div>` is a separate placeholder for content appended on send.
 
-**H17 — controlled partial failures with real writes.** On 60 dedicated drafts (three chunks), a
-locally injected pre-send error in chunk two yielded `done: 40, failed: 20` with default continuation.
-With `continue_on_error=false`, it yielded `done: 20, failed: 40`, including 20 `not sent`; the third
-chunk was never attempted. Fresh Graph states matched both results. A completed real 20-item write
-followed by injected response loss and failed read-back yielded `unknown: 20`; an independent read
-confirmed the changes. All initial states were restored. These are injected failures, not evidence
-of natural Microsoft outages; flag/move/delete failure variants remain synthetic coverage.
+### 5.2 Reads
 
-**W9 — public-tool lifecycle after the fixes (2026-10-07, later).** With the inactive values and
-description metadata treated as neutral and creation reconciled against read-back, `list_rules`
-reported all nine current rules as supported (none read-only). One throwaway rule (invalid sender
-and a unique subject marker, so it could never fire; Archive; stop processing) went through the
-`Rules` service with a proposal and confirmation for each write: create (id found in read-back),
-rename (conditions and folder kept), add then clear a subject-or-body condition (other conditions
-kept), disable, enable, reorder to last and back, and delete. Every step returned `done`, verified by
-fresh read-back. Afterwards the original rules' ids, order, enabled states and full revisions matched
-the starting snapshot exactly.
+`GET /ows/v1/OutlookCloudSettings/settings/` with headers `x-outlook-client: owa` and
+`Accept: application/json`. Live, 2026-10-07:
 
-### 4.6 Outlook Web signature capture (2026-10-07)
-
-**Scope and confidence.** Offline review of the owner-supplied HAR: 105 entries, 96 captured response
-bodies, 37 requests with body text and eight with `X-OWA-UrlPostData`. Request start times span
-09:05:00–09:06:47 America/Sao_Paulo (106.407 seconds). No captured credential was replayed and no
-mailbox changes were made during this analysis. Only schema, aggregate counts and conclusions are
-recorded here. Entry numbers below are zero-based positions in the supplied capture.
-
-The owner reports also adding, editing and deleting a signature. Those actions are owner-reported;
-this HAR does not expose an identifiable native signature CRUD sequence. It contains compose,
-add-in settings, template retrieval, inline uploads and draft save traffic. This limits what can be
-claimed about native settings endpoints, without contradicting the owner's actions.
-
-**Main finding — client-supplied signature content.** The initial `CreateItem` request already
-contains HTML with `id="Signature"`; OWS does not generate that block in its response. Later,
-`UpdateItem` submits a signature block with four `cid:` images after four successful inline uploads.
-This directly establishes client-supplied content for the captured draft. The loaded officeatwork
-Mail Signature add-in source contains the rendering and Office.js insertion path described below.
-Attributing every initial text-only signature byte to that add-in, or establishing native signature
-storage, would require additional evidence.
-
-**Useful network contracts (BROWSER, requests and responses):**
-
-| Entry | Operation | Observed result and use |
+| Purpose | Request | Result |
 |---|---|---|
-| 8 | `GET /ows/v1/OutlookCloudSettings/settings/` | HTTP 200, empty array; no signature content in this response. |
-| 29 | OWS `CreateItem`, `SaveOnly` | Submitted HTML already contains a text-only signature block; saved successfully. |
-| 32, 87, 102 | OWS `GetItem` | Draft read-back before/after inline uploads and body save; final item is still a draft with four inline attachments. |
-| 33 | Outlook beta `translateExchangeIds` | HTTP 200; the compose/add-in flow translates an item identifier. |
-| 50, 64 | `LoadExtensionCustomProperties` | Successful, empty custom-property objects. |
-| 56, 59 | `PATCH /api/beta/users/{user}/mailFolders/Inbox/UserConfigurations/{configuration}` | HTTP 200; `DictionaryData` is serialized XML, not signature HTML. See settings distinction below. |
-| 58 | OWS `SanitizeHtml` | Input HTML 2,471 characters; response is a JSON string containing 1,755 characters of HTML. No standalone sanitization contract tested. |
-| 61, 66, 70, 73 | `POST /owa/service.svc/CreateAttachmentFromLocalFile` | Four HTTP 200 / `NoError` uploads; inline attachment IDs and content IDs returned. |
-| 67 | Vendor `GET /api/appSettings/mailSignature` | HTTP 200; corporate signature configuration, library references, licensing and language settings. |
-| 74 | Graph `GET /v1.0/me` | HTTP 200; profile properties available for template substitution. |
-| 76 | Graph `POST /v1.0/me/getMemberGroups` | HTTP 200; request uses `securityEnabledOnly: false`. Group-based selection is present in the client source; this request alone does not prove its final choice. |
-| 82 | Graph `GET /v1.0/drives/{drive}/list/items` | `$expand=fields,driveItem`, `$filter=fields/DocIcon eq 'ofawmsig'`; one template package returned. |
-| 88 | SharePoint package download | HTTP 200; ZIP-format `.ofawmsig`, 16,815 bytes. |
-| 89 | OWS `SaveExtensionSettings` | Successful; selected template reference persisted in add-in roaming settings. |
-| 90, 91 | Graph `GET /v1.0/shares/{encoded-url}/driveItem?$expand=listItem` | Two image file lookups. The capture uses a doubled slash after `v1.0`; that is observed spelling, not a required contract. |
-| 96, 97 | SharePoint image downloads | Two complete PNG response bodies, 10,836 and 206,953 bytes. |
-| 101 | OWS `UpdateItem`, `SaveOnly` | HTML containing two tables and four CID images saved successfully. No send operation captured. |
+| Names and defaults | `?settingname=roaming_signature_list,roaming_new_signature,roaming_reply_signature` | Three settings: the list `type: BlobArray` (comma-joined names), the new-message and reply defaults `type: String` |
+| Contents | `?settingname={URL-encoded name}`, header `x-islargesetting: true` | One entry per format by `secondaryKey`: `htm`, `txt` and sometimes `rtf` |
 
-**Organization rollout (owner's mailbox, read 2026-10-07).** Three internal announcements describe
-the add-in: a standardized global signature from 2026-07-15, "applied automatically across all
-company email platforms", with contents generated from each employee's HR profile (myGPS);
-per-user display options (phone toggles, professional credentials, a NAM customer-survey toggle)
-set in the Mail Signature add-in panel on the "Corporate Signature RemainCo" template; and, from
-2026-08-17, a simplified signature (name, title, logo) for internal-only mail versus the full one
-for external mail, plus an Arial 11 pt standard font. The add-in is therefore recipient-dependent
-and has no single stored equivalent. The owner confirmed that drafts created by the connector are
-not modified by the add-in or by Outlook. The connector uses native signatures only (roadmap W8).
+- Entries carry `name`, `value`, `type`, `source`, `scope` (the account), `metadata`, `parentSetting`,
+  `Timestamp`, `itemClass`, `id` and `secondaryKey`; large ones also `nameBase64Encoded`.
+- Repeated reads returned identical values and timestamps.
+- A listed name can return `[]`: a leftover reference after a deletion. Resolve contents before trusting a
+  name.
+- Adding a signature does not change the defaults.
+- An image in a signature is stored inline as a `data:image/png;base64,…` source (61,483-byte PNG in one test).
+- Variants that failed: a name in the path (`/settings/{name}`) answered 404; `parentsetting=…` answered 403.
 
-**Corporate template pipeline.** The vendor settings response contains three SharePoint library
-definitions and 15 content-language entries. The downloaded package contains `template.njk`
-(7,559 bytes), `metadata.json` (4,385 bytes), `images.json` (671 bytes), and five embedded PNGs.
-This is a Nunjucks template with configuration and assets, rather than a ready-to-send HTML file.
-The client source constructs a context from sender/user profile, language, audience, compose type,
-item type, coercion type and configurable form fields before rendering it.
+### 5.3 Writes and lifecycle
 
-The template references `user.givenName`, `surname`, `jobTitle`, `companyName`, `streetAddress`,
-`postalCode`, `city`, `country`, `businessPhones[0]`, `mobilePhone` and `mail`. It uses
-`field(...).value`, `image(...).cid`, `mail.isPlainText`, filters such as `removeEmpty`, `join`,
-`lower` and `trim`, and the custom `loadImageFileFromSharePoint(...)` helper for additional images.
-There are country-dependent branches and optional phone/image fields. URLs, field values and
-personal data are deliberately omitted from this record.
-
-The captured metadata has ten form elements: language and audience pickers, switches, single-line
-text fields and a multi-line text field. Its automatic-insertion switches are:
-
-| Event | Configured |
-|---|---|
-| New message, forward, reply | `true` |
-| Recipients changed, sender changed | `true` |
-| New appointment, message send | `false` |
-
-These are template policy values, not independently exercised event tests. They explain why a
-static signature snapshot cannot reproduce all vendor selection/rendering behavior.
-
-**Insertion calls (SOURCE).** The loaded vendor code wraps
-`Office.context.mailbox.item.addFileAttachmentFromBase64Async(..., {isInline: true}, ...)` and
-`Office.context.mailbox.item.body.setSignatureAsync(html, {coercionType: ...}, ...)`; the insertion
-path processes HTML image assets before invoking the signature setter. Microsoft's
-[`Body.setSignatureAsync` documentation](https://learn.microsoft.com/en-us/javascript/api/outlook/office.body?view=outlook-js-preview#outlook-office-body-setsignatureasync-member(1))
-describes this as a compose API that adds or replaces a signature in the item body. It is not a
-mailbox signature-settings read API. The capture shows the resulting upload/save contracts, but
-does not include an Office.js callback/event trace proving each source function executed.
-
-**Settings distinction.** `SaveExtensionSettings.request.Settings` is serialized JSON. Its
-`ofaw.user.signatureFileReference` value requires two further JSON decodes to obtain
-`{sourceId, itemIdentifier:{type, name, driveId, driveItemId, webUrl}}`. This is a selected template
-pointer, not the rendered signature HTML. It may offer a discovery route, but reading it with the
-connector's own token has not been tested.
-
-The two `UserConfigurations` PATCH requests carry `<UserConfiguration><Info .../><Data><e .../>`
-XML in `DictionaryData`. The `18-ExtensionSettings` entry decodes to Sales add-in preference keys:
-`SPTenantId`, `SPUserId`, `isEURegionKey`, `region`, `SPEnvironmentType`, `SPDefaultLocation`.
-Responses also contain `18-OLPrefsVersion`. Neither write stores signature HTML; they must not be
-counted as native signature creation/edit/deletion. Likewise, `SaveExtensionCustomProperties`
-stores `SalesProductivityExternalContacts`, unrelated to the signature template reference.
-
-**Inline upload contract.** The request metadata resides in URL-encoded JSON in
-`X-OWA-UrlPostData`; the request body holds image bytes. The envelope types are
-`CreateAttachmentJsonRequest:#Exchange` → `CreateAttachmentRequest:#Exchange`. Relevant fields are
-`ParentItemId:{Id,ChangeKey}`, `Attachments:[{__type:"FileAttachment:#Exchange", Content:"",
-ContentType:"image/png", IsInline:true, Name, Size, ...}]`, `IncludeContentIdInResponse:true`,
-`SliceNumber:0`, `TotalSlices:1`, and cancellation/IRM flags. Each response attachment includes
-`AttachmentId`, `ContentId`, `LastModifiedTime`, `IsInline`; the returned content IDs match the
-four references in the subsequent saved HTML. No independent app-owned upload replay was done.
-
-**Extraction and read-back trap.** The HAR's upload bodies were decoded lossily as UTF-8, so they
-cannot supply exact original PNG bytes on their own. Complete binary bodies were recoverable from
-the package and SharePoint downloads. Each of the four uploaded assets matched a unique recovered
-PNG by size (10,836, 1,751, 1,000 and 997 bytes), and decoding that PNG as UTF-8 with replacement
-exactly reproduced the HAR upload text. This is strong correlation, not a hash comparison against
-the unavailable original upload bytes.
-
-The final `GetItem.NormalizedBody` instead contains four `data:image/gif;base64,...` sources, each
-decoding to a 42-byte placeholder. Those are not the signature PNGs. Preserve submitted CID HTML
-and retrieve actual attachments; do not treat this display-oriented normalized body as an asset
-export. The private local extraction contains only the saved signature block (1,741 characters),
-four recovered PNGs, the original template and reduced metadata; CID references were replaced with
-local image paths. It is ignored by Git. No credentials, profile JSON or full message was exported.
-
-**Authentication limits.** A successful vendor-resource token response reports scope names
-`Files.Read.All`, `Sites.Read.All`, `User.Read`, but its audience is the vendor resource, not Graph.
-This does not demonstrate those scopes for the connector's clients or prove that the token was
-used for the captured Graph requests. A separate Graph `Files.ReadWrite.AppFolder` request fails
-with `invalid_grant` / `AADSTS65001`; the other template and image reads still succeeded in this
-browser session. These facts are not grounds to copy vendor tokens or add broad permissions.
-
-**Follow-up:** §4.7 supersedes the native retrieval gap: app-owned list/default/content reads now
-work. App-owned Graph reads also retrieved the first capture's Web-created draft signature and four
-inline PNGs (10,836, 1,751, 1,000 and 997 bytes), with every body CID backed by an attachment.
-Corporate template-settings access and policy execution remain untested. W9's public-rule blockers
-are unchanged: this HAR contains no inbox-rule operations. Calendar authentication is unaddressed.
-
-**How Outlook Web finds and replaces the signature in a draft (2026-10-07).** Offline, read-only
-review of the Outlook Web JavaScript bundles in the second owner-supplied capture (247 scripts with
-bodies). Minified names are capture-specific and can change with any Outlook Web release; the
-string constants and behavior below are what matter.
-
-- **The container is client convention, not a server feature.** A shared module defines the id
-  `Signature`, the selector `#Signature` and the attribute `data-signature-name`. The editor's
-  HTML parser reads `data-signature-name` from a container into its model (`signatureName`), and the
-  serializer writes it back, so the name of the inserted signature travels with the block. The
-  captured drafts show `<div id="Signature" class="elementToProof">` (initial `CreateItem`) and
-  `<div id="Signature">` (later `UpdateItem`); the corporate template added its own inner
-  `<span id="LGEmailSignatureBlock">`. OWS stores whatever HTML it is given (§4.6 above).
-- **Which signature is "current":** the compose code walks the body model and takes the **first**
-  `FormatContainer` block whose id is `Signature`, reading its `signatureName`.
-- **Replace or insert (add-in path, captured in full):** the signature HTML is wrapped as
-  `<div id='Signature'><div>{html}</div></div>`; the editor queries `#Signature`. If one exists, the
-  **first match is replaced in place** (the whole node); otherwise the block is inserted with a
-  per-account prefix, at the start of the body for new mail and smart responses, else at the cursor.
-  Plain-text bodies get the signature spliced in after two newlines. A newer path
-  (`insertSignatureWithContentModel`, `insertSignatureForAddinWithContentModel`) lives in a lazily
-  loaded "EditorInsertActions" chunk that is **not in either capture**; its exact rules are
-  unconfirmed, but it is called with the same `Signature` id.
-- **An emptied signature stops being one.** The editor's model fix-up hook takes the **last**
-  `Signature` container and, if it holds nothing but one empty paragraph, removes its id.
-- **Quoted history does not collide.** Exchange prefixes element ids in received HTML with `x_`
-  (`x_Signature`). When loading a reply/forward, the parser strips that prefix only for elements
-  before the reply header (`divRplyFwdMsg`); everything after it keeps `x_`. So the original
-  sender's signature never matches `#Signature`, and only the block in the new part is replaced.
-- **Other markers seen:** `<div id=appendonsend></div>` is a separate placeholder for content the
-  client appends on send (organization disclaimers/add-ins), not the signature.
-
-**Implications for W8 (connector-inserted signatures).** Use the same convention so Outlook Web
-recognizes the block: one `<div id="Signature" data-signature-name="{name}">…</div>` in the new
-part of the body, above any `divRplyFwdMsg` header. Signature selection and placement happen when a
-draft is created; a changed draft is a full replacement, so the desired signature is composed into
-that replacement. A later change of the default signature in settings does not touch existing drafts;
-`data-signature-name` tells which signature a draft carries if a replacement is ever wanted.
-
-### 4.7 Native roaming-signature discovery and standalone reads (2026-10-07)
-
-**Discovery (SOURCE).** The second owner-supplied HAR contains 343 entries, including native Outlook
-settings and compose JavaScript. `owa.93987.m.5c7464db.js` defines `signaturehtml`, `signaturetxt`,
-`roaming_signature_list`, `roaming_new_signature` and `roaming_reply_signature`. Its save code uses
-`RoamingSetting` entries scoped to the account, HTML/text secondary keys `htm`/`txt`, and
-`parentSetting: "roaming_signature_list"`. The list is written as comma-joined names (`BlobArray`),
-while the two defaults are separate `String` values. Worker source uses the `x-islargesetting`
-header for large signature settings. These are code observations; the HAR does not contain a full
-native create/edit/delete request lifecycle.
-
-Compose source in `owa.MailComposeActions.m.2ceb7db6.js` selects `defaultSignatureName` for new mail
-and `defaultReplySignatureName` for replies/forwards, then looks up the selected entry in the roaming
-signature map. The older `UserOptions.SignatureHtml`/`SignatureText` path is separate. A standalone
-`GetOwaUserConfiguration` call succeeds with our OWS sign-in but returns null legacy signature
-contents; that does not mean the modern roaming-signature list is empty. One attempted
-`GetUserConfiguration` JSON envelope returned HTTP 400; no general lack of configuration-read
-access is inferred from that malformed/unsupported variant.
-
-**Public API boundary (checked 2026-10-07):** consult Microsoft's
-[roaming-signature guidance](https://learn.microsoft.com/en-us/powershell/module/exchangepowershell/set-organizationconfig?view=exchange-ps#-postponeroamingsignaturesuntillater),
-[mailboxSettings](https://learn.microsoft.com/en-us/graph/api/resources/mailboxsettings?view=graph-rest-1.0)
-and [beta userSettings](https://learn.microsoft.com/en-us/graph/api/resources/usersettings?view=graph-rest-beta)
-for Graph's current signature-management gap. This is why the native signature work uses Cloud
-Settings. It does not prove that every undocumented Graph route fails; recheck for a documented
-equivalent before expanding the private implementation.
-
-**Proven reads (STANDALONE).** All requests below used the connector's existing encrypted, app-owned
-`outlook` profile (One Outlook Web → Outlook resource), no browser credentials. Reads were sequential
-and did not change mail or signature settings. No extra scopes, vendor authentication or user file
-upload was required. Responses and private snapshots remain outside Git.
-
-| Purpose | Proven request | Result |
-|---|---|---|
-| List and default pointers | `GET /ows/v1/OutlookCloudSettings/settings/?settingname=roaming_signature_list,roaming_new_signature,roaming_reply_signature` | HTTP 200, three settings. List `type: BlobArray`; default settings `type: String`. Every returned `scope` matched the bound account. |
-| Signature contents | Same endpoint, URL-encoded `settingname={name}`, header `x-islargesetting: true` | HTTP 200, per-format entries identified by `secondaryKey`. Default returned `htm`, `rtf`, `txt`; a newly created image signature returned `htm`, `txt`. |
-| Freshness verification | Repeat the list/default GET after retrieving contents | Settings values and timestamps unchanged in the tested read sequence. |
-
-Headers used were `x-outlook-client: owa` and `Accept: application/json`, plus the large-setting flag
-for content reads. No claim is made that all are mandatory. Native entries include `name`, `value`,
-`type`, `source`, `scope`, `metadata`, `parentSetting`, `Timestamp`, `itemClass`, `id`, timestamps and
-`secondaryKey`; large responses also contain `nameBase64Encoded`. For this probe the returned names
-matched the list entries directly. Do not infer an extra decoding step from that flag without
-testing its semantics. Request names must be URL-encoded rather than interpolated into query text.
-
-**Current-default retrieval.** The first read returned two list names. Both the new-message and
-reply/forward pointers selected the same readable entry, with 1,629 characters of HTML, 152 of text
-and an RTF value. That HTML contains no image tags. A fresh list/default read after content retrieval
-returned exactly the same values and `Timestamp` fields. A review-only HTML snapshot was saved
-privately; application composition must perform fresh reads, not use that file as a cache.
-
-**Empty list reference.** The other initial list name returned HTTP 200 with `[]`, both on an
-individual content query and a combined name query. The owner confirmed the native settings UI
-showed one signature. This supports a leftover list reference, but does not establish all deletion
-or tombstone semantics. A reliable list operation must resolve contents and report missing entries;
-a raw name is not proof that a retrievable signature exists. The selected default was readable.
-
-**New signature with image, observed live.** The owner then created a new signature and added an
-image in Outlook. A fresh list read contained the existing and new signatures and no longer contained
-the previous empty reference. Both entries were readable. Both default pointers still selected the
-existing signature: adding a signature did not automatically change the defaults in this test.
-The new entry returned 82,274 characters of HTML, 32 of text and one `<img>` with an embedded
-`data:image/png;base64,...` source. Decoding it produced a 61,483-byte PNG with a valid PNG header.
-Its complete HTML and image were recovered privately through our authentication, without a new HAR.
-No native signature send/recipient rendering or automatic application insertion was tested here.
-
-**Unsuccessful variants.** A content-name URL path (`/settings/{name}`) returned HTTP 404; use the
-proven query route. A guessed `parentsetting=roaming_signature_list` query returned HTTP 403 and
-does not prove inability to read children: exact-name large-setting reads work. No guessed write
-request was sent during this read-only discovery phase, and no unsuccessful authentication/client-scope
-pair was retried. The subsequent authorized lifecycle writes are recorded in §4.8.
-
-**Owner-selected W8 design.** Read the current native configuration automatically, expose reliable
-listing/content retrieval, and resolve the correct default per compose operation. Check account
-scope and completeness; respect an explicitly empty default. If a configured default is missing,
-the read fails, or its revision changes during retrieval, report it rather than silently using an
-old snapshot or another signature. HTML image data must become actual inline assets/CIDs during
-composition. Signature selection is done before saving the draft; send still sends that saved draft
-unchanged. API discovery is proved; public read tools and automatic integration are not implemented.
-
-**Separate corporate add-in.** These are the native Outlook defaults. The officeatwork add-in can
-subsequently replace/render a signature using sender, recipient, language and policy context (§4.6).
-Reading native defaults does not reproduce that additional logic. Graph draft extraction is now
-proved, but is a snapshot rather than an always-current corporate-default resolver.
-
-### 4.8 Native signature CRUD and default lifecycle (2026-10-07)
-
-**Scope (STANDALONE).** The owner explicitly requested the remaining live tests. All operations used
-the connector's existing encrypted, bound-account `outlook` profile against Outlook Cloud Settings,
-with no browser credentials or new scopes. Only uniquely named synthetic signatures and temporary
-default selections were changed. No real signature contents were overwritten; no messages were
-created, edited or sent. Writes were sent once, with fresh reads to verify their results and cleanup.
-Recovery state was encrypted and never committed.
-
-**Proven write contracts:**
+Live, 2026-10-07 and 2026-10-08, with synthetic signatures only; originals verified unchanged afterwards.
 
 | Action | Request | Result |
 |---|---|---|
-| Create and update HTML/text | `PATCH /ows/v1/OutlookCloudSettings/settings/account`, JSON array of per-format settings; `x-islargesetting: true` | HTTP 200. New contents readable immediately; created signature automatically appeared in the name list. |
-| Set/clear a default | Same PATCH endpoint, `String` settings; `x-islargesetting: false` | HTTP 200. New-message and reply defaults changed independently; empty new-message default accepted. |
-| Delete all fixture formats | `DELETE /ows/v1/OutlookCloudSettings/settings/account`, JSON body `{name}`; `Content-Type: application/json`, `x-islargesetting: true` | HTTP 200. Content read returned `[]`; fixture was also removed from the name list. |
+| Create or update | `PATCH /ows/v1/OutlookCloudSettings/settings/account`, JSON array of per-format settings, `x-islargesetting: true` | 200; readable at once and added to the name list |
+| Set or clear a default | Same route, `String` settings, `x-islargesetting: false` | 200; new-message and reply defaults change independently; an empty value clears one |
+| Delete | `DELETE /ows/v1/OutlookCloudSettings/settings/account`, body `{"name": …}`, `Content-Type: application/json`, `x-islargesetting: true` | 200; contents `[]`, name gone from the list |
 
-Content patches contain `itemClass: "RoamingSetting"`, `name`, account `scope`, `secondaryKey: "htm"`
-or `"txt"`, `type: "Blob"`, `value`, `parentSetting: "roaming_signature_list"`,
-`metadata: "encoding:utf-8"`, a current UTC .NET-ticks `timestamp`, and `value@is.Large: true`.
-Default patches contain the same item class/scope, `name` and `secondaryKey` equal to
-`roaming_new_signature` or `roaming_reply_signature`, `type: "String"`, and `value`. Headers also
-included `x-outlook-client: owa`, `Accept: application/json` and `x-overridetimestamp: false`.
-This proves the tested header/payload combination, not that every field is independently mandatory.
-The captured native source and this [original HTTP implementation](https://gist.github.com/EionRobb/21dd89b05417b247bface6373fb380fb)
-provided wire-format leads; our own live calls establish capability for this account.
+- A content setting: `itemClass: "RoamingSetting"`, `name`, account `scope`, `secondaryKey` `htm` or `txt`,
+  `type: "Blob"`, `value`, `parentSetting: "roaming_signature_list"`, `metadata: "encoding:utf-8"`, a UTC .NET-ticks
+  `timestamp`, `value@is.Large: true`. A default: `name` and `secondaryKey` both `roaming_new_signature` or
+  `roaming_reply_signature`, `type: "String"`. Headers also `x-outlook-client: owa`, `x-overridetimestamp: false`.
+- A DELETE without the JSON content type answered 415; with only a query name, 400.
+- Saved HTML is normalized: Outlook adds wrappers and CRLFs and turns `id="Signature"` into `id="x_Signature"`.
+  Visible text, the text format and embedded PNG bytes are kept exactly.
+- **Deleting the selected default leaves the pointer** on the missing name. A reader must check that the
+  default's contents exist and report it missing, not fall back.
+- **Names are exact, case-sensitive keys.** Writing the same content under a new name makes a second entry;
+  defaults do not follow a rename. Spaces, accents, `+` and `&` round-trip. A name with a comma answered
+  `InvalidRequest` (the list is comma-joined).
+- An image signature placed in a draft as a CID with an inline attachment kept the reference and byte-identical
+  image through Graph read-back and sending (2026-10-08, 2026-10-10).
 
-**Content lifecycle.** A dedicated fixture with a space-containing name was created with synthetic
-HTML and text containing accents and Japanese characters. HTML read-back was normalized: Outlook
-added wrappers/CRLFs and changed `id="Signature"` to `id="x_Signature"`. Visible text and the text
-format matched exactly. An edit changed the text and added a base64 PNG; read-back retained the
-expected visible/text content and exactly matching decoded PNG bytes. A later edit removed the
-image and retained the updated text. Deletion removed both formats and its name-list reference.
-No append-at-end order was assumed; the original signatures' relative order was preserved.
+Wire-format leads came from the Outlook Web source and an
+[open HTTP implementation](https://gist.github.com/EionRobb/21dd89b05417b247bface6373fb380fb); the calls above
+establish the behavior for this account.
 
-**Default lifecycle.** With the fixture's image-bearing HTML selected as the new-message default,
-fresh default resolution retrieved that current HTML. The reply default initially stayed unchanged;
-it was then separately set to the fixture. Clearing only the new-message default produced an
-explicit empty string while the reply default still selected the fixture. Both original values
-were restored before ordinary fixture deletion. These calls establish server configuration behavior,
-not automatic signature insertion by the connector, which is unimplemented.
+### 5.4 Corporate signature add-in (not used)
 
-**Deleting the selected default.** A separate temporary fixture was selected only for new messages
-and deleted. Contents returned `[]` and the name was absent from the list, but
-`roaming_new_signature` still pointed to the deleted name. The reply default stayed unchanged.
-Cleanup restored the original new-message default. A consumer must verify that selected content
-exists and report a missing configured default, rather than silently falling back to another name
-or a cached signature. The backend DELETE alone does not maintain the default pointer.
+Browser and Source, 2026-10-07. The organization's officeatwork Mail Signature add-in supplies its own signature
+in the compose client: the HTML is in Outlook Web's first `CreateItem` request, and OWS does not generate it.
+The add-in renders a Nunjucks template package (`.ofawmsig` from a SharePoint library) from the sender's
+profile, language, audience and recipients, uploads its images with `CreateAttachmentFromLocalFile` (§4.3), and
+inserts the result with Office.js `body.setSignatureAsync`. Its selected template is stored in add-in roaming
+settings (`SaveExtensionSettings`), not as native signature HTML, and `UserConfigurations` writes in the same
+capture held unrelated add-in preferences. Because its output depends on recipients, it has no stored
+equivalent; drafts created by the connector are not changed by it (owner, 2026-10-07). A `GetItem`
+`NormalizedBody` shows images as 42-byte placeholder GIFs, so attachments, not that body, are the source of
+image bytes.
 
-**Probe corrections and cleanup.** Two initial setup passes stopped on overly strict harness
-expectations (byte-identical HTML and insertion at the end of the list); both fixtures were cleaned
-up. A DELETE with no JSON content type returned HTTP 415, and a query-only name with that header
-returned HTTP 400. The corrected JSON-body DELETE succeeded. Rejected requests were not automatically
-retried. Four temporary signatures in total were created and removed, including the complete
-lifecycle and selected-default deletion fixture. Final reads confirmed the original two signatures'
-full records were unchanged (hashed comparison), all test contents were absent, and original
-signature-list/default values were restored. Default/list revision timestamps can advance when
-values are changed and restored; no claim of restoring those metadata revisions is made.
+## 6. Search v2 (Substrate)
 
-**Limits of the 2026-10-07 lifecycle tests.** Those tests proved native create/read/update/delete,
-embedded PNG add/remove, list registration/removal, independent default changes and no-default
-behavior through our authentication. The 2026-10-08 follow-up below tests rename behavior, case and
-special-name round-trips, and a CID-to-data-URI-to-inline-draft image path. It still does not prove
-RTF editing, concurrent-write races, every image format, visual browser rendering, or recipient-
-dependent corporate add-in behavior. Graph-first routing remains unchanged: native signatures fill
-the documented roaming-signature gap in Graph.
+`POST https://outlook.office.com/searchservice/api/v2/query` with the Search v2 token (§2) and
+`X-AnchorMailbox: Oid:<object id>@<tenant id>`. Live from our process; no browser cookies or tokens.
+The `teams.microsoft.com` host answered 405 for this path.
 
-### 4.9 W7 HTML compatibility matrix (2026-10-07)
+### 6.1 Request and paging
 
-**Scope.** Five synthetic messages were created/read back and sent once through the connector's
-own draft-first service, to the owner's work mailbox and previously authorized personal Gmail.
-Cases: HTML fragment, equivalent full document, deliberately unclosed paragraph/list/table markup,
-inline plus head stylesheet CSS, and one static public remote PNG. No signature settings or
-unrelated mail were modified. Saved drafts, Sent Items and received work copies were checked through
-Graph; Outlook Web and Gmail were then inspected in the owner's authenticated Edge tabs using
-rendered DOM/computed styles and screenshots. Native desktop control was unavailable.
+```json
+{"Cvid": "<guid>", "LogicalId": "<guid>", "Scenario": {"Name": "owa.react"}, "TimeZone": "UTC",
+ "TextDecorations": "Off",
+ "EntityRequests": [{"EntityType": "Event", "ContentSources": ["Exchange"],
+   "Query": {"QueryString": "<text>", "DisplayQueryString": "<text>"},
+   "From": 0, "Size": 25, "Sort": [], "PropertySet": "Optimized"}]}
+```
 
-| Case | Graph draft/sent/received checks | Outlook Web in Edge | Gmail in Edge |
-|---|---|---|---|
-| Fragment / full document | Both returned 548-character HTML with equal visible-text hashes and matching structure; all expected markers, two NBSPs, table/list/link retained. | Both retained bold, italic, accents/Japanese text, two table rows and two list items. | Same verified structure/formatting; full reading-view screenshot inspected. |
-| Malformed accepted HTML | Saved/sent successfully; paragraph/list/table markup repaired; end marker and all expected text retained. | Three paragraphs, two table rows and two list items; end marker displayed. | Same counts and end marker displayed. |
-| CSS | Inline styles, head rules and classes persisted in draft, sent and received HTML. | Inline and stylesheet styling applied; 2px borders, 12px padding and bold weights retained. Dark theme changed displayed colors. | Intended inline blue box, purple bold text and green box rendered; computed colors/borders/padding matched. |
-| Remote image | Original HTTPS image URL retained; no attachment fabricated. | PNG loaded and displayed at 211 × 71 with the original source URL; initial paint was asynchronous. | PNG loaded at 211 × 71 through Google's image proxy, without changing image preferences. |
+- The response is `EntitySets[].ResultSets[]` with `Total`, `MoreResultsAvailable` and `Results[].Source`.
+- **Reuse `Cvid` and `LogicalId` across the pages of one search.** A new pair per page answered 400 after the
+  first page.
+- **Offset limit** (2026-10-13): one session answered pages starting up to 975 and refused a page starting at
+  1,000 with 400; a page starting at 990 with 25 rows was answered, so the limit is on where a page starts.
+- **No date restriction:** `start:`, `meeting start:` and `meeting received:` terms returned no result set
+  (2026-10-13).
+- `ContentSources` is required: a Teams message request without it answered 400.
 
-All five retained every expected content marker across draft/sent/received work copies, with no
-verification findings. The external Gmail copies included a corporate disclaimer absent from the
-submitted, sent and received work-mailbox bodies, consistent with a transport-added external footer.
-The footer text and addresses are not reproduced here. These observations support recording
-normalization, theme and transport changes rather than requiring byte-identical rendered HTML.
-No generalized body-diff feature is justified by these fixtures.
+### 6.2 Events
 
-**Cleanup.** All five drafts were sent; their five Sent Items copies, five received
-work copies and five Gmail copies remain as visual evidence. Gmail's five messages were restored to
-their initial unread state; work-message read states were restored through the connector. The
-temporary Gmail reading window was closed. Synthetic structural results and sanitized browser
-checks/private screenshots are stored outside Git.
+`EntityType: "Event"`, `ContentSources: ["Exchange"]` (2026-10-10 and 2026-10-12):
 
-**Owner desktop confirmation (2026-10-07).** In response to the Outlook desktop check request, the
-owner confirmed that all five messages looked correct. The desktop version was not supplied.
-This completes W7 validation for the tested fixtures: automated draft/sent/received checks,
-Outlook Web and Gmail in Edge, and owner-confirmed Outlook desktop rendering. No pixel-identical
-cross-client behavior or coverage of every client version/HTML feature is claimed. No further W7
-implementation or validation task is identified, so W7 is removed from the current-work roadmap.
+- A broad query returned 25 rows a page, `Total=703` and `MoreResultsAvailable=true`; offset 5 with the same
+  `Cvid`/`LogicalId` returned five more.
+- `Source` fields: `Subject`, `Start`, `End`, `Organizer`, `DisplayTo`, `Location`, `IsMeeting`, `IsCancelled`,
+  `IsAllDayEvent`, `IsOrganizer`, `IsResponseRequested`, `MyResponseType`, `LegacyFreeBusyStatus`,
+  `Sensitivity`, `HasAttachments`, `ItemId.Id`, `ImmutableId`, `UID` and series-master ids. Requesting
+  `Fields` did not add `OnlineMeeting` or `EventConversationId`.
+- **`Total` is unreliable for recurring events:** one series returned ten occurrence rows over two pages while
+  each response said `Total=1`.
+- **`HasAttachments` is unreliable:** rows said `false` for an event whose `GetItem` returned an attachment.
+- `Source.ItemId.Id` hydrates through OWS `GetItem` (§4.3), which returns the agenda, attendees, attachment
+  metadata and a Teams join URL, but no Teams chat id.
+- A minimal `AnswerEntityRequests` for events answered 500.
 
-### 4.10 Public-tool validation of compose-once drafts (2026-10-08)
+### 6.3 Mail conversations (parked)
 
-Through the MCP tools and the connector's encrypted token cache, two synthetic drafts were created;
-both returned verified Graph read-backs, and the replacement had a distinct id and matching subject.
-A follow-up synthetic draft confirmed that Outlook's returned text has a trailing CRLF terminator;
-trimming that terminator matched the submitted text. `delete_messages` moved all four throwaway
-drafts used by these checks to Deleted Items (`done: 4`, `unknown: 0`). No message was sent, and no
-test draft remains in Drafts. Nothing was permanently deleted. No mailbox content, addresses or
-identifiers were retained here.
+`EntityType: "Conversation"`, `ContentSources: ["Exchange"]` works (2026-10-02). `Source` carries
+`ConversationId` (a different encoding from Graph's), `ImmutableId` (readable through Graph), `ParentFolderId`,
+`From`, `UniqueSenders`, `MessageCount`, `Preview` and `HasAttachments`; the result set also has
+`TotalWithoutCollapsing`. It matched Graph `$search` on recall (§3.4), so mail search stays on Graph.
 
-### 4.11 Native signature name and inline-image follow-up (2026-10-08)
+### 6.4 Teams messages and transcripts
 
-**Scope.** Live calls used the connector's encrypted, bound graph/outlook profiles and its transport;
-no browser credentials were used. Only unique synthetic names and drafts were created. Writes were
-sent once. No real signature content was changed and no message was sent.
+The same token answers `EntityType: "Message"`, `ContentSources: ["Teams"]` (2026-10-10). The Teams connector
+uses this route; its findings are in the
+[Teams research](https://github.com/lucasrhode95/lrh-teams-connector/blob/main/docs/api-research.md#message-search).
+`EntityType: "Transcript"` with `ContentSources: ["Teams"]` answered 200 with no `EntitySets`; with Exchange,
+OneDrive or SharePoint sources, or as `MeetingTranscript` or `MeetingInsights`, it answered 400. Transcript
+search is neither shown nor ruled out.
 
-**Rename and case.** Writing the same content under a new name created a second list entry; it did
-not replace the old entry. Both new-message and reply defaults stayed on the old name. Deleting that
-synthetic old entry removed it from the list but left both default pointers on the now-missing name.
-The original defaults were restored and read back. Two names that differed only by letter case
-coexisted and returned their distinct contents. Treat names as exact, case-sensitive keys; updating
-content does not rename. A rename is create under the new name, then delete the old one, and callers
-must not expect default pointers to follow.
+### 6.5 Other search routes seen in Outlook Web
 
-**Other names.** A synthetic name with spaces, an accented character, plus and ampersand round-tripped
-through the list, exact-name content read and reply default, which was then restored. A comma-name
-probe returned `InvalidRequest` before its round-trip could be proven. A read-only cleanup scan found
-no comma test entry or content. Reject commas in the connector to avoid ambiguity in the
-comma-joined name list. The W8 name validation applies this result; the failed variant was not retried.
+Browser and Source, 2026-10-10:
 
-**Inline image path.** A synthetic OWS draft with a CID-referenced inline PNG was read through Graph;
-the connector downloaded bytes matching the generated PNG. Those bytes were embedded as a
-`data:image/png` URI in a throwaway native signature. Cloud Settings read-back contained the same
-PNG bytes. A second synthetic draft inserted the signature content with a CID and inline attachment;
-Graph read-back retained the CID reference, inline attachment flag and byte-identical image. This
-proves the storage/attachment association used by W8. Visual browser rendering was not inspected.
+- Outlook Web's global search submitted `POST /searchservice/api/v2/query` for `Conversation`/`Exchange` with
+  `From=0`, `Size=25`. Search-box suggestions are separate (`/search/api/v1/suggestions`, `People`, `File`,
+  `Event`, `Message`), as are `/search/api/v1/recommendations`, `/search/api/v2/init`,
+  `/search/api/v2/resources` and the `/search/api/v1/events` telemetry.
+- Every captured offset was 0; no continuation request was captured.
+- Persona calls beside search (`livepersonacard/configuration`, `peopleInsights/owareadingpane`,
+  `personaphoto`, `personacards/preparePersona`) are profile support, not search.
+- Outlook Web also calls its own GraphQL (`/outlookgatewayb2/graphql`) for calendar groups, tabs, working
+  hours, auth settings and meeting responses.
 
-**Cleanup.** Six non-comma signature fixtures were removed. The list returned to its pre-test count
-of two, a read-only scan found no W8 test names or content, and the original defaults were verified
-restored. The two synthetic image drafts were moved to Deleted Items (`done: 2`, `unknown: 0`); no
-test draft remains in Drafts. Nothing was permanently deleted.
+## 7. Rejected alternatives and identifiers
 
-**Public-tool validation (2026-10-08).** The local MCP server used the encrypted graph/outlook token
-profiles to exercise list/get/create/update/delete and default selection with unique synthetic
-signatures. A new-message draft used the selected native default. Graph read-back confirmed its
-signature text, recipient, CID reference and byte-equal inline PNG. One synthetic draft was sent once
-to the signed-in account (`sent`). A strict post-send check for the custom `data-signature-name`
-attribute did not pass; read-only inspection confirmed the sent copy retained signature text and a
-CID reference. A separate reply draft used a temporary reply default; its Graph read-back confirmed
-the signature block before quoted synthetic history, the inline CID, and a recipient matching the
-synthetic sender. Visual browser rendering was not inspected.
-
-The temporary signatures were deleted and the original defaults restored. A later read-only signature
-list found the pre-test count of two, no synthetic W8 signature name, and defaults either empty or
-pointing to listed signatures. The sent item and synthetic drafts were moved to Deleted Items; a
-read-only Drafts scan found no matching test draft. No item was permanently deleted, and the one
-self-send was not retried.
-
-### 4.12 Graph inline attachment content IDs (2026-10-08)
-
-A read-only Graph probe used two synthetic messages in Deleted Items with inline file attachments.
-The attachment-list request selected
-`id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId`. The ordinary
-request and the same attachment-list request sent as a `$batch` subrequest both returned HTTP 200.
-Every inline file attachment in both responses had a non-empty `contentId`; normal and batched
-values and attachment counts matched. This confirms the field can be returned in the normal listing
-and removes the need for per-image lookups. The probe exposed no mailbox content, names, ids or CIDs
-in its output and made no writes.
-
-### 4.13 Recipient-side signature rendering and image save (2026-10-10)
-
-A fresh synthetic signature and self-addressed draft were created through the connector using its
-encrypted token cache. The draft was sent once. Read-only checks of the Sent Items and Inbox copies
-found one CID reference matching one inline PNG attachment in each; both downloads were valid
-160×80 PNGs of 439 bytes and matched the generated image byte for byte. The user confirmed that
-Outlook rendered the image without errors and that **Save as Picture** succeeded. The earlier
-failing diagnostic attachment was a malformed 26-byte PNG, so the red X came from invalid image
-bytes rather than a missing remote image URL. The previous strict `data-signature-name` presence
-check remains an attribute-level discrepancy; it did not prevent rendering or saving the image.
-Live behavior for a mailbox with no configured native signature remains unconfirmed; that case is
-covered by synthetic tests only.
-
-**Cleanup and remaining copies.** A follow-up signature listing found no temporary W8 signature,
-and no matching draft or Outbox item remained. One synthetic message copy remains in Inbox and one
-in Sent Items for the user's inspection; neither was moved to Deleted Items. No addresses, subjects,
-message bodies or real identifiers are recorded.
-
-## 5. Substrate Search v2 (`/searchservice/api/v2/query`), mail search parked
-
-- **Works STANDALONE** at `https://outlook.office.com/searchservice/api/v2/query` with the `search` token (§2) and `X-AnchorMailbox: Oid:<oid>@<tid>`.
-- Minimal request: `{Cvid, LogicalId, Scenario:{Name:"owa.react"}, TimeZone:"UTC", TextDecorations:"Off", EntityRequests:[{EntityType:"Conversation", ContentSources:["Exchange"], Query:{QueryString, DisplayQueryString}, From, Size, Sort:[], PropertySet:"Optimized"}]}`. **Reuse the same `Cvid` / `LogicalId` across pages.** A new session per page returns 400.
-- Response: `EntitySets[].ResultSets[]` with `Total`, `TotalWithoutCollapsing`, `MoreResultsAvailable`, and `Results[].Source` holding `ConversationId`, `ImmutableId`, `ParentFolderId`, `From`, `UniqueSenders`, `MessageCount`, `Preview`, `HasAttachments`, ….
-- The raw `ConversationId` uses a different encoding from Graph's, but `ImmutableId` is directly GET-able in Graph.
-- Ordinary product mail search remains on Graph `$search`; the separate standalone Event and Teams
-  Message findings are recorded in §3.14 and do not establish full mail parity or a stable public
-  contract.
-
-## 6. Rejected alternatives
-
-- **Browser-token tools** (`outlook-cli`, `owa-piggy`) offer useful route vocabulary, but their authentication model is unacceptable. [outlook-cli](https://github.com/yusufaltunbicak/outlook-cli) · [owa-piggy](https://github.com/damsleth/owa-piggy)
-- **Outlook REST v2:** see the official [Graph comparison and retirement guidance](https://learn.microsoft.com/en-us/outlook/rest/compare-graph); do not build a new backend on this route.
-- **`GetAccessTokenForResource` via OWS** is a historical token-minting path. Do not use it. [Black Hat 2019](https://i.blackhat.com/USA-19/Thursday/us-19-Jaiswal-Preventing-Authentication-Bypass-A-Tale-Of-Two-Researchers.pdf)
-- **EWS:** follow Microsoft's current [retirement guidance](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online); public lifecycle dates are not maintained here.
-
-## 7. Identifiers worth knowing
-
-- The Exchange resource app id is `00000002-0000-0ff1-ce00-000000000000`. It is not a client id.
-- `ab0455a0-8d03-46b9-b18b-df2f57b9e44c` appears in Outlook Web's consumer-auth config. It is unverified and must not be used.
-- Deep links (BROWSER): `/mail/inbox/id/<id>`, `/owa/?viewmodel=ReadMessageItem&ItemID=<id>`. These could be "open in Outlook" links in the UI.
+- **Browser-token tools** ([outlook-cli](https://github.com/yusufaltunbicak/outlook-cli),
+  [owa-piggy](https://github.com/damsleth/owa-piggy)): useful route vocabulary, unacceptable authentication.
+- **Outlook REST v2:** retired; see Microsoft's [Graph comparison](https://learn.microsoft.com/en-us/outlook/rest/compare-graph).
+- **`GetAccessTokenForResource` over OWS:** a historical token-minting path; do not use
+  ([Black Hat 2019](https://i.blackhat.com/USA-19/Thursday/us-19-Jaiswal-Preventing-Authentication-Bypass-A-Tale-Of-Two-Researchers.pdf)).
+- **EWS:** follow Microsoft's [retirement guidance](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online).
+- The Exchange resource app id `00000002-0000-0ff1-ce00-000000000000` is not a client id.
+- `ab0455a0-8d03-46b9-b18b-df2f57b9e44c` appears in Outlook Web's consumer-auth configuration; unverified, do
+  not use.
+- Outlook Web deep links (Browser): `/mail/inbox/id/<id>` and `/owa/?viewmodel=ReadMessageItem&ItemID=<id>`.
 
 ## 8. Mailbox side effects of research
 
-- One synthetic self-send to the signed-in mailbox (2026-10-01).
-- 2026-10-02, on four user-named Inbox messages: read and flag toggles, a category set and then cleared, a conversation read toggle, a move round trip, and two soft deletes. Two messages remain in Deleted Items. Sent copies were untouched, and nothing was hard-deleted.
-- 2026-10-04 (W9 replay): one throwaway inbox rule (conditions that match no real mail) created, edited, renamed, disabled, enabled, moved last and first, and removed. The rule list ended as it started.
-- 2026-10-07 (connector validation): four dedicated messages were sent, each with a received
-  self-copy; personal recipients were included as authorized. The sent and received copies remain
-  as evidence. 101 unsent bulk reply drafts and four signature probes were moved to Deleted Items
-  (`done: 105` in total), all locations independently verified; no test drafts remain in Drafts.
-  Bulk and partial-failure read states were restored before cleanup. One throwaway inbox rule was
-  created and removed; the eight original rules ended with identical ids, order, priorities,
-  enabled states and revisions. Nothing was permanently deleted.
-- 2026-10-07 (native signatures): four synthetic signatures created and deleted. New-message and
-  reply defaults were temporarily switched, the new-message default was cleared, and deletion of
-  a selected fixture left a dangling pointer that was repaired. Final list/default values matched
-  the original baseline, both original signature records were unchanged, and all temporary contents
-  were absent. No message writes or sends occurred in these signature tests.
-- 2026-10-08 (W10 public-tool validation): four synthetic drafts were moved to Deleted Items; none were sent.
-- 2026-10-08 (W8 research): six synthetic native signature fixtures were removed; the current list returned to its pre-test count of two and a read-only check found no test names/content. Original defaults were restored and verified. Two synthetic image drafts were moved to Deleted Items (`done: 2`, `unknown: 0`); none were sent.
-- 2026-10-08 (W8 public tools): temporary signatures were deleted and defaults restored; one synthetic self-send and synthetic drafts were moved to Deleted Items; no matching test draft or signature remains. The send was not retried.
-- 2026-10-08 (H19 Graph check): read-only normal and batched attachment listings confirmed non-empty content IDs for inline files on two synthetic messages; no writes occurred.
-- 2026-10-10 (W8 recipient-side check): one synthetic self-send was sent once. The Inbox and Sent Items copies each retained the byte-identical inline PNG; the user confirmed Outlook rendered it and Save as Picture succeeded. The temporary signature is absent; one copy remains in each folder for inspection.
-- No browser cookie, token or canary was ever used by a probe. The capture review decoded token *claims* (audience, client and scope names) only.
+What research left in the tested mailbox. Nothing was permanently deleted, no write was retried, and no probe
+used a browser cookie, token or canary.
+
+| Date | Writes |
+|---|---|
+| 2026-10-01 | One synthetic self-send. |
+| 2026-10-02 | On four user-named Inbox messages: read and flag toggles, a category set and cleared, a conversation read toggle, a move round trip, two soft deletes (two messages remain in Deleted Items). |
+| 2026-10-04 | One throwaway inbox rule created, edited, renamed, disabled, enabled, reordered and removed; the rule list ended as it started. |
+| 2026-10-07 | Four test messages sent, with personal recipients as authorized; sent and received copies remain. Five HTML test messages sent to the work mailbox and Gmail; copies remain, read states restored. 105 drafts moved to Deleted Items. One throwaway rule created and removed; the original rules unchanged. Four synthetic signatures created and deleted; defaults switched and restored. |
+| 2026-10-08 | Six synthetic signatures created and removed, defaults restored. One synthetic self-send. Synthetic drafts moved to Deleted Items. |
+| 2026-10-10 | One synthetic self-send for the signature-image check; one copy remains in Inbox and one in Sent Items. One synthetic self-send for the search checks. |
+| 2026-10-13 | One synthetic draft with unfinished markup, never sent, moved to Deleted Items. |
+| 2026-10-15 | Size-limit check (§4.6): three synthetic self-drafts with random-byte attachments saved. Two were sent to the owner's address (1 MiB delivered, 35.3 MiB bounced with an NDR); their Sent Items copies, the received copy and the NDR remain. The third draft was moved to Deleted Items. Four oversized saves were refused and left nothing. |
