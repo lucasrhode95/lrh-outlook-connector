@@ -549,4 +549,4 @@ used a browser cookie, token or canary.
 | 2026-10-08 | Six synthetic signatures created and removed, defaults restored. One synthetic self-send. Synthetic drafts moved to Deleted Items. |
 | 2026-10-10 | One synthetic self-send for the signature-image check; one copy remains in Inbox and one in Sent Items. One synthetic self-send for the search checks. |
 | 2026-10-13 | One synthetic draft with unfinished markup, never sent, moved to Deleted Items. |
-| 2026-10-15 | Size-limit check (§4.6): three synthetic self-drafts with random-byte attachments saved. Two were sent to the owner's address (1 MiB delivered, 35.3 MiB bounced with an NDR); their Sent Items copies, the received copy and the NDR remain. The third draft was moved to Deleted Items. Four oversized saves were refused and left nothing. |
+| 2026-10-15 | Size-limit check (§4.6): three synthetic self-drafts with random-byte attachments saved. Two were sent to the owner's address (1 MiB delivered, 35.3 MiB bounced with an NDR); the third draft, both Sent Items copies, the received copy and the NDR were moved to Deleted Items. Four oversized saves were refused and left nothing. |
