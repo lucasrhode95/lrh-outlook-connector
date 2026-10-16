@@ -1,4 +1,4 @@
-![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](docs/connector-overview.svg)
+![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/connector-overview.svg)
 
 A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
@@ -79,7 +79,7 @@ The UI opens in your browser and stops after 30 minutes without activity:
 uv run outlook-connector ui
 ```
 
-![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](docs/ui-preview.svg)
+![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/ui-preview.svg)
 
 > The web UI is intended for manual message exports. The preview is plain text, not rendered HTML; it shows how extracted message content will appear in an export.
 
@@ -143,12 +143,10 @@ Project references: [documentation index](docs/README.md) · [requirements](docs
 ## Disclaimer
 
 > [!WARNING]
-> These tools sign in as Microsoft's own apps and use undocumented Outlook and Teams services.
-> Giving an AI agent access to your work mail, chats or files may break your organization's policies
-> on AI use and data handling, so check with your IT or security team first. The tools are provided
-> as is, without warranty, and the authors are not responsible for any misuse or its consequences.
-> Microsoft, Outlook, Teams, SharePoint and Entra are trademarks of Microsoft; this project is not
-> affiliated with or endorsed by Microsoft.
+> Unofficial: these tools sign in as Microsoft's own apps and use undocumented services. Check your
+> organization's AI and data policies before giving an agent your work data. Provided as is, without
+> warranty. Microsoft, Outlook, Teams, SharePoint and Entra are Microsoft trademarks; this project is
+> not affiliated with Microsoft.
 
 ## License
 
