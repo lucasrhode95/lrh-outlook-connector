@@ -193,7 +193,7 @@ Re-run the relevant probes from [research/README.md](../research/README.md), rec
   - OUTLOOK_CONNECTOR_HOME overrides the data directory (tests, portability);
   - store: <data directory>/accounts/<fingerprint>/mail.sqlite3 (account binding and folder cache only);
   - exports: <data directory>/exports/. Downloaded attachments and saved .eml files: <data directory>/downloads/. Both are removed after 7 days; cleanup tolerates a file another process removed first. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
-  - logs: <data directory>/logs/<command>-<process id>.log, one file per `mcp` or `ui` process, rotated at midnight and kept 7 days ([`logs.py`](../src/outlook_connector/logs.py)). The MCP server logs to its file only, since stdout carries the protocol; the UI also logs to stdout. A filter redacts bearer tokens, assigned secrets and secret query parameters; `httpx` and `httpcore`, which log full request URLs, are held at WARNING. `OUTLOOK_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
+  - logs: <data directory>/logs/<command>-<start time>-<process id>.log, one file per `mcp` or `ui` process, rotated at midnight and kept 7 days ([`logs.py`](../src/outlook_connector/logs.py)). The MCP server logs to its file only, since stdout carries the protocol; the UI also logs to stdout. A filter redacts bearer tokens, assigned secrets and secret query parameters; `httpx` and `httpcore`, which log full request URLs, are held at WARNING. `OUTLOOK_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
 
 
 ## 8. Surfaces: tools and endpoints

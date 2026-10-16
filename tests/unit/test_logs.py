@@ -73,6 +73,22 @@ def test_request_urls_from_http_libraries_stay_out(tmp_path: Path) -> None:
     assert "synthetic" not in path.read_text(encoding="utf-8")
 
 
+def test_credential_headers_are_redacted_in_full() -> None:
+    record = logging.LogRecord(
+        "synthetic",
+        logging.INFO,
+        "test_logs.py",
+        1,
+        "Cookie: sid=one-value; refresh=two-value\nAuthorization: Basic three-value",
+        (),
+        None,
+    )
+
+    assert SecretRedactionFilter().filter(record)
+    message = record.getMessage()
+    assert message == "Cookie: [REDACTED]\nAuthorization: [REDACTED]"
+
+
 def test_component_must_be_a_short_name(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         configure_app_logging("../escape", directory=tmp_path)

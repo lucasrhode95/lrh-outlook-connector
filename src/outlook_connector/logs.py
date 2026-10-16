@@ -29,6 +29,8 @@ QUIET_LIBRARIES = ("httpx", "httpcore")
 _MANAGED = "_outlook_connector_managed"
 _VALID_COMPONENT = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 _BEARER_SECRET = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
+# A credential header's value runs to the end of the line: "Cookie: a=1; b=2", "Authorization: Basic x".
+_HEADER_SECRET = re.compile(r"(?im)\b(authorization|proxy-authorization|cookie|set-cookie)(\s*:\s*)[^\r\n]+")
 _ASSIGNED_SECRET = re.compile(
     r"(?i)\b(access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|cookie|client[_-]?secret)\b"
     r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;&}]+)"
@@ -53,7 +55,8 @@ def configure_app_logging(
     target = directory if directory is not None else log_directory()
     target.mkdir(parents=True, exist_ok=True)
     _prune_expired_logs(target, component)
-    log_path = target / f"{component}-{os.getpid()}.log"
+    # The start time keeps a reused process id from appending to a retained file of an earlier run.
+    log_path = target / f"{component}-{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}.log"
 
     level = getattr(logging, os.environ.get(LOG_LEVEL_VARIABLE, "INFO").upper(), None)
     if not isinstance(level, int):
@@ -120,6 +123,7 @@ def _prune_expired_logs(directory: Path, component: str) -> None:
 
 
 def _redact(value: str) -> str:
+    value = _HEADER_SECRET.sub(r"\1\2[REDACTED]", value)
     value = _BEARER_SECRET.sub("Bearer [REDACTED]", value)
     value = _ASSIGNED_SECRET.sub(r"\1\2[REDACTED]", value)
     return _QUERY_SECRET.sub(r"\1[REDACTED]", value)
