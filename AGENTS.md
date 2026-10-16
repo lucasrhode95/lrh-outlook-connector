@@ -55,13 +55,14 @@ The MCP server lives for one agent session (stdio); the web UI stays on `127.0.0
 
 ## Checks
 
-Run all four before every commit:
+Run all five before every commit:
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .   # use `uv run ruff format .` to fix
 uv run pyright
 uv run pytest
+node --test tests/surfaces/message_reader.test.cjs
 ```
 
 Tests use the fake mailbox in `tests/fakes/graph_fake.py`; use synthetic data only, never real captures.
