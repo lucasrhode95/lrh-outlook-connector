@@ -143,12 +143,10 @@ Project references: [documentation index](docs/README.md) · [requirements](docs
 ## Disclaimer
 
 > [!WARNING]
-> These tools sign in as Microsoft's own apps and use undocumented Outlook and Teams services.
-> Giving an AI agent access to your work mail, chats or files may break your organization's policies
-> on AI use and data handling, so check with your IT or security team first. The tools are provided
-> as is, without warranty, and the authors are not responsible for any misuse or its consequences.
-> Microsoft, Outlook, Teams, SharePoint and Entra are trademarks of Microsoft; this project is not
-> affiliated with or endorsed by Microsoft.
+> Unofficial: these tools sign in as Microsoft's own apps and use undocumented services. Check your
+> organization's AI and data policies before giving an agent your work data. Provided as is, without
+> warranty. Microsoft, Outlook, Teams, SharePoint and Entra are Microsoft trademarks; this project is
+> not affiliated with Microsoft.
 
 ## License
 
