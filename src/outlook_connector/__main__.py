@@ -77,16 +77,20 @@ def _exit_codes(handler: Handler) -> Handler:
 
 def _mcp(args: argparse.Namespace) -> int:
     """``mcp``: the MCP server over stdio; stdout belongs to the protocol from here on."""
+    from outlook_connector.logs import configure_app_logging
     from outlook_connector.surfaces.mcp_main import serve_mcp
 
+    configure_app_logging("mcp")  # file only
     serve_mcp(unsecure=args.unsecure)
     return EXIT_OK
 
 
 def _ui(args: argparse.Namespace) -> int:
     """``ui``: the local web UI until Ctrl+C or idle."""
+    from outlook_connector.logs import configure_app_logging
     from outlook_connector.surfaces.web.web_main import serve_ui
 
+    configure_app_logging("ui", stdout=True)
     with contextlib.suppress(KeyboardInterrupt):
         serve_ui(
             unsecure=args.unsecure,
