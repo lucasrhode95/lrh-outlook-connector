@@ -83,8 +83,24 @@ function part(text, id = 'mail') {
 }
 
 test('quoted history is enabled by default', () => {
-  assert.match(page, /<input id="opt-full" type="checkbox" checked>/);
-  assert.match(page, /<input id="opt-attachments" type="checkbox" checked>/);
+  assert.match(page, /<input id="opt-full" type="checkbox" role="switch" checked>/);
+  assert.match(page, /<input id="opt-attachments" type="checkbox" role="switch" checked>/);
+});
+
+test('export options live in the settings menu, which the cog opens and closes', () => {
+  const menu = page.slice(page.indexOf('id="settings-menu"'), page.indexOf('<span id="account"'));
+  for (const option of ['id="opt-attachments"', 'id="opt-full"', 'name="files"']) assert.ok(menu.includes(option), option);
+  assert.ok(!page.includes('class="export-options"'));
+  const ui = reader(async () => part('Hello'));
+  const toggle = ui.context.document.getElementById('settings-toggle');
+  const settings = ui.context.document.getElementById('settings-menu');
+  settings.hidden = true;
+  toggle.dispatch('click');
+  assert.equal(settings.hidden, false);
+  assert.equal(toggle.attributes.get('aria-expanded'), 'true');
+  toggle.dispatch('click');
+  assert.equal(settings.hidden, true);
+  assert.equal(toggle.attributes.get('aria-expanded'), 'false');
 });
 
 test('loads the whole body in one request with the chosen body kind', async () => {

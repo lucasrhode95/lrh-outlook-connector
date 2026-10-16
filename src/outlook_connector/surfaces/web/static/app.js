@@ -820,6 +820,13 @@ function focusCalendarDate(key) {
   $("calendar-days").querySelector(`[data-date="${key}"]`)?.focus();
 }
 
+// The export settings menu stays open while its options change; an outside click or Escape closes it.
+function setSettingsOpen(open, { restoreFocus = false } = {}) {
+  $("settings-menu").hidden = !open;
+  $("settings-toggle").setAttribute("aria-expanded", String(open));
+  if (!open && restoreFocus) $("settings-toggle").focus();
+}
+
 function setCalendarOpen(open, { restoreFocus = false } = {}) {
   $("calendar").hidden = !open;
   $("range-toggle").setAttribute("aria-expanded", String(open));
@@ -942,10 +949,13 @@ $("today-date").addEventListener("click", () => {
 $("calendar-done").addEventListener("click", () => setCalendarOpen(false, { restoreFocus: true }));
 document.addEventListener("pointerdown", (event) => {
   if (!$("calendar").hidden && !$("range-picker").contains(event.target)) setCalendarOpen(false);
+  if (!$("settings-menu").hidden && !$("settings-wrap").contains(event.target)) setSettingsOpen(false);
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !$("calendar").hidden) setCalendarOpen(false, { restoreFocus: true });
+  if (event.key === "Escape" && !$("settings-menu").hidden) setSettingsOpen(false, { restoreFocus: true });
 });
+$("settings-toggle").addEventListener("click", () => setSettingsOpen($("settings-menu").hidden));
 $("more").addEventListener("click", () => (state.mode === "search" ? runSearch : loadList)(false));
 $("export-view").addEventListener("click", () => runExport($("export-view"), viewRequest(), "Export view"));
 $("refresh-folders").addEventListener("click", () => loadFolders(true));

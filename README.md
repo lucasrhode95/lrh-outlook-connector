@@ -81,7 +81,7 @@ uv run outlook-connector ui
 
 ![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/ui-preview.svg)
 
-> The web UI is intended for manual message exports. The preview is plain text, not rendered HTML; it shows how extracted message content will appear in an export.
+> The web UI is intended for manual message exports; its export options are behind the cog. The preview is plain text, not rendered HTML; it shows how extracted message content will appear in an export.
 
 ## MCP tools
 

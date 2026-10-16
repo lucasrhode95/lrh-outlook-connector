@@ -46,6 +46,23 @@
       <input id="since" type="hidden">
       <input id="until" type="hidden">
     </div>
+    <div id="settings-wrap" class="settings-wrap">
+      <button id="settings-toggle" class="icon-button settings-toggle" type="button" aria-label="Export settings" title="Export settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm8 4.8v-2.6l-2-.5a6.4 6.4 0 0 0-.6-1.5l1.1-1.8-1.8-1.8-1.8 1.1a6.4 6.4 0 0 0-1.5-.6l-.5-2h-2.6l-.5 2a6.4 6.4 0 0 0-1.5.6L6.5 5.1 4.7 6.9l1.1 1.8a6.4 6.4 0 0 0-.6 1.5l-2 .5v2.6l2 .5a6.4 6.4 0 0 0 .6 1.5l-1.1 1.8 1.8 1.8 1.8-1.1a6.4 6.4 0 0 0 1.5.6l.5 2h2.6l.5-2a6.4 6.4 0 0 0 1.5-.6l1.8 1.1 1.8-1.8-1.1-1.8a6.4 6.4 0 0 0 .6-1.5l2-.5Z"/></svg>
+      </button>
+      <div id="settings-menu" class="settings-menu" role="dialog" aria-label="Export settings" hidden>
+        <label class="switch"><input id="opt-attachments" type="checkbox" role="switch" checked><span>Include attachments</span></label>
+        <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a conversation reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox" role="switch" checked><span>Include quoted history</span></label>
+        <div class="files">
+          <span class="section-label">Files</span>
+          <span class="segmented" role="radiogroup" aria-label="Files">
+            <label title="One file per conversation"><input type="radio" name="files" value="per_conversation" checked><span>Per conversation</span></label>
+            <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
+            <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
+          </span>
+        </div>
+      </div>
+    </div>
     <span id="account" class="account">
       <span id="avatar" class="avatar" aria-hidden="true"></span>
       <span id="account-name" class="muted"></span>
@@ -112,17 +129,6 @@
 
     <footer class="exportbar" aria-label="Export controls">
       <div class="export-status"><span id="selection" class="muted">Nothing selected</span></div>
-      <div class="export-options">
-        <label class="switch"><input id="opt-attachments" type="checkbox" checked> Include attachments</label>
-        <label class="switch" title="Replies usually repeat the earlier messages of the conversation below the new text (&quot;From: … Sent: …&quot;). Off: each message shows only what it adds, so a conversation reads once, without repetition. On: full bodies, repeated history included. Applies to the reader and to exports."><input id="opt-full" type="checkbox" checked> Include quoted history</label>
-        <span class="files">Files
-          <span class="segmented" role="radiogroup" aria-label="Files">
-            <label title="One file per conversation"><input type="radio" name="files" value="per_conversation" checked><span>Per conversation</span></label>
-            <label title="One file for everything"><input type="radio" name="files" value="all"><span>All in one</span></label>
-            <label title="One file per message"><input type="radio" name="files" value="none"><span>Per message</span></label>
-          </span>
-        </span>
-      </div>
       <div class="export-actions">
         <button id="export-view" class="secondary" title="Export every message of this folder and date range">Export view</button>
         <button id="clear">Clear</button>
