@@ -203,7 +203,13 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
 .switch:has(input:checked), .scope-option:has(input:checked) { color: var(--text); }
 .switch input:focus-visible, .segmented input:focus-visible + span { outline: 2px solid var(--accent-bright); outline-offset: 3px; }
 
-.files { display: inline-flex; align-items: center; gap: 9px; color: var(--muted); white-space: nowrap; }
+.settings-wrap { position: relative; display: flex; align-items: center; }
+.icon-button.settings-toggle { width: 38px; height: 38px; padding: 7px; color: var(--header-text); }
+.icon-button.settings-toggle svg { width: 24px; height: 24px; }
+.icon-button.settings-toggle:hover:not(:disabled), .icon-button.settings-toggle[aria-expanded="true"] { background: rgb(255 255 255 / 14%); color: var(--header-text); }
+.settings-menu { position: absolute; z-index: 20; top: calc(100% + 8px); right: 0; display: grid; min-width: min(320px, calc(100vw - 36px)); gap: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); box-shadow: 0 12px 32px rgb(0 0 0 / 35%); }
+.settings-menu[hidden] { display: none; }
+.files { display: grid; gap: 8px; color: var(--muted); white-space: nowrap; }
 .segmented { position: relative; display: inline-grid; grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--segment-bg); }
 .segmented::before { position: absolute; z-index: 0; top: 4px; bottom: 4px; left: 4px; width: calc((100% - 8px) / 3); transform: translateX(0); border-radius: 7px; background: var(--segment-active-bg); box-shadow: 0 1px 3px rgb(0 0 0 / 22%); content: ""; pointer-events: none; transition: transform .24s cubic-bezier(.2, .8, .2, 1); }
 .segmented:has(input[value="all"]:checked)::before { transform: translateX(100%); }
@@ -391,7 +397,7 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
   z-index: 2;
   display: grid;
   flex: none;
-  grid-template-columns: minmax(130px, .55fr) minmax(0, 2fr) auto;
+  grid-template-columns: minmax(130px, 1fr) auto;
   align-items: center;
   gap: 12px 18px;
   padding: 12px 18px;
@@ -400,7 +406,6 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
   box-shadow: 0 -8px 20px rgb(0 0 0 / 10%);
 }
 .export-status { min-width: 0; color: var(--muted); }
-.export-options { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
 .exportbar label { color: var(--muted); }
 .export-actions { display: flex; align-items: center; gap: 8px; }
 .export-actions button { white-space: nowrap; }
@@ -420,15 +425,12 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
 }
 
 @media (max-width: 1220px) {
-  .topbar { display: grid; grid-template-columns: auto minmax(220px, 1fr) auto; grid-template-rows: auto auto; }
+  .topbar { display: grid; grid-template-columns: auto minmax(220px, 1fr) auto auto; grid-template-rows: auto auto; }
   .brand { grid-column: 1; grid-row: 1; }
   .search { grid-column: 1 / 3; grid-row: 2; min-width: 0; }
   .range-picker { grid-column: 3; grid-row: 2; }
-  #account { grid-column: 3; grid-row: 1; margin-left: 0; }
-  .exportbar { grid-template-columns: minmax(130px, 1fr) auto; }
-  .export-status { grid-column: 1; grid-row: 1; }
-  .export-options { grid-column: 1 / -1; grid-row: 2; }
-  .export-actions { grid-column: 2; grid-row: 1; }
+  .settings-wrap { grid-column: 4; grid-row: 2; }
+  #account { grid-column: 3 / 5; grid-row: 1; margin-left: 0; justify-self: end; }
 }
 
 @media (max-width: 900px) {
@@ -453,7 +455,5 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
   .list { min-height: 300px; overflow: visible; padding: 18px 12px; }
   .reader { min-height: 260px; border-top: 1px solid var(--line); padding: 20px; }
   .exportbar { display: flex; flex-direction: column; align-items: stretch; padding: 14px; }
-  .export-options { gap: 12px 18px; }
   .export-actions { justify-content: flex-end; }
-  .files { flex-wrap: wrap; }
 }
