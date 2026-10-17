@@ -100,5 +100,5 @@
     <text x="1182" y="468.5" font-size="14" class="small">Exchange Online mailbox</text>
   </g>
 
-  <text x="750" y="746" class="subtitle" text-anchor="middle" font-size="14">For local agentic clients with stdio MCP support. Hosted ChatGPT Web, Claude web chat, and Microsoft Copilot chat are not supported.</text>
+  <text x="750" y="746" class="subtitle" text-anchor="middle" font-size="14">For local agentic clients with stdio MCP support. ChatGPT web can connect through OpenAI's Secure MCP Tunnel; other hosted chats are not supported.</text>
 </svg>
