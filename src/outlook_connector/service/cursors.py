@@ -1,7 +1,7 @@
 """Self-contained continuation cursors.
 
-Processes are short-lived (architecture §2), so a cursor carries everything needed to continue:
-the remote continuation link and the original selection. Cursors are opaque to callers.
+Processes are short-lived, so a cursor carries everything needed to continue: the remote continuation link
+and the original selection. Cursors are opaque to callers.
 """
 
 from __future__ import annotations
@@ -25,4 +25,5 @@ def decode(cursor: str, kind: str) -> dict[str, Any]:
         raise InvalidRequest("Malformed cursor.") from None
     if not isinstance(data, dict) or data.get("kind") != kind:
         raise InvalidRequest(f"This cursor does not belong to {kind}.")
+    data.pop("kind")  # the state alone, so a continued request can re-encode it
     return data
