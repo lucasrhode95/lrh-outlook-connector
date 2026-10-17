@@ -4,7 +4,7 @@
 |---|---|
 | [Architecture](architecture.md) | How the connector is built: processes, layers, rules per module, routing, and the contract of every MCP tool (§8) |
 | [Requirements](requirements.md) | What the connector must do, and the decisions behind it |
-| [Roadmap](roadmap.md) | Open decisions, enhancements and validation work |
+| [Roadmap](roadmap.md) | Open work: implementation, decisions and live verification |
 | [API research](api-research.md) | Dated evidence of what Microsoft does not document: client grants, Outlook Web's private services, and Graph behavior beyond its documentation |
 
 Diagrams: [architecture](diagrams/architecture.svg) (overview) and [code map](diagrams/code-map.svg)
