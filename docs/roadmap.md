@@ -61,16 +61,6 @@ candidate values), and whether a single file over the one-request limit is worth
 `CreateAttachmentFromLocalFile` slices ([research §4.3](api-research.md#43-reads-and-other-actions)),
 which are untested.
 
-#### Branch-aware conversations (parked)
-
-A conversation is exactly Exchange's conversation: one flat list, oldest first, with nothing saying who
-answered whom. Example: Alice sends a proposal, Bob replies to all, and Carol forwards it to Dan, who
-replies to Carol; `get_conversation` returns all four by date, and Dan's reply reads as if it answered
-Bob. Plan: build the reply tree from RFC 5322 `Message-ID` / `In-Reply-To` / `References` headers, with
-Exchange `ConversationId` and `Thread-Index` as supporting evidence; detect branches, including forwards;
-offer a merged chronological view where each message is labeled with its branch. Check the quality of
-those headers in real mail first.
-
 ## Decisions
 
 ### Default conversation scope
@@ -114,9 +104,22 @@ ranked search limited to that week.
 
 ### Other calendars
 
-Only the signed-in user's default calendar is listed and searched, so "What does Alex have on Thursday?"
-cannot be answered. Check reading shared and delegated calendars with the `teams.graph` token's
-`Calendars.Read.Shared` ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
+Only the signed-in user's default calendar is listed and searched. Out of reach: secondary calendars the
+user created ("What is on my Project Beta calendar next week?"), and calendars shared with or delegated to
+the user ("What does Alex have on Thursday?"). Check reading the user's own secondary calendars with the
+`teams.graph` token's calendar scope, and shared and delegated calendars with its `Calendars.Read.Shared`
+([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
+
+### Reply headers for branch-aware conversations (parked)
+
+A conversation is exactly Exchange's conversation: one flat list, oldest first, with nothing saying who
+answered whom. Example: Alice sends a proposal, Bob replies to all, and Carol forwards it to Dan, who
+replies to Carol; if Exchange groups all four, `get_conversation` returns them by date, and Dan's reply
+reads as if it answered Bob. A forward that Exchange gives its own conversation id is not returned at all.
+Check the quality of the RFC 5322 `Message-ID` / `In-Reply-To` / `References` headers, and of Exchange's
+`ConversationId` and `Thread-Index`, in real mail. If they hold, building the reply tree becomes an
+enhancement: detect branches, including forwards (looking across conversation ids where a forward left
+the conversation), and offer a merged chronological view where each message is labeled with its branch.
 
 ### Event attachment download
 

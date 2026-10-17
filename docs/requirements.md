@@ -50,7 +50,7 @@ Both surfaces are thin adapters over one shared service, and neither may limit t
 - A permanent background sync daemon.
 - Local full-text content search.
 - Server-side text extraction from attachments. Agents receive the raw file.
-- Branch-aware conversation reconstruction (parked in the roadmap).
+- Branch-aware conversation reconstruction (parked; its header check is in the roadmap).
 
 ## 4. Authentication (decided)
 
