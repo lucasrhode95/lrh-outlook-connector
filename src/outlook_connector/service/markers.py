@@ -3,9 +3,10 @@
 One rule serves get_message, get_conversation and exports:
 
 - An inline image the HTML body references by ``cid:`` reads ``[Image: name]`` where Exchange's text body
-  shows it, which is its alt text in brackets (research §3.6). Placeholders are matched in document order;
-  an image whose placeholder is not found (no alt text, or text that differs) is listed after the text, so
-  a name never lands on the wrong image.
+  shows it, which is its alt text in brackets (research §3.6). A placeholder is replaced only when the text
+  holds exactly as many ``[alt]`` as the HTML has images with that alt text, so the k-th occurrence is the
+  k-th image. Otherwise (no alt text, the same bracketed words in the prose, or text that differs) the
+  marker is listed after the text, so a name never lands on the wrong place.
 - Files, forwarded messages and cloud links follow the text: ``[File: name]``, ``[Message: name.eml]`` and
   ``[Link: name]``. Graph v1.0 gives no address for a cloud link.
 - Names come from the attachment name, made safe as a file name and unique within the message
@@ -62,22 +63,27 @@ def with_markers(
         for a in attachments
         if a.kind == "file" and a.is_inline and a.content_id and a.id in names
     }
-    out, position = text, 0
+    images = _images(html) if html is not None else []
+    by_alt: dict[str, list[str | None]] = {}  # alt text -> content id of each image carrying it, in order
+    for cid, alt in images:
+        if alt:
+            by_alt.setdefault(alt, []).append(cid)
+    edits: list[tuple[int, int, str]] = []  # (start, end, marker) in ``text``
     placed: set[str] = set()
-    unplaced: list[Attachment] = []
-    for cid, alt in _images(html) if html is not None else []:
-        attachment = by_cid.get(cid)
-        if attachment is None:
-            continue
-        marker = _marker(attachment, names[attachment.id])
-        found = out.find(f"[{alt}]", position) if alt else -1
-        if found >= 0:
-            out = out[:found] + marker + out[found + len(alt) + 2 :]
-            position = found + len(marker)
-            placed.add(attachment.id)
-        elif attachment.id not in placed and all(a.id != attachment.id for a in unplaced):
-            unplaced.append(attachment)
-    trailing = [a for a in unplaced if a.id not in placed]
+    for alt, cids in by_alt.items():
+        found = _occurrences(text, f"[{alt}]")
+        if len(found) != len(cids):
+            continue  # ambiguous: these images are listed after the text
+        for start, cid in zip(found, cids, strict=True):
+            attachment = by_cid.get(cid) if cid else None
+            if attachment is not None:
+                edits.append((start, start + len(alt) + 2, _marker(attachment, names[attachment.id])))
+                placed.add(attachment.id)
+    out = text
+    for start, end, marker in sorted(edits, reverse=True):
+        out = out[:start] + marker + out[end:]
+    unplaced = [by_cid[cid] for cid, _ in images if cid in by_cid and by_cid[cid].id not in placed]
+    trailing = list({a.id: a for a in unplaced}.values())
     trailing += [a for a in attachments if a.id in names and not (a.kind == "file" and a.is_inline)]
     if not trailing:
         return out
@@ -95,22 +101,33 @@ def _marker(attachment: Attachment, name: str) -> str:
     return f"[File: {name}]"
 
 
+def _occurrences(text: str, needle: str) -> list[int]:
+    """Start of each non-overlapping occurrence of ``needle`` in ``text``."""
+    found: list[int] = []
+    start = text.find(needle)
+    while start >= 0:
+        found.append(start)
+        start = text.find(needle, start + len(needle))
+    return found
+
+
 class _ImageParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.images: list[tuple[str, str]] = []
+        self.images: list[tuple[str | None, str]] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag != "img":
             return
         values = {key: value or "" for key, value in attrs}
         src = values.get("src", "").strip()
-        if src[:4].lower() == "cid:":
-            self.images.append((src[4:], " ".join(values.get("alt", "").split())))
+        cid = src[4:] if src[:4].lower() == "cid:" else None
+        self.images.append((cid, " ".join(values.get("alt", "").split())))
 
 
-def _images(html: str) -> list[tuple[str, str]]:
-    """(content id, alt text) of each ``cid:`` image, in document order."""
+def _images(html: str) -> list[tuple[str | None, str]]:
+    """(content id, or None for another source, and alt text) of each image, in document order. Images
+    of any source count, since Exchange shows each one's alt text."""
     parser = _ImageParser()
     parser.feed(html)
     parser.close()

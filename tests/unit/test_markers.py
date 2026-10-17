@@ -87,3 +87,18 @@ def test_names_given_by_an_export_replace_the_message_names() -> None:
     assert with_markers("Text", [REPORT], html=None, names={"a2": "budget-report (2).xlsx"}) == (
         "Text\n\n[File: budget-report (2).xlsx]"
     )
+
+
+def test_the_same_bracketed_words_in_the_prose_make_the_placeholder_ambiguous() -> None:
+    text = "See [chart] below.\n\n[chart]"
+    html = '<p>See [chart] below.</p><img alt="chart" src="cid:image001.png@synthetic">'
+    assert with_markers(text, [CHART], html=html) == "See [chart] below.\n\n[chart]\n\n[Image: image001.png]"
+
+
+def test_an_external_image_with_the_same_alt_text_keeps_its_own_placeholder() -> None:
+    text = "[logo] then [logo]"
+    html = (
+        '<img alt="logo" src="https://example.com/l.png"> then '
+        '<img alt="logo" src="cid:image001.png@synthetic">'
+    )
+    assert with_markers(text, [CHART], html=html) == "[logo] then [Image: image001.png]"
