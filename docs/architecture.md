@@ -131,7 +131,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 **[`failures.py`](../src/outlook_connector/service/failures.py)** is the one classification of failed Microsoft requests (the table is in requirements §11) and the one renderer of the `[EXPORT ERROR]` block and the export's "Export errors" line.
 
 **[`writes.py`](../src/outlook_connector/service/writes.py) and [`signatures.py`](../src/outlook_connector/service/signatures.py)**
-- Text bodies become escaped minimal HTML that keeps whitespace and NBSP. HTML bodies and signatures pass one checker, [`passive_html.py`](../src/outlook_connector/service/passive_html.py): no active content, no elements that change how the rest is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`), no markup left open at the end.
+- Text bodies become escaped minimal HTML that keeps whitespace and NBSP. HTML bodies and signatures pass one checker, [`passive_html.py`](../src/outlook_connector/service/passive_html.py): no declarations (doctype, CDATA, processing instructions), no active content, no elements that change how the rest is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`), no markup left open at the end.
 - `create_draft` resolves the default or named signature fresh, adds one signature block after the body, turns data-URI images into CID-linked inline attachments, and verifies the saved images and, for replies, the quoted history on Graph read-back. A configuration that changes during the read is refused.
 - `send_draft` accepts no content: it checks the bound account and sends the stored draft once. An ambiguous answer reads the exact id; a Sent Items copy proves it was sent, otherwise the result is unknown.
 
@@ -446,7 +446,7 @@ Returns one signature's HTML and plain text. A signature that `list_signatures` 
 
 #### `create_signature`
 
-Creates a signature from passive HTML. Scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs, markup left open at the end, and elements that change how the rest of the markup is read are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
+Creates a signature from passive HTML. Declarations (doctype, CDATA, processing instructions), scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs, markup left open at the end, and elements that change how the rest of the markup is read are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
 
 To copy a signature from an Outlook draft: read its HTML, download each inline image it references by `cid:`, replace each `cid:` reference with a `data:image` URI holding that image's bytes, and create the signature from the result.
 

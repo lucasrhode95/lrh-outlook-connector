@@ -196,3 +196,9 @@ def test_reader_gets_an_entire_large_message_in_one_server_read(client: TestClie
     assert content["text"] == text and content["total_chars"] == len(text)
     assert content.get("next_offset") is None
     assert fake.calls.count("GET /v1.0/me/messages/m1") == 1  # fetched once, not once per chunk
+
+
+def test_responses_carry_security_headers(client: TestClient) -> None:
+    page = client.get("/")
+    assert page.headers["X-Content-Type-Options"] == "nosniff"
+    assert page.headers["Referrer-Policy"] == "no-referrer"

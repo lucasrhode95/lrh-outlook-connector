@@ -67,7 +67,10 @@ def _guard(token: str, port: int, activity: Activity) -> type[BaseHTTPMiddleware
             if request.url.path.startswith("/api/") and request.headers.get("x-session-token") != token:
                 return JSONResponse({"error": "Missing or wrong session token."}, status_code=403)
             activity.touch()
-            return await call_next(request)
+            response = await call_next(request)
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
+            return response
 
     return Guard
 

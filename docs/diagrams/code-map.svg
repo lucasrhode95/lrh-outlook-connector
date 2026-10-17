@@ -240,7 +240,7 @@
 <g><title>Output folders under the data directory; files older than a week are removed; exclusive file creation.</title><text class="detail" x="691" y="2252">• <tspan class="code">localfiles.py</tspan></text></g>
 <g><title>Validation shared by the entry points that accept mailbox scope.</title><text class="detail" x="691" y="2279">• <tspan class="code">scope.py</tspan></text></g>
 <g><title>Concurrent reads that finish or are cancelled before their caller returns.</title><text class="detail" x="691" y="2306">• <tspan class="code">concurrency.py</tspan></text></g>
-<g><title>The one HTML check for draft bodies and signatures: no active content, no markup left open, no elements that change how the rest is read.</title><text class="detail" x="691" y="2333">• <tspan class="code">passive_html.py</tspan></text></g>
+<g><title>The one HTML check for draft bodies and signatures: no declarations, no active content, no markup left open, no elements that change how the rest is read.</title><text class="detail" x="691" y="2333">• <tspan class="code">passive_html.py</tspan></text></g>
 <text class="group-title" x="1100" y="2168">Domain</text>
 <g><title>Pydantic models: the single schema for the service, the MCP tools and the web API. Never mirrors a Microsoft wire format.</title><text class="detail" x="1100" y="2198">• <tspan class="code">domain/models.py</tspan></text></g>
 <g><title>ConnectorError and its kinds (NotFound, Throttled, AuthenticationRequired, WriteOutcomeUnknown, ...); surfaces know how to present them.</title><text class="detail" x="1100" y="2225">• <tspan class="code">domain/errors.py</tspan></text></g>
