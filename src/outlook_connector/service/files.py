@@ -107,7 +107,13 @@ class Files:
                 path=str(target), name=name, content_type=content_type, size=target.stat().st_size
             )
         folder.mkdir(parents=True, exist_ok=True)
-        partial = claim(folder, f".{uuid.uuid4().hex}.part")
+        try:
+            partial = claim(folder, f".{uuid.uuid4().hex}.part")
+        except FileNotFoundError:
+            # Another process's cleanup removed the folder (empty and a week old) after mkdir. A recreated
+            # folder is fresh, so cleanup leaves it alone for a week: one retry is enough.
+            folder.mkdir(parents=True, exist_ok=True)
+            partial = claim(folder, f".{uuid.uuid4().hex}.part")
         try:
             size = await self.mailbox.reader.download_attachment(message_id, attachment.id, partial)
         except BaseException:

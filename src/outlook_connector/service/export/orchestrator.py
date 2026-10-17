@@ -310,9 +310,11 @@ class Exports:
         for title, base, members in _groups(summaries, combine):
             name = policy.dedupe(policy.safe_name(f"{base}{suffix}", fallback=f"export{suffix}"), taken)
             file = TextFile(name=name, text="")
-            taken: set[str] = set()  # file names used in this file's folder
+            in_folder: set[str] = set()  # attachment names used in this file's folder
             stored: dict[str, str] = {}  # content digest -> name in this file's folder
-            rendered = [self._message(m, fetched, downloads, request, file, taken, stored) for m in members]
+            rendered = [
+                self._message(m, fetched, downloads, request, file, in_folder, stored) for m in members
+            ]
             if request.format == "jsonl":
                 file.text = "".join(jsonl_record(r, body_kind=request.body) + "\n" for r in rendered)
             else:
@@ -329,7 +331,7 @@ class Exports:
         downloads: dict[str, Downloaded],
         request: ExportRequest,
         file: TextFile,
-        taken: set[str],
+        in_folder: set[str],
         stored: dict[str, str],
     ) -> RenderedMessage:
         """One message's text, with a marker for each file, and its attachment records (JSONL). A file
@@ -357,7 +359,9 @@ class Exports:
                 digest = hashlib.sha256(path.read_bytes()).hexdigest()
                 final = stored.get(digest)
                 if final is None:
-                    final = policy.dedupe(names.get(attachment.id) or f"attachment-{len(taken) + 1}", taken)
+                    final = policy.dedupe(
+                        names.get(attachment.id) or f"attachment-{len(in_folder) + 1}", in_folder
+                    )
                     stored[digest] = final
                     file.attachments.append((final, path))
                 names[attachment.id] = final

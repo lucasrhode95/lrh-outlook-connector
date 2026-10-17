@@ -920,3 +920,43 @@ async def test_failed_conversation_export_cancels_and_awaits_sibling_reads(
     with pytest.raises(NotFound) as caught:
         await exports.export(ExportRequest(conversation_ids=["missing", "slow"]))
     assert caught.value is failure and cleaned_up.is_set()
+
+
+async def test_conversations_with_the_same_name_keep_separate_files(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    for mid, conversation in (("same1", "c-same-1"), ("same2", "c-same-2")):
+        fake.add(
+            FakeMessage(
+                mid, "Status", "f-inbox", "2026-10-05T09:00:00Z", conversation=conversation,
+                text=f"body of {mid}",
+                attachments=[FakeAttachment(f"{mid}-a", "notes.txt", mid.encode(), "text/plain")],
+            )
+        )  # fmt: skip
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-same-1", "c-same-2"], include_attachments=True)
+    )
+    names = zip_names(artifact.path)
+    assert len(names) == len(set(names)) == 4  # two text files, each with its own attachment folder
+    texts = [n for n in names if n.endswith(".txt") and "/" not in n]
+    assert sorted("body of same1" in zip_text(artifact.path, n) for n in texts) == [False, True]
+
+
+async def test_a_cache_folder_removed_before_the_claim_is_recreated(
+    exports: Exports, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outlook_connector.service import files as files_module
+
+    real_claim = files_module.claim
+    removed = False
+
+    def claim_after_cleanup(directory: Path, filename: str) -> Path:
+        nonlocal removed
+        if not removed:
+            removed = True
+            directory.rmdir()  # another process's cleanup removes the empty folder meanwhile
+        return real_claim(directory, filename)
+
+    monkeypatch.setattr(files_module, "claim", claim_after_cleanup)
+    saved = await Files(exports.mailbox).download_attachment("m3", ["numbers.xlsx"])
+    assert Path(saved.files[0].path).read_bytes() == b"xlsx-bytes"
