@@ -88,3 +88,20 @@ def test_a_file_that_replaces_an_expired_one_is_restored_not_deleted(
 
     assert target.read_bytes() == b"fresh download"
     assert sorted(path.name for path in folder.iterdir()) == ["report.pdf"]
+
+
+def test_cleanup_is_left_to_the_process_that_holds_the_folder_lock(tmp_path: Path) -> None:
+    folder = tmp_path / "downloads"
+    folder.mkdir()
+    expired = folder / "expired.bin"
+    expired.write_bytes(b"old")
+    _age(expired, 8)
+
+    with localfiles._cleanup_lock(folder) as held:  # pyright: ignore[reportPrivateUsage]
+        assert held
+        localfiles.kept_dir("downloads")  # another holder is cleaning: this call skips its cleanup
+        assert expired.exists()
+
+    localfiles.kept_dir("downloads")
+    assert not expired.exists()
+    assert not (folder / ".downloads.cleanup.lock").exists()  # the lock sits beside the folder
