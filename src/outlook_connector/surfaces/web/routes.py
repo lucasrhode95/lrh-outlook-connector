@@ -58,16 +58,20 @@ class Activity:
 def _guard(token: str, port: int, activity: Activity) -> type[BaseHTTPMiddleware]:
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
+    async def admit(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if request.headers.get("host") not in allowed_hosts:
+            return JSONResponse({"error": "Forbidden host."}, status_code=403)
+        if request.url.path.startswith("/api/") and request.headers.get("x-session-token") != token:
+            return JSONResponse({"error": "Missing or wrong session token."}, status_code=403)
+        activity.touch()
+        return await call_next(request)
+
     class Guard(BaseHTTPMiddleware):
         async def dispatch(
             self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
         ) -> Response:
-            if request.headers.get("host") not in allowed_hosts:
-                return JSONResponse({"error": "Forbidden host."}, status_code=403)
-            if request.url.path.startswith("/api/") and request.headers.get("x-session-token") != token:
-                return JSONResponse({"error": "Missing or wrong session token."}, status_code=403)
-            activity.touch()
-            response = await call_next(request)
+            # Every response the guard returns carries the headers, including its own refusals.
+            response = await admit(request, call_next)
             response.headers.setdefault("X-Content-Type-Options", "nosniff")
             response.headers.setdefault("Referrer-Policy", "no-referrer")
             return response

@@ -202,3 +202,14 @@ def test_responses_carry_security_headers(client: TestClient) -> None:
     page = client.get("/")
     assert page.headers["X-Content-Type-Options"] == "nosniff"
     assert page.headers["Referrer-Policy"] == "no-referrer"
+
+
+def test_refused_requests_carry_the_security_headers(client: TestClient) -> None:
+    wrong_host = client.get("/", headers={"host": "attacker.example"})
+    assert wrong_host.status_code == 403
+    assert wrong_host.headers["X-Content-Type-Options"] == "nosniff"
+    assert wrong_host.headers["Referrer-Policy"] == "no-referrer"
+    wrong_token = client.get("/api/status", headers={"X-Session-Token": "not-the-token"})
+    assert wrong_token.status_code == 403
+    assert wrong_token.headers["X-Content-Type-Options"] == "nosniff"
+    assert wrong_token.headers["Referrer-Policy"] == "no-referrer"
