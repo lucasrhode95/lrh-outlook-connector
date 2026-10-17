@@ -2,13 +2,17 @@
 
 Each kind has its own folder. Files older than a week are removed when the folder is next used, including
 files in its subfolders (the download cache keeps one subfolder per source). A new file name is claimed with
-an exclusive create, so concurrent processes never share a file.
+an exclusive create, so concurrent processes never share a file. An expired file is renamed to a private
+name before it is deleted, so the file deleted is the one whose age was checked. A file held open elsewhere
+is kept.
 """
 
 from __future__ import annotations
 
 import contextlib
+import os
 import time
+import uuid
 from pathlib import Path, PurePath
 
 from outlook_connector import config
@@ -44,10 +48,28 @@ def _remove_expired(directory: Path, cutoff: float) -> None:
                 _remove_expired(old, cutoff)
                 if old.stat().st_mtime < cutoff and not any(old.iterdir()):
                     _remove_empty(old)
-            elif old.is_file() and old.stat().st_mtime < cutoff:
-                old.unlink(missing_ok=True)
-        except FileNotFoundError:
-            continue  # another process removed the entry after it was listed
+            elif old.is_file():
+                _remove_if_expired(old, cutoff)
+        # Removed by another process, or open elsewhere (Windows): kept for a later cleanup.
+        # Any other error is a real problem and still propagates.
+        except (FileNotFoundError, PermissionError):
+            continue
+
+
+def _remove_if_expired(path: Path, cutoff: float) -> None:
+    """Delete ``path`` if it has expired. It is renamed to a private name first, so a file that replaces
+    it after the first check is not deleted: its age is checked again, and a fresh file goes back under
+    its name."""
+    if path.stat().st_mtime >= cutoff:
+        return
+    claimed = path.with_name(f".{path.name}.{uuid.uuid4().hex}.expiring")
+    os.replace(path, claimed)
+    if claimed.stat().st_mtime < cutoff:
+        claimed.unlink(missing_ok=True)
+        return
+    with contextlib.suppress(OSError):  # the name was taken again: the file stays under its private name
+        os.link(claimed, path)
+        claimed.unlink()
 
 
 def _remove_empty(folder: Path) -> None:
