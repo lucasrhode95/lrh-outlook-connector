@@ -1,7 +1,7 @@
-"""The single export path (requirements §10), used by both the local UI and MCP.
+"""The single export path (requirements §11), used by both the local UI and MCP.
 
 selection (conversations + messages + folder/date window) → copies merged → bodies (Graph $batch) →
-attachments (policy) → grouping (per conversation / all / none) →
+attachments (policy, markers) → grouping (per conversation / all / none) →
 TXT or JSONL rendering → packaging.
 """
 
@@ -30,10 +30,11 @@ from outlook_connector.domain.models import (
     Scope,
 )
 from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.service import markers
 from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first
 from outlook_connector.service.export import attachments as policy
-from outlook_connector.service.export.formatter import RenderedMessage, body_text, jsonl_record, render_file
+from outlook_connector.service.export.formatter import RenderedMessage, jsonl_record, render_file
 from outlook_connector.service.export.packaging import TextFile, package
 from outlook_connector.service.failures import (
     THROTTLING,
@@ -68,6 +69,7 @@ class Fetched:
     missing: dict[str, ExportError]  # message id -> why it has no body
     attachments: dict[str, list[Attachment]]
     attachment_failures: dict[str, ExportError]  # message id -> why its attachments could not be listed
+    html: dict[str, str]  # message id -> body HTML (of the exported kind), for messages with inline files
 
 
 class Exports:
@@ -77,7 +79,7 @@ class Exports:
         self.reader = conversations.mailbox.reader
 
     async def export(self, request: ExportRequest) -> ExportArtifact:
-        """Export a selection to one local file (requirements §10).
+        """Export a selection to one local file (requirements §11).
 
         Entry point: the request is structurally validated as an ExportRequest. This method checks
         the export limit and that something is selected; _select enforces the selected-message cap.
@@ -94,16 +96,13 @@ class Exports:
                 f"Nothing to export: the selection holds no messages{_excluded_note(selection.excluded)}."
             )
         bodies, missing = await self.conversations.bodies(summaries, known=selection.known)
-        found, attachment_failures = await self._attachments(
-            summaries, inline=request.include_attachments, skip=set(missing)
-        )
-        fetched = Fetched(bodies, missing, found, attachment_failures)
+        found, attachment_failures = await self._attachments(summaries, skip=set(missing))
+        html = await self.mailbox.inline_html(found, request.body)
+        fetched = Fetched(bodies, missing, found, attachment_failures, html)
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
         try:
             downloads = (
-                await self._download(summaries, found, request, workdir)
-                if request.include_attachments
-                else {}
+                await self._download(summaries, found, html, workdir) if request.include_attachments else {}
             )
             failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, ExportError)]
             summary = error_summary(list(missing.values()), failed_files, list(attachment_failures.values()))
@@ -231,18 +230,17 @@ class Exports:
         self,
         summaries: list[MessageSummary],
         *,
-        inline: bool,
         skip: set[str],
     ) -> tuple[dict[str, list[Attachment]], dict[str, ExportError]]:
         """Attachments per message, and why listing failed for others. ``skip``: messages without
-        a body (deleted on the server, or not fetched). Graph reports hasAttachments=false when a
-        message has only inline attachments, so when files are exported (inline images included)
-        every message is asked, in batches.
+        a body (deleted on the server, or not fetched). Every message is asked, in batches: the text names
+        each file whether or not files are exported, and Graph reports hasAttachments=false when a
+        message has only inline attachments.
 
         Assumes (not re-checked here): ``summaries`` is the final selection from ``_select``, and ``skip``
         the messages without a body from ``Conversations.bodies``.
         """
-        wanted = [m.id for m in summaries if m.id not in skip and (inline or m.has_attachments)]
+        wanted = [m.id for m in summaries if m.id not in skip]
         if not wanted:
             return {}, {}
         found, failed = await self.reader.list_attachments_many(wanted)
@@ -254,27 +252,18 @@ class Exports:
         self,
         summaries: list[MessageSummary],
         found: dict[str, list[Attachment]],
-        request: ExportRequest,
+        html: dict[str, str],
         workdir: Path,
     ) -> dict[str, Downloaded]:
         """Download the attachments the policy wants, each to its own file in ``workdir``; a failed download
         becomes an ExportError.
 
         Assumes (not re-checked here): ``summaries`` is the final selection and ``found`` the attachment
-        listing from ``_attachments`` for it.
+        listing from ``_attachments`` for it, and ``html`` the body HTML of the exported kind.
         """
-        inline_ids = {
-            mid: [a.id for a in items if a.is_inline and a.kind == "file"] for mid, items in found.items()
-        }
-        needs_html = [m.id for m in summaries if inline_ids.get(m.id)]
-        html = (await self.reader.get_messages(needs_html, body_format="html")).messages if needs_html else {}
-
         jobs: list[tuple[str, Attachment, Path]] = []
         for index, summary in enumerate(summaries):
-            page = html.get(summary.id)
-            page_html = None
-            if page is not None:
-                page_html = page.unique_body_html if request.body == "unique" else page.body_html
+            page_html = html.get(summary.id)
             for position, attachment in enumerate(found.get(summary.id, [])):
                 if policy.wanted(attachment, body_html=page_html):
                     jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
@@ -321,9 +310,11 @@ class Exports:
         for title, base, members in _groups(summaries, combine):
             name = policy.dedupe(policy.safe_name(f"{base}{suffix}", fallback=f"export{suffix}"), taken)
             file = TextFile(name=name, text="")
-            names: set[str] = set()
+            in_folder: set[str] = set()  # attachment names used in this file's folder
             stored: dict[str, str] = {}  # content digest -> name in this file's folder
-            rendered = [self._message(m, fetched, downloads, request, file, names, stored) for m in members]
+            rendered = [
+                self._message(m, fetched, downloads, request, file, in_folder, stored) for m in members
+            ]
             if request.format == "jsonl":
                 file.text = "".join(jsonl_record(r, body_kind=request.body) + "\n" for r in rendered)
             else:
@@ -340,25 +331,26 @@ class Exports:
         downloads: dict[str, Downloaded],
         request: ExportRequest,
         file: TextFile,
-        names: set[str],
+        in_folder: set[str],
         stored: dict[str, str],
     ) -> RenderedMessage:
-        """One message's text, attachment lines (TXT) and attachment records (JSONL).
+        """One message's text, with a marker for each file, and its attachment records (JSONL). A file
+        this export wrote is named in the text by its name in the folder.
 
         Assumes (not re-checked here): the message has a body in ``fetched.bodies`` or an error in
         ``fetched.missing`` (``Conversations.bodies`` guarantees one of the two).
         """
-        lines: list[str] = []
         blocks: list[str] = []
         records: list[dict[str, Any]] = []
         listing_error = fetched.attachment_failures.get(message.id)
         if listing_error:
             blocks.append(error_block("The attachments of this message could not be listed.", listing_error))
         listed = fetched.attachments.get(message.id, [])
+        names = markers.file_names(listed)
         if request.include_attachments:
             for attachment, path in downloads.get(message.id, []):
                 if isinstance(path, ExportError):
-                    name = attachment.name or "(unnamed)"
+                    name = names.get(attachment.id) or attachment.name or "(unnamed)"
                     blocks.append(error_block(f"The attachment {name} could not be downloaded.", path))
                     records.append(_attachment_record(attachment, error=path))
                     continue
@@ -368,34 +360,30 @@ class Exports:
                 final = stored.get(digest)
                 if final is None:
                     final = policy.dedupe(
-                        policy.safe_name(
-                            attachment.name,
-                            fallback=f"attachment-{len(names) + 1}",
-                            eml=attachment.kind == "item",
-                        ),
-                        names,
+                        names.get(attachment.id) or f"attachment-{len(in_folder) + 1}", in_folder
                     )
                     stored[digest] = final
                     file.attachments.append((final, path))
-                lines.append(f"{file.folder}/{final} ({policy.size_label(path.stat().st_size)})")
+                names[attachment.id] = final
                 records.append(_attachment_record(attachment, file=f"{file.folder}/{final}"))
-            for a in listed:
-                if a.kind == "reference":
-                    lines.append(f"{a.name} (cloud link, not downloaded)")
-                    records.append(_attachment_record(a))
+            records += [_attachment_record(a) for a in listed if a.kind == "reference"]
         else:
-            for a in listed:
-                if policy.listed(a):
-                    lines.append(f"{a.name} ({policy.size_label(a.size)})")
-                    records.append(_attachment_record(a))
+            records += [_attachment_record(a) for a in listed if policy.listed(a)]
         error = fetched.missing.get(message.id)
         text = (
-            error_block(BODY_MISSING, error) if error else body_text(fetched.bodies[message.id], request.body)
+            error_block(BODY_MISSING, error)
+            if error
+            else markers.with_markers(
+                fetched.bodies[message.id].body(request.body),
+                listed,
+                html=fetched.html.get(message.id),
+                names=names,
+            ).strip()
+            or "(No text content.)"
         )
         return RenderedMessage(
             message,
             text,
-            lines,
             export_error=error,
             error_blocks=blocks,
             attachments=records,

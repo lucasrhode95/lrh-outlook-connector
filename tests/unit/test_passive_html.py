@@ -69,3 +69,16 @@ def test_start_tags_carry_their_source_for_later_rules() -> None:
 def test_elements_that_change_how_the_rest_is_read_are_refused(page: str) -> None:
     with pytest.raises(InvalidRequest, match="changes how the rest of the markup is read"):
         passive_start_tags(page)
+
+
+@pytest.mark.parametrize(
+    ("page", "match"),
+    [
+        ("<!DOCTYPE html><p>x</p>", "declarations"),
+        ("<![CDATA[ > <img src=x onerror=alert(1)> ]]>", "CDATA"),
+        ("<?xml version=1.0?><p>x</p>", "processing instructions"),
+    ],
+)
+def test_declarations_are_refused(page: str, match: str) -> None:
+    with pytest.raises(InvalidRequest, match=match):
+        passive_start_tags(page)

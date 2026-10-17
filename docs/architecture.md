@@ -27,7 +27,7 @@ There is no daemon. MCP and the UI run only for their active client or session; 
 | `outlook-connector mcp` | One stdio process per MCP client session | core + MCP |
 | `outlook-connector ui [--port]` | Localhost web server; exits on Ctrl+C or after an idle timeout | core + web stack |
 | `outlook-connector auth [--sign-out] [--unsecure]` | Prepares every shared profile, or signs out | shared auth |
-| `outlook-connector status [--check] [--json]` | Offline profile and cache status; `--check` acquires tokens but does not prove API authorization | shared auth |
+| `outlook-connector status [--check]` | Offline profile and cache status, in the same shape as `auth_status`; `--check` acquires tokens but does not prove API authorization | shared auth |
 
 Consequences of short-lived processes:
 
@@ -66,9 +66,9 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 ### 5.2 [`remote/transport.py`](../src/outlook_connector/remote/transport.py)
 
 - One `httpx.AsyncClient` per process. [`remote/urls.py`](../src/outlook_connector/remote/urls.py) is the only outbound URL policy: an HTTPS host allowlist, Graph continuation links kept under the versioned Graph root, no redirects. Responses are size-capped; downloads stream.
-- One auth/retry state machine for requests and downloads. Only idempotent requests retry (GETs, and read-style POSTs such as a `$batch` of GETs), honoring 429 and Retry-After. A write is sent once: no answer or a 5xx raises `WriteOutcomeUnknown`; a 4xx or 429 is a definite failure.
+- One auth/retry state machine for requests and downloads. Only idempotent requests retry (GETs, and read-style POSTs such as a `$batch` of GETs), honoring 429 and Retry-After. A write is retried, a bounded number of times and honoring Retry-After, only when the failure proves nothing was applied: the connection never opened, or Microsoft answered 429 or 503. No answer or any other 5xx raises `WriteOutcomeUnknown` and is never resent; another 4xx is a definite failure.
 - At most **4 requests in flight** per process (Exchange allows about 4 concurrent requests per app and mailbox, and 10,000 per 10 minutes).
-- **401** renews the token once (force refresh, or the claims challenge from `WWW-Authenticate`); a second 401 raises `AuthenticationRequired`. **403** is access denied for that item, never a sign-in problem.
+- **401** renews the token once (force refresh, or the claims challenge from `WWW-Authenticate`); a second 401 raises `AuthenticationRequired`. **403** raises `PermissionDenied`: access denied for that item, never a sign-in problem. Domain errors are the same in every `lrh-*` connector: `InvalidRequest` (with `DownloadLimitExceeded`: "The file exceeds the connector's N MiB download limit."), `NotFound`, `Throttled`, `Upstream`, `PermissionDenied` (HTTP 403: access denied for that account or item, never a sign-in problem; a kind of `Upstream`) and, for writes, `WriteOutcomeUnknown`, besides `AuthenticationRequired` and `AccountMismatch` from the shared sign-in.
 - Errors name the operation in progress ("While fetching message bodies"), the HTTP status, the service code, a shortened message and the request id. Logs carry metadata only.
 
 ### 5.3 [`remote/ids.py`](../src/outlook_connector/remote/ids.py)
@@ -84,21 +84,21 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - A conversation listing cannot use `$orderby` with the `conversationId` filter, so the service sorts; Graph pages it, and the connector reads every page (research §3.5).
 - `count_messages` returns per-folder counts in one `$batch` (`$count`, `ConsistencyLevel: eventual`); a failed folder is left out instead of hiding the others.
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
-- Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MB guard stops larger ones.
+- Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
 
 ### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py), calendar adapters
 
 - Bearer-only envelope (research §4.1–4.2): payloads up to 2,048 characters go in the `X-OWA-UrlPostData` header; the anchor mailbox is the Outlook token's upn.
 - Two request styles. `Ows.call` sends one item action in the JsonRequest envelope; an item whose ResponseClass is not Success/Warning raises with its ResponseCode. `Ows.call_request` sends inbox-rule actions as the bare request object (research §4.4); `WasSuccessful`/`ErrorCode` decide success, and an answer without them is an unknown outcome. `call_read` and `call_view` are the retryable read paths (`call_view` for `GetCalendarView`, whose items sit directly in `Body`).
-- Writes: drafts are `CreateItem` (SaveOnly), and replies use `ReplyToItem`/`ReplyAllToItem` with explicit recipients and an HTML body so the quoted original keeps its formatting; signature images go in as CID-linked inline attachments. `send_draft` is `UpdateItem` with SendAndSaveCopy and no field changes, bound to the change key the draft was read at (NeverOverwrite); `SendItem` is not supported over OWS. Read state and flags are one `SetItemField` per message with read receipts suppressed; `MoveItem` by distinguished or folder id; `DeleteItem` with MoveToDeletedItems only. Conversation read state is done per message, not with ApplyConversationAction. Writes return an outcome per message and are never retried.
+- Writes: drafts are `CreateItem` (SaveOnly), and replies use `ReplyToItem`/`ReplyAllToItem` with explicit recipients and an HTML body so the quoted original keeps its formatting; signature images go in as CID-linked inline attachments. `send_draft` is `UpdateItem` with SendAndSaveCopy and no field changes, bound to the change key the draft was read at (NeverOverwrite); `SendItem` is not supported over OWS. Read state and flags are one `SetItemField` per message with read receipts suppressed; `MoveItem` by distinguished or folder id; `DeleteItem` with MoveToDeletedItems only. Conversation read state is done per message, not with ApplyConversationAction. Writes return an outcome per message; a write is resent only when Microsoft refused it as throttled or unavailable (429, 503) or the connection never opened.
 - **Calendar search and details.** [`substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) calls Outlook-hosted Search v2 (`m365.search`, Event/Exchange) and keeps `Cvid` and `LogicalId` across the pages of one walk. [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) hydrates a result with `GetItem` (default shape plus body and attachment metadata, no attachment bytes). [`service/calendar.py`](../src/outlook_connector/service/calendar.py) keeps agenda text verbatim with its truncation flag, omits Search v2 totals (recurring totals were inconsistent), and issues no cursor at offset 1,000, which Search v2 refuses (research §6.1). Events are never mapped to Teams resources automatically.
 - **Calendar windows, Graph first.** [`graph_calendar.py`](../src/outlook_connector/remote/graph_calendar.py) reads `/me/calendarView` under `config.CALENDAR_PROFILE` (`teams.graph`; the Outlook Graph profile has no calendar scope), asks for UTC times and text bodies, refuses non-UTC times, and converts ids to the Outlook Web form for `get_calendar_event`. `OwsCalendarWindow` calls `GetCalendarView` (UTC `TimeZoneContext`, no descriptions). [`service/calendar_listing.py`](../src/outlook_connector/service/calendar_listing.py) falls back to Outlook Web only for a first page whose Graph read failed for a service reason (`AuthenticationRequired`, `Throttled`, `Upstream`), never when `contains` or `include_body` needs descriptions. A cursor keeps the service that answered; Outlook Web pages resume after the last event by (start, id) (research §3.8).
 
 ### 5.6 [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py)
 
 - Implements SignatureStore over Outlook Cloud Settings with the account-bound Outlook profile; no local copy.
-- Reads fetch the name list and both defaults fresh; each content read checks its scope matches the list. The opaque account scope is carried from present settings into writes. Missing list or default records mean no names or defaults; malformed or duplicate records and mismatched scopes fail. Writes need a scope returned by Outlook, so with none, configure a signature in Outlook first. Each write is one PATCH or DELETE, never retried.
+- Reads fetch the name list and both defaults fresh; each content read checks its scope matches the list. The opaque account scope is carried from present settings into writes. Missing list or default records mean no names or defaults; malformed or duplicate records and mismatched scopes fail. Writes need a scope returned by Outlook, so with none, configure a signature in Outlook first. Each write is one PATCH or DELETE, resent only when refused as throttled or unavailable (429, 503) or when the connection never opened.
 - Names are exact and case-sensitive; commas are refused because the list is comma-joined; names are URL-encoded for content reads.
 
 ### 5.7 [`domain/`](../src/outlook_connector/domain/)
@@ -128,10 +128,10 @@ One SQLite database per account fingerprint: the account binding and the folder 
 
 **[`conversations.py`](../src/outlook_connector/service/conversations.py)** fetches, sorts oldest first, and hydrates bodies in `$batch`; a body that fails becomes that message's `export_error`.
 
-**[`failures.py`](../src/outlook_connector/service/failures.py)** is the one classification of failed Microsoft requests (the table is in requirements §10) and the one renderer of the `[EXPORT ERROR]` block and the export's "Export errors" line.
+**[`failures.py`](../src/outlook_connector/service/failures.py)** is the one classification of failed Microsoft requests (the table is in requirements §11) and the one renderer of the `[EXPORT ERROR]` block and the export's "Export errors" line.
 
 **[`writes.py`](../src/outlook_connector/service/writes.py) and [`signatures.py`](../src/outlook_connector/service/signatures.py)**
-- Text bodies become escaped minimal HTML that keeps whitespace and NBSP. HTML bodies and signatures pass one checker, [`passive_html.py`](../src/outlook_connector/service/passive_html.py): no active content, no elements that change how the rest is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`), no markup left open at the end.
+- Text bodies become escaped minimal HTML that keeps whitespace and NBSP. HTML bodies and signatures pass one checker, [`passive_html.py`](../src/outlook_connector/service/passive_html.py): no declarations (doctype, CDATA, processing instructions), no active content, no elements that change how the rest is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`), no markup left open at the end.
 - `create_draft` resolves the default or named signature fresh, adds one signature block after the body, turns data-URI images into CID-linked inline attachments, and verifies the saved images and, for replies, the quoted history on Graph read-back. A configuration that changes during the read is refused.
 - `send_draft` accepts no content: it checks the bound account and sends the stored draft once. An ambiguous answer reads the exact id; a Sent Items copy proves it was sent, otherwise the result is unknown.
 
@@ -146,7 +146,9 @@ One SQLite database per account fingerprint: the account binding and the folder 
 - Conversations given to `set_read` expand to every message in scope. With more than 100 messages, `counts` covers all and `results` keeps explicit ids and anything not `done` or `unchanged`.
 - `move` refuses Deleted Items and hidden folders; `delete` leaves messages already in Deleted Items alone.
 
-**[`files.py`](../src/outlook_connector/service/files.py)** names a saved `.eml` from the downloaded Subject header.
+**[`markers.py`](../src/outlook_connector/service/markers.py)** names each file in message text (§8.6), for `get_message`, `get_conversation` and exports alike.
+
+**[`files.py`](../src/outlook_connector/service/files.py)** saves attachments by their marker names into the download cache, and names a saved `.eml` from the downloaded Subject header.
 
 **[`export/`](../src/outlook_connector/service/export/)**
 - [`orchestrator.py`](../src/outlook_connector/service/export/orchestrator.py): sources defer copy merging to one final pass, and the window pages with `skip_returned_copies=False`, so `also_in` names every folder. Explicit ids are read first and fail the export before anything is written. Bodies fetched while selecting are reused.
@@ -156,8 +158,32 @@ One SQLite database per account fingerprint: the account binding and the folder 
 
 ### 5.10 [`surfaces/`](../src/outlook_connector/surfaces/)
 
-- **MCP** ([`mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py)): FastMCP over stdio. FastMCP checks argument types; tools pass values to the service unchanged. Files are returned as local paths, never inline base64. The server instructions carry the usage rules agents need (scope, out of reach, copies, coverage and cursors, throttling, the 150 MB limit, access denied versus sign-in).
+- **MCP** ([`mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py)): FastMCP over stdio. FastMCP checks argument types; tools pass values to the service unchanged. Files are returned as local paths, never inline base64. The server instructions carry the usage rules agents need (scope, out of reach, copies, coverage and cursors, throttling, the 150 MiB limit, access denied versus sign-in).
 - **Web** ([`surfaces/web/`](../src/outlook_connector/surfaces/web/)): a Starlette JSON API over the same service calls, bound to localhost, with a per-run session token and a localhost Host check on every call. `POST /api/export` returns one download with an `X-Export-Errors` header carrying the export's error line; `POST /api/heartbeat` keeps the idle timer alive while a tab is open. Port and idle defaults are in [`ui_settings.py`](../src/outlook_connector/surfaces/ui_settings.py). The UI is described in the README and shown in [`ui-preview.svg`](ui-preview.svg). Its export options (attachments, quoted history and how files are grouped) sit in a settings menu behind the cog, as in the Teams connector; the menu stays open while they change and closes on an outside click or Escape. Details worth knowing: attachment names come from one batched request per 200 messages, conversation sizes are requested after a list loads, a reader answer for a message no longer selected is ignored, and the profile and photo are read once per process.
+
+### 5.11 Local UI design rules
+
+Shared by the Outlook and Teams connector UIs; each keeps its own accent color, layout and product
+vocabulary.
+
+- **Type and shape:** the font stack `"Segoe UI", system-ui, sans-serif`; corners of about 4 px on fields
+  and buttons, 8–12 px on cards, menus and dialogs, and round avatars and icon buttons. Pills, chips
+  and badges keep small radii of their own.
+- **Header:** the product name, then the search or filters, with the signed-in account (avatar and name)
+  at the far right.
+- **Settings:** options that apply to the download sit behind a cog beside the filters, as on/off switches
+  (`role="switch"`) or a segmented choice; the menu stays open while they change and closes on an outside
+  click or Escape.
+- **Selection and actions:** the footer holds the selection on the left (a count or pills, with
+  **Clear all**) and the status and actions on the right, the primary action last. Buttons never wrap.
+- **Date range:** the same picker in both UIs: weeks start on Sunday, future days are disabled, two clicks
+  in either order make the range, and × clears it.
+- **States:** one spinner per loading area; empty, loading, ready and failed states are distinct, and a
+  failure offers Retry. Message content is always rendered as text, never as HTML.
+- **Theme:** light and dark follow the system setting and change live, without a reload.
+- **Lifetime:** loopback only, a per-run session token, and a stop after 30 idle minutes.
+
+**Residual differences.** Outlook keeps rounder corners than this rule on its search fields (10–12 px), folder buttons (12 px), icon buttons (9 px), segmented control (10 px), message rows (13 px) and app frame (20–26 px). Its colors, layout and vocabulary are its own, and it has not been restyled to the rule.
 
 ## 6. Capability routing and portability
 
@@ -203,8 +229,8 @@ Re-run the relevant probes from [research/README.md](../research/README.md), rec
   - shared token cache: %USERPROFILE%/.lrh-m365-auth/token-cache.bin by default on Windows, or ~/.lrh-m365-auth/token-cache.bin elsewhere. `M365_AUTH_HOME` overrides it. `--unsecure` selects a separate plaintext development cache;
   - OUTLOOK_CONNECTOR_HOME overrides the data directory (tests, portability);
   - store: <data directory>/accounts/<fingerprint>/mail.sqlite3 (account binding and folder cache only);
-  - exports: <data directory>/exports/. Downloaded attachments and saved .eml files: <data directory>/downloads/. Both are removed after 7 days; cleanup tolerates a file another process removed first. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
-  - logs: <data directory>/logs/<command>-<start time>-<process id>.log, one file per `mcp` or `ui` process, rotated at midnight and kept 7 days ([`logs.py`](../src/outlook_connector/logs.py)). The MCP server logs to its file only, since stdout carries the protocol; the UI also logs to stdout. A filter redacts bearer tokens, assigned secrets and secret query parameters; `httpx` and `httpcore`, which log full request URLs, are held at WARNING. `OUTLOOK_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
+  - exports: <data directory>/exports/. Downloaded attachments: <data directory>/downloads/<source>/<name>, one folder per message attachment (a hash of the two ids). Saved .eml files: <data directory>/downloads/. Both are removed after 7 days; one process cleans a folder at a time, and cleanup tolerates a file another process removed first. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
+  - logs: <data directory>/logs/<command>-<start time>-<process id>.log, one file per `mcp` or `ui` process, rotated at midnight and kept 7 days ([`logs.py`](../src/outlook_connector/logs.py)). The MCP server logs to its file only, since stdout carries the protocol; the UI also logs to stdout. A filter redacts bearer tokens, credential headers, assigned secrets and secret query parameters ([`logs.py`](../src/outlook_connector/logs.py) is the same module in every `lrh-*` connector, and the shared sign-in library logs through the same handlers); `httpx` and `httpcore`, which log full request URLs, are held at WARNING. `OUTLOOK_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
 
 
 ## 8. Surfaces: tools and endpoints
@@ -228,7 +254,7 @@ The MCP server exposes 30 tools, grouped below by task. The [README](../README.m
 
 #### `auth_status`
 
-Reports the signed-in account and, for each profile, whether a client credential is cached, when a cached access token expires and what the profile is for. It works offline and also returns the sign-in command. Call it first when something fails, to see whether sign-in is missing.
+Reports the signed-in account and, for each profile, whether a client credential is cached, when a cached access token expires and what the profile is for. It works offline and also returns the sign-in command. The report is built by `status_report` in the shared auth library, the same function every connector's `auth_status` uses, so the tools and `status` cannot disagree. Call it first when something fails, to see whether sign-in is missing.
 
 - A cached token shows that sign-in state exists. It does not prove that a particular operation is allowed. `outlook-connector status --check` tests token acquisition for each profile but does not verify service authorization.
 
@@ -268,6 +294,7 @@ Returns one message's body and its attachment metadata. `body` is `full` (defaul
 
 - An id that cannot be read returns `NotFound`, which does not guess the cause: the message may be deleted or moved out of reach, or the id may be wrong.
 - Attachments are listed even when Graph reports `hasAttachments=false`, so inline-only images still appear.
+- The text names each file with the markers of §8.6; `body="html"` returns the HTML unchanged.
 - Unlike lists and search, `get_message` reads an id in a hidden folder when Graph allows it (see §8.1).
 
 #### `get_conversation`
@@ -277,28 +304,33 @@ Returns a whole conversation across all folders, oldest first (sorted locally). 
 - Every message of the conversation is listed, however long it is; `max_chars` and `cursor` bound the bodies of one response.
 - A body that cannot be fetched sets `export_error` on its message, and that message's text shows an `[EXPORT ERROR]` block. Count messages with `export_error` rather than reading their text.
 - `coverage.complete` stays false while a failed body might succeed on a retry.
+- Bodies carry the markers of §8.6.
 
 ### 8.6 Attachments and saved files
 
+Message text names every file the message carries. An inline image the HTML body references by `cid:` reads `[Image: name]` where Exchange's text shows its alt text in brackets ([research §3.6](api-research.md#36-attachments-and-inline-images)); a placeholder is replaced only when the text holds exactly as many of it as the HTML has images with that alt text, so the k-th occurrence is the k-th image. Otherwise (no alt text, the same bracketed words in the prose, or text that differs) the marker is listed after the text instead. Files, forwarded messages and cloud links follow the text: `[File: name]`, `[Message: name.eml]`, `[Link: name]`. An inline image the body does not reference gets no marker. Names come from the attachment name, made safe as a file name and unique within the message (`report.pdf`, `report (2).pdf`). The HTML is read only for messages with inline files; one whose HTML cannot be read keeps Exchange's placeholders and lists every inline file after the text, and one whose listing cannot be read gets no markers.
+
 #### `list_attachments`
 
-Lists a message's attachments: `id`, `name`, `content_type`, `size`, `is_inline` and `kind`, which is `file`, `item` (a forwarded message), `reference` (a cloud link) or `unknown`. Inline images also carry a `content_id`, which matches the `cid:` reference in the body.
+Lists a message's attachments: `id`, `name`, `file_name` (the name the text and `download_attachment` use), `content_type`, `size`, `is_inline` and `kind`, which is `file`, `item` (a forwarded message), `reference` (a cloud link) or `unknown`. Inline images also carry a `content_id`, which matches the `cid:` reference in the body.
 
 - Inline-only attachments are listed even when Graph reports no attachments.
 
 #### `download_attachment`
 
-Saves one attachment under `<data directory>/downloads/` and returns its local path, name, content type and size. Read the file with your own file tools.
+Saves a message's files by the names its text shows, given in `names` (case-insensitive), or all of its files when `names` is omitted, and returns `files` (local path, name, content type and size of each) and `unavailable` (name and reason of each file it could not save). Read the files with your own file tools.
 
-- Downloads over 150 MB are refused. Download a larger file directly from Outlook.
-- `reference` attachments are cloud links with no file content here, so they are refused. Fetching `item` attachments is best effort.
+- An unknown name is refused before anything is downloaded, and the error lists the names there are.
+- Each file is fetched once into the download cache, one folder per message attachment, and published under its name only when complete; a later call reuses it and keeps it another week.
+- Files over 150 MiB are not saved. Download a larger file directly from Outlook.
+- Cloud links (`[Link: name]`) have no file content here and are listed under `unavailable`. A call that saves nothing fails. Fetching `item` attachments is best effort.
 - A forwarded message (`kind: item`) is saved as an `.eml` file.
 
 #### `save_message_mime`
 
 Saves the original message, headers and all, as an `.eml` file named from its Subject header, and returns its path.
 
-- The same 150 MB limit applies.
+- The same 150 MiB limit applies.
 
 ### 8.7 Exports
 
@@ -314,8 +346,9 @@ The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several fi
 - A copy of one message is exported once, and `also_in` names the other folders.
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
 - Inline images (74% of file attachments in the R1 mailbox, mostly signatures and quoted history) are included when their `cid:` appears in the rendered body. If the reference cannot be read, the image is included rather than dropped.
+- Each message's text names its files with the markers of §8.6, whether or not files are included, so every message's attachments are listed. A file the export wrote is named by its name in the folder, which is unique within the output file.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
-- Attachments over 150 MB are marked and must be downloaded from Outlook.
+- Attachments over 150 MiB are marked and must be downloaded from Outlook.
 - The export runs inside the tool call. No progress is reported and no background job is left behind.
 - Output goes to `<data directory>/exports/` and is kept for seven days.
 
@@ -411,7 +444,7 @@ Moves the messages named by id to Deleted Items. Messages already in Deleted Ite
 
 ### 8.12 Native signatures
 
-Signatures are Outlook's native roaming signatures. They are read and written through Outlook's settings service with the `outlook.api` profile. Names are exact and case-sensitive, and cannot contain commas. Each write is sent once and never retried.
+Signatures are Outlook's native roaming signatures. They are read and written through Outlook's settings service with the `outlook.api` profile. Names are exact and case-sensitive, and cannot contain commas. Each write is resent only when Microsoft refused it as throttled or unavailable (429, 503) or the connection never opened; any other failure is reported, not resent.
 
 If Outlook returns no account scope, configure a signature in Outlook first. Until then, drafts stay unsigned and signature writes cannot run.
 
@@ -425,7 +458,7 @@ Returns one signature's HTML and plain text. A signature that `list_signatures` 
 
 #### `create_signature`
 
-Creates a signature from passive HTML. Scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs, markup left open at the end, and elements that change how the rest of the markup is read are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
+Creates a signature from passive HTML. Declarations (doctype, CDATA, processing instructions), scripts, frames, form controls, event-handler attributes, `javascript:` or `vbscript:` URLs, markup left open at the end, and elements that change how the rest of the markup is read are refused. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace. When a draft uses the signature, its images are attached inline.
 
 To copy a signature from an Outlook draft: read its HTML, download each inline image it references by `cid:`, replace each `cid:` reference with a `data:image` URI holding that image's bytes, and create the signature from the result.
 
@@ -449,7 +482,7 @@ Changes follow one confirmation flow:
 
 1. Call `create_rule`, `update_rule`, `reorder_rules` or `delete_rule` without `user_confirmation`. The result has `status: proposed`, the exact change, and a `confirmation` code bound to the current state of the rules.
 2. Show the person that exact change. Repeat the same request with the code only after they approve it. Never supply the code yourself.
-3. The change is sent once and read back. `status` is then `done`, `failed` or `unknown`; for `unknown`, check Outlook before repeating.
+3. The change is never resent unless Microsoft refused it as throttled or unavailable (429, 503), then read back. `status` is then `done`, `failed` or `unknown`; for `unknown`, check Outlook before repeating.
 
 If the rules changed after the proposal, the code no longer matches and the change is refused.
 
@@ -471,7 +504,7 @@ Sets the order of the supported rules. `rule_ids` must list every supported rule
 
 #### `delete_rule`
 
-Deletes one supported rule. It is sent once and never retried.
+Deletes one supported rule. It is never resent unless Microsoft refused it as throttled or unavailable (429, 503).
 
 The web UI serves the same read operations through the local UI, plus attachment downloads, conversation-size lookups, exports, status, profile details and a heartbeat. The web surface is implemented in [`surfaces/web/`](../src/outlook_connector/surfaces/web/); every API call requires the per-run session token and a localhost Host header. GET requests take scope as `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests use a nested `scope` object. Write tools are MCP-first.
 
@@ -483,5 +516,5 @@ The web UI serves the same read operations through the local UI, plus attachment
 | Retries | Idempotent requests only, bounded, honoring Retry-After. Throttled $batch items are re-sent in batches of at most 20. Writes never retry. An ambiguous write → re-read state. |
 | Throttling | Exchange Online: about 4 concurrent requests and 10,000 requests per 10 minutes per app and mailbox; each $batch item counts. At most 4 requests and 2 batches in flight per process. Clients are told the limits (MCP instructions, error messages). |
 | Bounds | Every list/search/conversation/body response is size-bounded with a cursor. Binary content goes through resources or files. |
-| Errors | Domain errors from the service, naming the operation, service code/message and request id. 401 → renew once, then AuthenticationRequired; 403 → access denied (no new sign-in). The MCP surface returns tool errors, the web surface returns HTTP status + JSON. Bulk operations report per-item gaps instead of failing whole. |
-| Security | Localhost-only web binding. Host allowlist for outbound calls. No arbitrary URL fetching. No browser credentials, ever. |
+| Errors | Domain errors from the service, naming the operation, service code/message and request id. 401 → renew once, then AuthenticationRequired; 403 → `PermissionDenied` (no new sign-in; the web surface answers 403). The MCP surface returns tool errors, the web surface returns HTTP status + JSON. Bulk operations report per-item gaps instead of failing whole. |
+| Security | Localhost-only web binding. Host allowlist for outbound calls. No arbitrary URL fetching. No browser credentials, ever. UI responses send `nosniff` and `no-referrer`. |

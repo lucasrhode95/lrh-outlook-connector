@@ -39,9 +39,8 @@ class DownloadLimitExceeded(InvalidRequest):
     def __init__(self, limit_bytes: int) -> None:
         self.limit_bytes = limit_bytes
         mebibytes, remainder = divmod(limit_bytes, 1024 * 1024)
-        self.limit = f"{mebibytes} MB" if remainder == 0 else f"{limit_bytes} bytes"
-        limit_text = f"{self.limit} limit" if remainder == 0 else f"limit of {self.limit}"
-        super().__init__(f"Download exceeds the connector's local {limit_text}.")
+        self.limit = f"{mebibytes} MiB" if remainder == 0 else f"{limit_bytes:,} bytes"
+        super().__init__(f"The file exceeds the connector's {self.limit} download limit.")
 
 
 class NotFound(ConnectorError):
@@ -54,6 +53,11 @@ class Throttled(ConnectorError):
 
 class Upstream(ConnectorError):
     """A Microsoft service could not be reached or returned an unexpected failure."""
+
+
+class PermissionDenied(Upstream):
+    """Microsoft denied this operation for the current account or item (HTTP 403); the sign-in itself is
+    fine. A kind of ``Upstream``, so code that tolerates an upstream failure tolerates this too."""
 
 
 class WriteOutcomeUnknown(ConnectorError):
@@ -72,6 +76,7 @@ __all__ = [
     "Failure",
     "InvalidRequest",
     "NotFound",
+    "PermissionDenied",
     "SecureStorageUnavailable",
     "Throttled",
     "Upstream",

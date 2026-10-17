@@ -301,7 +301,7 @@ async def test_failed_middle_chunk_preserves_partial_results(
     ids = [f"partial-{i}" for i in range(45)]
     for mid in ids:
         fake.add(FakeMessage(mid, "synthetic", "f-inbox", "2026-09-01T00:00:00Z", is_read=False))
-    fake.ows_next = [None, 429, None]
+    fake.ows_next = [None, 400, None]  # a refused chunk (a throttled one would be retried)
     if action == "read":
         result = await mutations.set_read(ids, True, continue_on_error=keep_going)
     elif action == "flag":
@@ -323,7 +323,7 @@ async def test_default_continues_after_failed_chunk(mutations: Mutations, fake: 
     ids = [f"default-{i}" for i in range(21)]
     for mid in ids:
         fake.add(FakeMessage(mid, "x", "f-inbox", "2026-09-01T00:00:00Z"))
-    fake.ows_next = [429, None]
+    fake.ows_next = [400, None]  # a refused chunk (a throttled one would be retried)
     result = await mutations.set_flag(ids, True)
     assert result.counts == {"failed": 20, "done": 1} and len(fake.ows_calls) == 2
 

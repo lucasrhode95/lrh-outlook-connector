@@ -20,17 +20,6 @@ from outlook_connector.surfaces.ui_settings import DEFAULT_UI_IDLE_MINUTES, DEFA
 from outlook_connector.surfaces.web.routes import Activity, create_app
 
 
-def _free_port(preferred: int) -> int:
-    for port in (preferred, 0):
-        with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe:
-            try:
-                probe.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return probe.getsockname()[1]
-    raise OSError("No free local port.")
-
-
 def serve_ui(
     *,
     unsecure: bool,
@@ -57,19 +46,55 @@ def serve_ui(
                     server.should_exit = True
 
         watcher = asyncio.create_task(watch_idle())
+        server_task = asyncio.create_task(server.serve())
         try:
-            await server.serve()
+            # The browser opens once the server answers, so a failed start is reported instead.
+            while not server.started and not server_task.done():
+                await asyncio.sleep(0.05)
+            if not server.started:
+                print(
+                    f"Outlook connector UI did not start at {url}; check the startup error above.",
+                    flush=True,
+                )
+            elif open_browser:
+                _open_browser(url)
+            await server_task
         finally:
             watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
+            if not server_task.done():
+                server.should_exit = True
+                await server_task
             await _close(context)
 
     print(
         f"Outlook connector UI: {url}  (Ctrl+C to stop; stops after {idle_minutes:g} idle minutes)",
         flush=True,
     )
-    if open_browser:
-        threading.Timer(1.0, webbrowser.open, args=(url,)).start()
     asyncio.run(serve())
+
+
+def _open_browser(url: str) -> None:
+    """Open the browser on a daemon thread. A launcher that waits for the browser must not hold up the UI:
+    the thread is never awaited, and it does not keep the process alive."""
+
+    def open_or_report() -> None:
+        if not webbrowser.open(url):
+            print(f"Open this address in your browser: {url}", flush=True)
+
+    threading.Thread(target=open_or_report, daemon=True).start()
+
+
+def _free_port(preferred: int) -> int:
+    for port in (preferred, 0):
+        with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as probe:
+            try:
+                probe.bind(("127.0.0.1", port))
+            except OSError:
+                continue
+            return probe.getsockname()[1]
+    raise OSError("No free local port.")
 
 
 async def _close(context: AppContext) -> None:

@@ -128,20 +128,24 @@ async def test_changed_server_state_invalidates_confirmation(rules: Rules, fake:
 
 
 @pytest.mark.parametrize(
-    "script, expected", [("done-no-answer", "done"), ("no-answer", "unknown"), (429, "failed")]
+    "script, expected, sends",
+    # 429 proves the write was not processed, so it is sent again; an unclear answer is never resent.
+    [("done-no-answer", "done", 1), ("no-answer", "unknown", 1), (429, "done", 2)],
 )
-async def test_single_write_outcomes(rules: Rules, fake: FakeGraph, script: Any, expected: str) -> None:
+async def test_single_write_outcomes(
+    rules: Rules, fake: FakeGraph, script: Any, expected: str, sends: int
+) -> None:
     proposal = await rules.create_rule(changes())
     fake.ows_calls.clear()
     fake.ows_next = [None, script]
     result = await rules.create_rule(changes(), proposal.confirmation)
     assert result.status == expected
-    assert [a for a, _ in fake.ows_calls].count("NewInboxRule") == 1
+    assert [a for a, _ in fake.ows_calls].count("NewInboxRule") == sends
 
 
 async def test_failed_readback_keeps_unknown(rules: Rules, fake: FakeGraph) -> None:
     proposal = await rules.create_rule(changes())
-    fake.ows_next = [None, None, 503]
+    fake.ows_next = [None, None, 502]  # an unclear answer to the read-back, never retried
     result = await rules.create_rule(changes(), proposal.confirmation)
     assert result.status == "unknown" and result.rule_id and len(fake.inbox_rules) == 1
 

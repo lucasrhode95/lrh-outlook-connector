@@ -1,4 +1,4 @@
-"""Rendering of exported messages (requirements §10): TXT for people, JSONL for agents."""
+"""Rendering of exported messages (requirements §11): TXT for people, JSONL for agents."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from outlook_connector.domain.models import ExportError, Message, MessageSummary, Recipient
+from outlook_connector.domain.models import ExportError, MessageSummary, Recipient
 
 RULE = "=" * 78
 THIN = "-" * 78
@@ -18,7 +18,6 @@ THIN = "-" * 78
 class RenderedMessage:
     message: MessageSummary
     text: str
-    attachment_lines: list[str] = field(default_factory=list)
     export_error: ExportError | None = None  # why the body is missing (``text`` then holds its block)
     error_blocks: list[str] = field(default_factory=list)  # attachment errors, rendered (TXT)
     attachments: list[dict[str, Any]] = field(default_factory=list)  # JSONL attachment records
@@ -32,10 +31,6 @@ def stamp(value: datetime | None) -> str:
 def people(values: Sequence[Recipient]) -> str:
     # "; " as in Outlook: display names are often "Last, First", so a comma would be ambiguous
     return "; ".join(r.display() for r in values)
-
-
-def body_text(message: Message, kind: str) -> str:
-    return message.body(kind).strip() or "(No text content.)"  # type: ignore[arg-type]
 
 
 def render_message(item: RenderedMessage, *, position: str) -> str:
@@ -56,8 +51,6 @@ def render_message(item: RenderedMessage, *, position: str) -> str:
         lines.append(f"Internet id:     {m.internet_message_id}")
     if m.also_in:
         lines.append(f"Also in: {'; '.join(m.also_in)} (same message, exported once)")
-    for line in item.attachment_lines:
-        lines.append(f"Attachment: {line}")
     lines.append(THIN)
     for block in item.error_blocks:
         lines += [block, ""]

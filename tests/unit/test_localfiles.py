@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import os
 from pathlib import Path
 
@@ -43,14 +44,15 @@ def test_kept_dir_does_not_suppress_other_cleanup_errors(
     old_file = directory / "old.txt"
     old_file.write_text("temporary", encoding="utf-8")
     os.utime(old_file, (0, 0))
-    real_unlink = Path.unlink
+    real_replace = os.replace
 
-    def denied_unlink(path: Path, *args: object, **kwargs: object) -> None:
-        if path == old_file:
-            raise PermissionError(path)
-        real_unlink(path, *args, **kwargs)  # pragma: no cover
+    def failing_replace(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        if Path(src) == old_file:
+            raise OSError(errno.EIO, "disk error", str(old_file))
+        real_replace(src, dst)
 
-    monkeypatch.setattr(Path, "unlink", denied_unlink)
+    monkeypatch.setattr(os, "replace", failing_replace)
 
-    with pytest.raises(PermissionError):
+    with pytest.raises(OSError) as error:
         kept_dir("exports")
+    assert error.value.errno == errno.EIO

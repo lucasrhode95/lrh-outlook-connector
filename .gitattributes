@@ -1,2 +1,13 @@
-# Preserve line endings exactly as they are in the working tree.
-* -text
+# Every text file uses LF line endings in the repository and in every checkout, on every platform.
+* text=auto eol=lf
+
+# Binary files are never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.docx binary
+*.xlsx binary

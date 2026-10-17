@@ -27,7 +27,12 @@ Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 conne
 `status` shows the signed-in account and its cached profiles without touching the network. To switch accounts, run `auth --sign-out`, then `auth` again. Which profile serves which tool is in [architecture §6](docs/architecture.md#6-capability-routing-and-portability).
 
 > Credentials are entered only on Microsoft's sign-in page. Tokens stay in the shared encrypted cache
-> (`~/.lrh-m365-auth`, or `M365_AUTH_HOME`). If encryption is unavailable, sign-in fails closed.
+> (`%USERPROFILE%/.lrh-m365-auth` on Windows, the XDG data folder elsewhere, or `M365_AUTH_HOME`).
+> If encryption is unavailable, sign-in fails closed.
+
+Outlook's data (the folder cache, exports, downloads and logs) is stored under
+`%USERPROFILE%\.lrh-outlook-connector` on Windows, or `~/.local/share/lrh-outlook-connector` on other
+systems. Set `OUTLOOK_CONNECTOR_HOME` to override it.
 
 ### Configure a local MCP client
 
@@ -71,7 +76,7 @@ See the [Codex MCP guide](https://developers.openai.com/codex/mcp/).
 
 Replace the sample path with your clone’s absolute path. In Windows JSON paths, escape backslashes (for example, `C:\\Users\\you\\lrh-outlook-connector`). This example requires Copilot Chat’s Agent mode with local MCP support; see [VS Code’s MCP guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers).
 
-> **Client compatibility:** These examples require a locally running agentic client that can launch a stdio MCP server. Hosted ChatGPT Web, Claude web chat, Copilot web chat, and similar services cannot start this local process. This project does not provide a remote MCP endpoint; hosted clients require one to be deployed separately.
+> **Client compatibility:** These examples require a locally running agentic client that can launch a stdio MCP server. Hosted chat apps cannot start this local process, and this project provides no remote MCP endpoint. ChatGPT can still reach it through OpenAI's [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), where your plan and workspace allow custom MCP apps; files the server saves stay on the computer running the tunnel.
 
 The UI opens in your browser and stops after 30 minutes without activity:
 
@@ -98,8 +103,8 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, join URL and attachment metadata |
 | `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
 | `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
-| `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List attachment metadata, including inline image IDs |
-| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save an attachment locally |
+| `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List attachment metadata: the file names the text shows, sizes, types and inline image IDs |
+| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's files locally by the names its text shows (`[File: …]`, `[Image: …]`) |
 | `save_message_mime` | [`service/files.py`](src/outlook_connector/service/files.py) | Save the original message as an .eml file |
 | `export_messages` | [`service/export/`](src/outlook_connector/service/export/) | Export conversations, messages or a folder/date window |
 | `list_rules`, `create_rule`, `update_rule`, `reorder_rules`, `delete_rule` | [`service/rules.py`](src/outlook_connector/service/rules.py) | Read rules or propose and confirm supported changes |
@@ -135,6 +140,9 @@ uv run pyright
 uv run pytest
 node --test tests/surfaces/message_reader.test.cjs
 ```
+
+`lrh-m365-auth` follows its `main` branch, and `uv.lock` records the exact commit. Run
+`uv lock --upgrade-package lrh-m365-auth` to move to its latest commit.
 
 Logs: each `mcp` and `ui` process writes a daily-rotated file under `<data directory>/logs/`, kept for seven days; the UI also logs to stdout. Set `OUTLOOK_CONNECTOR_LOG_LEVEL=DEBUG` for request timings ([architecture §7](docs/architecture.md#7-data-and-identity)).
 

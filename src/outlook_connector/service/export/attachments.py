@@ -1,4 +1,4 @@
-"""Attachment selection policy and safe file names (requirements §10, research §3.6).
+"""Attachment selection policy and safe file names (requirements §11, research §3.6).
 
 - Non-inline file attachments are exported.
 - Item attachments (forwarded mail) are exported as .eml.
@@ -15,13 +15,13 @@ from pathlib import PurePath
 from outlook_connector.domain.models import Attachment
 
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Win32 device names, superscript digits included ("Naming Files, Paths, and Namespaces").
 _RESERVED = {
     "con",
     "prn",
     "aux",
     "nul",
-    *(f"com{i}" for i in range(1, 10)),
-    *(f"lpt{i}" for i in range(1, 10)),
+    *(f"{port}{digit}" for port in ("com", "lpt") for digit in "0123456789¹²³"),
 }
 MAX_NAME = 120
 
@@ -54,9 +54,10 @@ def safe_name(name: str | None, *, fallback: str, eml: bool = False) -> str:
     cleaned = _UNSAFE.sub("_", (name or "").strip()).strip(" .") or fallback
     if eml and not cleaned.lower().endswith(".eml"):
         cleaned += ".eml"
+    # Win32 reserves a device name followed by any extension (CON.backup.txt), so check before the first dot.
+    if cleaned.split(".", 1)[0].rstrip(" ").lower() in _RESERVED:
+        cleaned = f"_{cleaned}"
     stem, suffix = PurePath(cleaned).stem, PurePath(cleaned).suffix
-    if stem.lower() in _RESERVED:
-        stem = f"_{stem}"
     if len(stem) + len(suffix) > MAX_NAME:
         stem = stem[: MAX_NAME - len(suffix)]
     return stem + suffix
@@ -71,13 +72,3 @@ def dedupe(name: str, taken: set[str]) -> str:
         counter += 1
     taken.add(candidate.lower())
     return candidate
-
-
-def size_label(size: int | None) -> str:
-    if size is None:
-        return "size unknown"
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.0f} KB"
-    return f"{size / (1024 * 1024):.1f} MB"

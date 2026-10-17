@@ -2,8 +2,8 @@
 
 One process per agent session. Nothing touches the network until the first tool call.
 Reads never change the mailbox (not even read state). The write tools save drafts, send mail
-(only with the user's confirmation of the exact message, requirements §11.1) and change
-messages named by id (§11.2), each with a result per message.
+(only with the user's confirmation of the exact message, requirements §12.1) and change
+messages named by id (§12.2), each with a result per message.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from inspect import Parameter
 from inspect import Signature as FunctionSignature
 from typing import Annotated, Any, Literal
 
+from m365_auth import status_report
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
@@ -48,7 +49,7 @@ from outlook_connector.domain.models import (
     SignatureList,
     SignatureWriteResult,
 )
-from outlook_connector.service.files import SavedFile
+from outlook_connector.service.files import SavedFile, SavedFiles
 
 INSTRUCTIONS = """\
 The signed-in user's own Outlook mailbox. Microsoft Graph handles core mail-data reads; Outlook \
@@ -105,9 +106,12 @@ list_messages(include_total=true) gives the server's count for the window, to pl
 When Junk Email and Deleted Items hold most of the mailbox, a mailbox-wide list_messages reads folder \
 by folder (full pages, a bit slower) and coverage.notes says so: pass that note on to the user.
 - Mail deleted on the server is gone: nothing is kept locally.
-- Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
-path for you to read with your own file tools. Downloads are limited to 150 MB; for a larger attachment, \
-download it directly from Outlook. save_message_mime saves the original .eml.
+- Attachments: message text names every file: [File: name], [Image: name] where an inline image sits, \
+[Message: name.eml] for a forwarded message and [Link: name] for a cloud link. download_attachment saves \
+files by those names (all of them when names is omitted) and returns local paths for you to read with \
+your own file tools; list_attachments adds sizes and types. Downloads are limited to 150 MiB; for a larger \
+attachment, download it directly from Outlook. Cloud links are not downloaded. save_message_mime saves \
+the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
 are included and merged. Folder/date-window selections follow scope; conversations follow \
 scope.deleted_items but keep sent and meeting mail. \
@@ -134,7 +138,8 @@ many small ones. On a throttling error, wait at least a minute before retrying.
 Outlook sign-in. list_signatures reports Outlook's exact, case-sensitive native names, the new-message
 and reply/forward defaults, and whether contents are readable. get_signature returns the HTML and
 text. create_signature, update_signature, delete_signature and set_default_signature change Outlook
-settings once; they are not retried. Names cannot contain commas. A deleted signature can
+settings and are not repeated unless Outlook refused them as throttled or unavailable.
+Names cannot contain commas. A deleted signature can
 remain selected as a dangling default, so set a valid default after deletion when needed. To copy an
 Outlook draft signature, get its HTML, download its CID-referenced inline images, replace each CID
 image with a data:image URI containing those bytes, then save the resulting HTML as a native
@@ -164,7 +169,8 @@ on messages the user asked about, and say which ones before changing many.
  delete_rule, first omit user_confirmation and show the persistent change and returned RULE code. \
 Only after explicit human confirmation repeat the exact request with that code. \
 Never confirm on the user's behalf. \
-Each write is sent once and read back; unknown means check Outlook before repeating. \
+Each write is sent again only when Outlook refused it as throttled or unavailable, then read back; \
+unknown means check Outlook before repeating. \
 Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
 - Core mail-data reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature \
   access use `outlook.api`, prepared by `outlook-connector auth`.
@@ -208,20 +214,9 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def auth_status() -> dict[str, object]:
-        """Offline status: account, cached client credentials and resource-token expiry by profile."""
-        status = context.tokens.status()
-        return {
-            "account": [a.username for a in status.accounts],
-            "profiles": {
-                p.profile: {
-                    "client_credential_cached": p.client_credential_cached,
-                    "access_token_expires_on": p.access_token_expires_on,
-                    "purpose": p.purpose,
-                }
-                for p in status.profiles
-            },
-            "sign_in_command": context.tokens.sign_in_command("outlook.graph"),
-        }
+        """Offline status: the signed-in account, each profile's cached credential and token expiry, and the
+        sign-in command. Makes no network call; use it before a long task to see whether sign-in is needed."""
+        return status_report(context.tokens)
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_folders(refresh: bool = False) -> list[Folder]:
@@ -396,15 +391,24 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_attachments(message_id: str) -> list[Attachment]:
-        """List attachment metadata, including inline content ids when available."""
+        """List attachment metadata: file_name (the name the text and download_attachment use), size,
+        content type, kind and inline content ids when available."""
         return await (await services()).mailbox.attachments(message_id)
 
     @mcp.tool(annotations=LOCAL_FILE)
-    async def download_attachment(message_id: str, attachment_id: str) -> SavedFile:
-        """Save an attachment under 150 MB; download larger files from Outlook.
+    async def download_attachment(
+        message_id: str,
+        names: Annotated[
+            list[str] | None,
+            Field(description="File names as the message text shows them; omit for all of its files."),
+        ] = None,
+    ) -> SavedFiles:
+        """Save a message's files by the names its text shows ([File: …], [Image: …], [Message: …]).
 
-        Forwarded emails are saved as .eml."""
-        return await (await services()).files.download_attachment(message_id, attachment_id)
+        Each file must be under 150 MiB; download larger files from Outlook. Forwarded emails are saved
+        as .eml; cloud links are not downloaded. A file that cannot be saved is listed under unavailable
+        while the others are saved."""
+        return await (await services()).files.download_attachment(message_id, names)
 
     @mcp.tool(annotations=LOCAL_FILE)
     async def save_message_mime(message_id: str) -> SavedFile:

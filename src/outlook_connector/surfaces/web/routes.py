@@ -29,12 +29,19 @@ from outlook_connector.domain.errors import (
     ConnectorError,
     InvalidRequest,
     NotFound,
+    PermissionDenied,
     Throttled,
 )
 from outlook_connector.domain.models import ExportRequest, Scope
 
 STATIC = resources.files("outlook_connector.surfaces.web") / "static"
-_STATUS = {AuthenticationRequired: 401, InvalidRequest: 400, NotFound: 404, Throttled: 429}
+_STATUS = {
+    AuthenticationRequired: 401,
+    InvalidRequest: 400,
+    PermissionDenied: 403,
+    NotFound: 404,
+    Throttled: 429,
+}
 
 
 class Activity:
@@ -51,16 +58,23 @@ class Activity:
 def _guard(token: str, port: int, activity: Activity) -> type[BaseHTTPMiddleware]:
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
 
+    async def admit(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if request.headers.get("host") not in allowed_hosts:
+            return JSONResponse({"error": "Forbidden host."}, status_code=403)
+        if request.url.path.startswith("/api/") and request.headers.get("x-session-token") != token:
+            return JSONResponse({"error": "Missing or wrong session token."}, status_code=403)
+        activity.touch()
+        return await call_next(request)
+
     class Guard(BaseHTTPMiddleware):
         async def dispatch(
             self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
         ) -> Response:
-            if request.headers.get("host") not in allowed_hosts:
-                return JSONResponse({"error": "Forbidden host."}, status_code=403)
-            if request.url.path.startswith("/api/") and request.headers.get("x-session-token") != token:
-                return JSONResponse({"error": "Missing or wrong session token."}, status_code=403)
-            activity.touch()
-            return await call_next(request)
+            # Every response the guard returns carries the headers, including its own refusals.
+            response = await admit(request, call_next)
+            response.headers.setdefault("X-Content-Type-Options", "nosniff")
+            response.headers.setdefault("Referrer-Policy", "no-referrer")
+            return response
 
     return Guard
 
@@ -197,9 +211,13 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         return _json(content)
 
     async def attachment(request: Request) -> Response:
-        saved = await (await context.services()).files.download_attachment(
-            request.path_params["message_id"], request.path_params["attachment_id"]
-        )
+        services = await context.services()
+        message_id = request.path_params["message_id"]
+        attachments = await services.mailbox.attachments(message_id)
+        match = next((a for a in attachments if a.id == request.path_params["attachment_id"]), None)
+        if match is None or not match.file_name:
+            raise NotFound("No such attachment on this message.")
+        saved = (await services.files.download_attachment(message_id, [match.file_name])).files[0]
         return FileResponse(saved.path, media_type=saved.content_type, filename=saved.name)
 
     async def export(request: Request) -> Response:

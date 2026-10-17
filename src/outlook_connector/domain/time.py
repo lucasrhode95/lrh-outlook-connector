@@ -1,7 +1,6 @@
 """The time zone rule for every entry point: a time without a zone is UTC; an aware time becomes UTC.
 
-Entry points that accept times (the service, and the export request that carries them) call these once, so
-a surface passes times through and no two layers normalize the same value.
+Entry points that accept times call these once, so no two layers normalize the same value.
 """
 
 from __future__ import annotations

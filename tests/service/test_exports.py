@@ -77,7 +77,8 @@ async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(expo
     # logo.png (inline signature, not referenced) and junk m4 are out.
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/image001.png", f"{stem}/numbers.xlsx"]
     text = zip_text(artifact.path, f"{stem}.txt")
-    assert "Attachment: 2026-09-28 Relatório de exemplo semanal/numbers.xlsx" in text
+    # The text names each file it carries; the image has no alt text, so its marker follows the text.
+    assert "Follow-up with numbers\n\n[Image: image001.png]\n[File: numbers.xlsx]" in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
     assert "> First report" in text  # full body, including quoted history, by default
     assert "buy now" not in text and artifact.messages_excluded == {"deleted_or_junk": 1}
@@ -90,7 +91,8 @@ async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: 
         and artifact.content_type.startswith("text/plain")
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert "Attachment: numbers.xlsx" in text and "image001.png" not in text  # inline images are not listed
+    # Markers name the files even when they are not exported; an unreferenced inline image gets none.
+    assert "[File: numbers.xlsx]" in text and "[Image: image001.png]" in text and "logo.png" not in text
 
 
 async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
@@ -189,8 +191,8 @@ async def test_download_limit_is_classified_and_recommends_outlook(
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
     assert artifact.export_errors == {"downloading an attachment": 1}
     text = zip_text(artifact.path, "2026-09-29 Relatório de exemplo semanal.txt")
-    assert "  Error:  Download exceeds the connector's local 150 MB limit." in text
-    assert "  Likely: attachment exceeds the connector's 150 MB download limit" in text
+    assert "  Error:  The file exceeds the connector's 150 MiB download limit." in text
+    assert "  Likely: attachment exceeds the connector's 150 MiB download limit" in text
     assert "  Fix:    download the attachment directly from Outlook" in text
     assert artifact.error_summary == (
         "Export errors: 1 attachment (1 connector download limit) could not be exported; "
@@ -601,6 +603,9 @@ def test_recipients_are_separated_by_semicolons() -> None:
 def test_safe_names() -> None:
     assert safe_name("a/b:c*?.pdf", fallback="x") == "a_b_c__.pdf"
     assert safe_name("CON.txt", fallback="x") == "_CON.txt"
+    assert safe_name("CON.backup.txt", fallback="x") == "_CON.backup.txt"
+    assert safe_name("COM².log", fallback="x") == "_COM².log"
+    assert safe_name("LPT0", fallback="x") == "_LPT0"
     assert safe_name("   ", fallback="file") == "file"
     taken: set[str] = set()
     assert [dedupe(n, taken) for n in ("r.pdf", "R.pdf", "r.pdf")] == ["r.pdf", "R (2).pdf", "r (3).pdf"]
@@ -641,12 +646,53 @@ async def test_jsonl_export_with_attachment_files_is_a_zip(exports: Exports) -> 
     assert files and all(f in names for f in files)
 
 
-async def test_downloads_never_share_a_file(exports: Exports) -> None:
+async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
+    exports: Exports, fake: FakeGraph
+) -> None:
     files = Files(exports.mailbox)
     first, second = await asyncio.gather(
-        files.download_attachment("m3", "a1"), files.download_attachment("m3", "a1")
+        files.download_attachment("m3", ["numbers.xlsx"]), files.download_attachment("m3", ["NUMBERS.xlsx"])
     )
-    assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()
+    assert [f.name for f in first.files] == ["numbers.xlsx"] and first.files[0].path == second.files[0].path
+    assert Path(first.files[0].path).read_bytes() == b"xlsx-bytes"
+    fake.calls.clear()
+    again = await files.download_attachment("m3", ["numbers.xlsx"])
+    assert again.files[0].path == first.files[0].path
+    assert not any(call.endswith("/$value") for call in fake.calls)  # served from the download cache
+
+
+async def test_omitted_names_save_every_file_and_unknown_names_are_refused(exports: Exports) -> None:
+    files = Files(exports.mailbox)
+    saved = await files.download_attachment("m3")
+    assert sorted(f.name for f in saved.files) == ["image001.png", "logo.png", "numbers.xlsx"]
+    with pytest.raises(NotFound, match="Its files: numbers.xlsx, image001.png, logo.png"):
+        await files.download_attachment("m3", ["missing.pdf"])
+
+
+async def test_a_cloud_link_is_reported_unavailable_while_the_files_are_saved(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add(
+        FakeMessage(
+            "m-link", "Shared plan", "f-inbox", "2026-10-03T09:00:00Z", conversation="c-link",
+            attachments=[
+                FakeAttachment("l1", "plan.docx", kind="referenceAttachment"),
+                FakeAttachment("f1", "notes.txt", b"notes", "text/plain"),
+            ],
+        )
+    )  # fmt: skip
+    files = Files(exports.mailbox)
+    saved = await files.download_attachment("m-link")
+    assert [f.name for f in saved.files] == ["notes.txt"] and saved.unavailable == []
+    mixed = await files.download_attachment("m-link", ["plan.docx", "notes.txt"])
+    assert [f.name for f in mixed.files] == ["notes.txt"]
+    assert [u.name for u in mixed.unavailable] == ["plan.docx"] and "cloud link" in mixed.unavailable[
+        0
+    ].reason
+    with pytest.raises(InvalidRequest, match="Nothing was saved"):
+        await files.download_attachment("m-link", ["plan.docx"])
+    content = await exports.mailbox.get_message("m-link")
+    assert content.text.endswith("[Link: plan.docx]\n[File: notes.txt]")
 
 
 async def test_save_mime_names_the_file_from_its_subject_header(exports: Exports, fake: FakeGraph) -> None:
@@ -672,7 +718,7 @@ async def test_identical_attachment_files_are_stored_once(exports: Exports, fake
     artifact = await exports.export(ExportRequest(conversation_ids=["c-sig"], include_attachments=True))
     stem = "2026-10-01 Status"
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/logo.png"] and artifact.attachment_files == 1
-    assert zip_text(artifact.path, f"{stem}.txt").count(f"Attachment: {stem}/logo.png") == 2
+    assert zip_text(artifact.path, f"{stem}.txt").count("[File: logo.png]") == 2  # both name the one file
 
 
 async def test_export_merges_copies_once_after_combining_selection_sources(
@@ -874,3 +920,43 @@ async def test_failed_conversation_export_cancels_and_awaits_sibling_reads(
     with pytest.raises(NotFound) as caught:
         await exports.export(ExportRequest(conversation_ids=["missing", "slow"]))
     assert caught.value is failure and cleaned_up.is_set()
+
+
+async def test_conversations_with_the_same_name_keep_separate_files(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    for mid, conversation in (("same1", "c-same-1"), ("same2", "c-same-2")):
+        fake.add(
+            FakeMessage(
+                mid, "Status", "f-inbox", "2026-10-05T09:00:00Z", conversation=conversation,
+                text=f"body of {mid}",
+                attachments=[FakeAttachment(f"{mid}-a", "notes.txt", mid.encode(), "text/plain")],
+            )
+        )  # fmt: skip
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-same-1", "c-same-2"], include_attachments=True)
+    )
+    names = zip_names(artifact.path)
+    assert len(names) == len(set(names)) == 4  # two text files, each with its own attachment folder
+    texts = [n for n in names if n.endswith(".txt") and "/" not in n]
+    assert sorted("body of same1" in zip_text(artifact.path, n) for n in texts) == [False, True]
+
+
+async def test_a_cache_folder_removed_before_the_claim_is_recreated(
+    exports: Exports, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from outlook_connector.service import files as files_module
+
+    real_claim = files_module.claim
+    removed = False
+
+    def claim_after_cleanup(directory: Path, filename: str) -> Path:
+        nonlocal removed
+        if not removed:
+            removed = True
+            directory.rmdir()  # another process's cleanup removes the empty folder meanwhile
+        return real_claim(directory, filename)
+
+    monkeypatch.setattr(files_module, "claim", claim_after_cleanup)
+    saved = await Files(exports.mailbox).download_attachment("m3", ["numbers.xlsx"])
+    assert Path(saved.files[0].path).read_bytes() == b"xlsx-bytes"

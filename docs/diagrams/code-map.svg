@@ -97,7 +97,7 @@
 <text class="group-title" x="650" y="803">Signatures</text>
 <g><title>Native signature names and the new-mail and reply defaults. → Signatures.list_signatures</title><text class="detail small" x="650" y="833">• <tspan class="code">list_signatures</tspan></text></g>
 <g><title>One signature's HTML and text. → Signatures.get_signature</title><text class="detail small" x="650" y="860">• <tspan class="code">get_signature</tspan></text></g>
-<g><title>Create from passive HTML; one write, never retried. → Signatures.create_signature</title><text class="detail small" x="650" y="887">• <tspan class="code">create_signature</tspan></text></g>
+<g><title>Create from passive HTML; one write, resent only when Outlook refused it as throttled or unavailable (429, 503). → Signatures.create_signature</title><text class="detail small" x="650" y="887">• <tspan class="code">create_signature</tspan></text></g>
 <g><title>Replace contents from passive HTML; does not rename. → Signatures.update_signature</title><text class="detail small" x="650" y="914">• <tspan class="code">update_signature</tspan></text></g>
 <g><title>Delete one signature; a selected default may be left dangling. → Signatures.delete_signature</title><text class="detail small" x="650" y="941">• <tspan class="code">delete_signature</tspan></text></g>
 <g><title>Set or clear the new-mail and/or reply default. → Signatures.set_default_signature</title><text class="detail small" x="650" y="968">• <tspan class="code">set_default_signature</tspan></text></g>
@@ -182,7 +182,7 @@
 <text class="section-title" x="691" y="1567"><tspan class="code">Writes</tspan><tspan class="detail" dx="12">writes.py</tspan></text>
 <text class="group-title" x="691" y="1604">Methods</text>
 <g><title>Save explicit text or HTML (checked once by passive_html) into Drafts with the native signature; require Graph read-back. Replies are checked for intact quoted history. Nothing is sent.</title><text class="detail" x="691" y="1634">• <tspan class="code">create_draft(message)</tspan></text></g>
-<g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. An unclear answer is checked against Sent Items, never retried.</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
+<g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. An unclear answer is checked against Sent Items and never resent; the send is resent only when Outlook refused it as throttled or unavailable (429, 503).</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
 <g><title>Refuses to write unless the Outlook sign-in is the bound Microsoft account.</title><text class="detail" x="691" y="1688">• <tspan class="code">check_account()</tspan></text></g>
 <text class="muted" x="691" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">MailWriter</tspan> · <tspan class="code">Signatures</tspan></text>
 
@@ -219,7 +219,7 @@
 <text class="group-title" x="1265" y="1903">Methods</text>
 <g><title>Every inbox rule in priority order; unsupported fields make a rule read-only.</title><text class="detail" x="1265" y="1933">• <tspan class="code">list_rules()</tspan></text></g>
 <g><title>Each change first returns a proposal and a code bound to the account and every current rule revision.</title><text class="detail" x="1265" y="1960">• <tspan class="code">create_rule</tspan> · <tspan class="code">update_rule</tspan></text></g>
-<g><title>With the user's code: one OWS write, then a fresh read-back. Never retried.</title><text class="detail" x="1265" y="1987">• <tspan class="code">reorder_rules</tspan> · <tspan class="code">delete_rule</tspan></text></g>
+<g><title>With the user's code: one OWS write, resent only when Outlook refused it as throttled or unavailable (429, 503), then a fresh read-back.</title><text class="detail" x="1265" y="1987">• <tspan class="code">reorder_rules</tspan> · <tspan class="code">delete_rule</tspan></text></g>
 <text class="group-title" x="1265" y="2026">Rules</text>
 <text class="detail" x="1265" y="2056">propose → confirm → one write → read back</text>
 <text class="muted" x="1265" y="2094">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">RuleWriter</tspan> · <tspan class="code">Writes.check_account</tspan></text>
@@ -228,7 +228,7 @@
 <text class="section-title" x="118" y="2165"><tspan class="code">Signatures</tspan><tspan class="detail" dx="12">signatures.py</tspan></text>
 <text class="group-title" x="118" y="2202">Methods</text>
 <g><title>Names, defaults and contents, read fresh; each content read must share the account scope.</title><text class="detail" x="118" y="2232">• <tspan class="code">list_signatures</tspan> · <tspan class="code">get_signature</tspan></text></g>
-<g><title>Passive HTML (checked by passive_html) plus quoted data-URI images; each write is sent once.</title><text class="detail" x="118" y="2259">• <tspan class="code">create</tspan>, <tspan class="code">update</tspan>, <tspan class="code">delete_signature</tspan></text></g>
+<g><title>Passive HTML (checked by passive_html) plus quoted data-URI images; each write is resent only when Outlook refused it as throttled or unavailable (429, 503).</title><text class="detail" x="118" y="2259">• <tspan class="code">create</tspan>, <tspan class="code">update</tspan>, <tspan class="code">delete_signature</tspan></text></g>
 <g><title>New-mail and reply defaults, set or cleared independently.</title><text class="detail" x="118" y="2286">• <tspan class="code">set_default_signature</tspan></text></g>
 <g><title>The signature block create_draft appends: the default for new mail or replies, or a named one; images become inline attachments.</title><text class="detail" x="118" y="2313">• <tspan class="code">resolve_for_draft</tspan></text></g>
 <text class="muted" x="118" y="2393">uses <tspan class="code">SignatureStore</tspan> · <tspan class="code">passive_html</tspan></text>
@@ -240,7 +240,7 @@
 <g><title>Output folders under the data directory; files older than a week are removed; exclusive file creation.</title><text class="detail" x="691" y="2252">• <tspan class="code">localfiles.py</tspan></text></g>
 <g><title>Validation shared by the entry points that accept mailbox scope.</title><text class="detail" x="691" y="2279">• <tspan class="code">scope.py</tspan></text></g>
 <g><title>Concurrent reads that finish or are cancelled before their caller returns.</title><text class="detail" x="691" y="2306">• <tspan class="code">concurrency.py</tspan></text></g>
-<g><title>The one HTML check for draft bodies and signatures: no active content, no markup left open, no elements that change how the rest is read.</title><text class="detail" x="691" y="2333">• <tspan class="code">passive_html.py</tspan></text></g>
+<g><title>The one HTML check for draft bodies and signatures: no declarations, no active content, no markup left open, no elements that change how the rest is read.</title><text class="detail" x="691" y="2333">• <tspan class="code">passive_html.py</tspan></text></g>
 <text class="group-title" x="1100" y="2168">Domain</text>
 <g><title>Pydantic models: the single schema for the service, the MCP tools and the web API. Never mirrors a Microsoft wire format.</title><text class="detail" x="1100" y="2198">• <tspan class="code">domain/models.py</tspan></text></g>
 <g><title>ConnectorError and its kinds (NotFound, Throttled, AuthenticationRequired, WriteOutcomeUnknown, ...); surfaces know how to present them.</title><text class="detail" x="1100" y="2225">• <tspan class="code">domain/errors.py</tspan></text></g>
@@ -348,7 +348,7 @@
 
 <rect x="1240" y="3271" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1258" y="3306"><tspan class="code">Ows</tspan><tspan class="detail" dx="12">ows.py</tspan></text>
-<g><title>call: one item action in the JsonRequest envelope, sent once. call_read and call_view: reads, retried like GETs (call_view for GetCalendarView, whose items sit directly in Body).</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan> · <tspan class="code">call_view</tspan></text></g>
+<g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read and call_view: reads, retried like GETs (call_view for GetCalendarView, whose items sit directly in Body).</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan> · <tspan class="code">call_view</tspan></text></g>
 <g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="3370">• <tspan class="code">call_request(action, ...)</tspan></text></g>
 <g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="3397">• <tspan class="code">account()</tspan></text></g>
 
@@ -361,7 +361,7 @@
 <g><title>request() and parse the JSON answer (size-capped).</title><text class="detail" x="678" y="3583">• <tspan class="code">json(...)</tspan></text></g>
 <g><title>Stream a GET body to a file, size-capped.</title><text class="detail" x="678" y="3610">• <tspan class="code">download(...)</tspan></text></g>
 <g><title>Only the configured Microsoft hosts (urls.py); at most 4 concurrent requests per mailbox (Exchange's limit).</title><text class="detail" x="1040" y="3556">host allowlist · ≤ 4 requests at once</text></g>
-<g><title>Up to 4 attempts, honouring Retry-After. Writes are sent once and never retried; no answer = WriteOutcomeUnknown.</title><text class="detail" x="1040" y="3583">reads retried on 429/502/503/504</text></g>
+<g><title>Up to 4 attempts, honouring Retry-After. Writes are retried only on 429 or 503 (nothing applied); no answer or another 5xx = WriteOutcomeUnknown, never resent.</title><text class="detail" x="1040" y="3583">reads retried on 429/502/503/504</text></g>
 <g><title>A rejected token is refreshed once (with the CAE claims challenge, if any); a second 401 asks for sign-in.</title><text class="detail" x="1040" y="3610">401 → renew the token once</text></g>
 
 <path class="call-flow" d="M1230 3671 V3737"/>

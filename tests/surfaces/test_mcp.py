@@ -52,7 +52,7 @@ class FakeTokens:
         }
         return AccessToken(profile=profile, value=jwt(claims), source="cache", expires_on=None)
 
-    def sign_in_command(self, profile: str) -> str:
+    def sign_in_command(self, profile: str | None = None) -> str:
         return "outlook-connector auth"
 
     def status(self) -> CacheStatus:
@@ -229,8 +229,10 @@ async def test_naive_datetimes_are_treated_as_utc(server: FastMCP) -> None:
 
 async def test_attachment_download_and_export_return_local_paths(server: FastMCP) -> None:
     attachments = await call(server, "list_attachments", message_id="m3")
-    saved = await call(server, "download_attachment", message_id="m3", attachment_id=attachments[0]["id"])
-    assert Path(saved["path"]).read_bytes() == b"xlsx-bytes" and saved["name"] == "numbers.xlsx"
+    assert attachments[0]["file_name"] == "numbers.xlsx"
+    saved = await call(server, "download_attachment", message_id="m3", names=["numbers.xlsx"])
+    (file,) = saved["files"]
+    assert Path(file["path"]).read_bytes() == b"xlsx-bytes" and file["name"] == "numbers.xlsx"
     eml = await call(server, "save_message_mime", message_id="m1")
     assert eml["path"].endswith(".eml")
     artifact = await call(server, "export_messages", conversation_ids=["c-rel"])

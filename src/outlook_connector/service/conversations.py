@@ -1,4 +1,4 @@
-"""Conversation retrieval (requirements §8, research §3.5).
+"""Conversation retrieval (requirements §9, research §3.5).
 
 A conversation is an Exchange conversation: every message with one conversationId across all folders.
 Graph cannot sort that query, so messages are sorted here. Copies of one message are shown once
@@ -26,7 +26,7 @@ from outlook_connector.domain.models import (
     Scope,
 )
 from outlook_connector.remote.ports import FetchedMessages
-from outlook_connector.service import cursors
+from outlook_connector.service import cursors, markers
 from outlook_connector.service.failures import error_block, export_error, gone
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.scope import validate_scope
@@ -110,9 +110,18 @@ class Conversations:
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
                 bodies, missing = await self.bodies(chunk)
+                found, html = await self.mailbox.marker_inputs(list(bodies), body)
                 for offset, summary in enumerate(chunk):
                     error = missing.get(summary.id)
-                    text = error_block(BODY_MISSING, error) if error else bodies[summary.id].body(body)
+                    text = (
+                        error_block(BODY_MISSING, error)
+                        if error
+                        else markers.with_markers(
+                            bodies[summary.id].body(body),
+                            found.get(summary.id, []),
+                            html=html.get(summary.id),
+                        )
+                    )
                     if len(text) > budget and entries:
                         next_start = index + offset
                         break

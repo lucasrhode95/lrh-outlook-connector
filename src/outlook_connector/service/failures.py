@@ -1,4 +1,4 @@
-"""One classification of failed Microsoft requests for exports and conversations (requirements §10).
+"""One classification of failed Microsoft requests for exports and conversations (requirements §11).
 
 Every gap in an export or a conversation body is an ExportError: the step, Microsoft's answer (status,
 code, message, request id), the likely cause, whether retrying can help, and what to do. It is
@@ -39,7 +39,7 @@ GONE = (
 )
 UNEXPECTED = ("unexpected error", False, "report it with the request id", "unexpected error")
 DOWNLOAD_LIMIT = (
-    "attachment exceeds the connector's 150 MB download limit",
+    "attachment exceeds the connector's 150 MiB download limit",
     False,
     "download the attachment directly from Outlook",
     "connector download limit",

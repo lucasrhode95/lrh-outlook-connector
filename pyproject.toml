@@ -52,4 +52,5 @@ include = ["src"]
 exclude = ["research"]
 
 [tool.uv.sources]
-lrh-m365-auth = { git = "https://github.com/lucasrhode95/lrh-m365-auth.git", rev = "9f2e4f4935cdc555dfc50f583f9c9e9290ca883e" }
+# Follows lrh-m365-auth main; uv.lock records the exact commit. Update with `uv lock --upgrade-package lrh-m365-auth`.
+lrh-m365-auth = { git = "https://github.com/lucasrhode95/lrh-m365-auth.git", branch = "main" }
