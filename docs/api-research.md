@@ -25,7 +25,7 @@ is the reference for routes, parameters and schemas.
 6. [Search v2](#6-search-v2-substrate): [request and paging](#61-request-and-paging), [events](#62-events),
    [mail](#63-mail-conversations-parked), [Teams](#64-teams-messages-and-transcripts),
    [other routes](#65-other-search-routes-seen-in-outlook-web)
-7. [Rejected alternatives and identifiers](#7-rejected-alternatives-and-identifiers)
+7. [Outlook Web deep links](#7-outlook-web-deep-links)
 
 **How to read it.** Every finding carries its evidence and date:
 
@@ -43,28 +43,20 @@ cookies, message text, addresses or real ids are kept here.
 
 ## 1. Summary
 
-- **Mail reads → Graph** with the Outlook Mobile client (`Mail.Read`); Graph also reads back OWS changes to
-  verify them (§3).
-- **Mail changes and inbox rules → OWS**, Outlook Web's private JSON RPC, with the One Outlook Web client.
-  The tested clients cannot write mail through Graph, and the Graph profile has no `MailboxSettings.*` (§2, §4).
-- **Native signatures → Outlook Cloud Settings**, with the same Outlook profile (§5).
-- **Calendar → Graph `calendarView`** with the Teams client's Graph token, which carries `Calendars.*`; OWS
-  `GetCalendarView` is the fallback and Search v2 finds events by topic (§3.8, §6.2).
-- **Mail search → Graph `$search`**, which matched Outlook's own top-bar search on recall (§3.4).
-- **Folders only are cached.** 25.6k items, two thirds in Junk; a full metadata mirror takes about
-  12 minutes (§3.2).
-- **One id model.** Graph immutable ids survive moves and become OWS ids by a base64 alphabet swap (§4.2);
-  `$search` hits are the exception and need `translateExchangeIds` (§3.1).
-- **Delta reports a soft delete as `deleted`.** Only a 404 on a GET by id means the item is gone (§3.7).
+- The tested clients cannot write mail through Graph, and the Graph profile has no `MailboxSettings.*`; Outlook
+  Web's OWS accepts the app-owned Outlook token without cookies (§2, §4).
+- The Teams client's Graph token carries `Calendars.*`, which the Outlook Graph profile lacks (§2, §3.8).
+- Graph `$search` matched Outlook's own top-bar search on recall (§3.4).
+- A full metadata mirror of the tested mailbox (25.6k items, two thirds in Junk) takes about 12 minutes (§3.2).
+- Graph immutable ids survive moves and become OWS ids by a base64 alphabet swap (§4.2); `$search` hits are the
+  exception and need `translateExchangeIds` (§3.1).
+- Delta reports a soft delete as `deleted`; only a 404 on a GET by id means the item is gone (§3.7).
 
 ## 2. Sign-in and clients
 
 Which Microsoft clients are granted which permissions, and the `AADSTS65002` refusals, are in the shared
-[sign-in research](https://github.com/lucasrhode95/lrh-m365-auth/blob/main/docs/api-research.md). For this
-connector, none of the tested usable clients could write mail through Graph, so mail changes, inbox rules and
-signatures use the Outlook profile. The split in
-[architecture §6](architecture.md#6-capability-routing-and-portability) follows from that and must be
-re-derived for another tenant.
+[sign-in research](https://github.com/lucasrhode95/lrh-m365-auth/blob/main/docs/api-research.md): none of the
+tested usable clients could write mail through Graph.
 
 Live, 2026-10-03 and 2026-10-04:
 
@@ -79,7 +71,7 @@ Live, 2026-10-03 and 2026-10-04:
 - The Teams client's Graph token (`teams.graph`) carried `Calendars.Read`, `Calendars.Read.Shared`,
   `Calendars.ReadWrite` and `Calendars.ReadWrite.Shared` (2026-10-12); see §3.8.
 
-Not tested: shared mailboxes, and an Online Archive (the account reports `HasArchive=false`).
+The account reports `HasArchive=false`.
 
 ## 3. Microsoft Graph
 
@@ -108,7 +100,6 @@ Live, 2026-10-02 to 2026-10-04, on the tested mailbox:
 | Metadata walk (`$top=500`, 17 fields) | 37 records/s, about 1.7 KB each: a full mirror takes about 11.5 minutes and 45 MB |
 | Inbox delta bootstrap | 139 records, one page, 1.6 s |
 
-So only folders are cached, and message metadata is read on demand.
 
 **Listing without a folder.** `/me/messages` pages newest first across every folder, Junk and Deleted Items
 included (86% of this mailbox), so filtering after paging kept 13 of 100 rows. Counting first (one `$batch` of
@@ -139,13 +130,12 @@ Live, 2026-10-02, three pages of 25 per backend:
 - After resolving Search v2's `ImmutableId`s through Graph, `subject:relatório` returned the identical 50
   conversations from Graph `$search` and Search v2; all 52 `$search` conversations for `relatório be` were in
   Search v2's top 75.
-- `/search/query` is not used: its total comes from another engine and ignores the folder rules.
+- `/search/query`'s total comes from another engine and ignores folder rules.
 - `$search` takes KQL `attachment:<name>` for attachment file names. Attachment *content* is searched only by
   `/search/query` with `entityTypes=["message"]`, whose hits do not say which attachment matched.
 - `/search/query` with `message` found a synthetic marker in its subject and, separately, in its body (2 hits
   each, consistent with the Sent Items and Inbox copies, 2026-10-10).
-- Three one-hit `search_messages` calls took 3.4 s, 0.8 s and 0.8 s end to end (2026-10-10). `$search` and
-  `/search/query` have not been timed on identical queries.
+- Three one-hit `search_messages` calls took 3.4 s, 0.8 s and 0.8 s end to end (2026-10-10).
 
 ### 3.5 Conversations
 
@@ -173,7 +163,7 @@ Live, 2026-10-02, 40 messages and 176 attachments; and later checks:
   (2026-10-08).
 - The text body Graph returns shows an inline image as its alt text in brackets at its place
   (`[synthetic pixel]`), and a message whose only attachment is inline reports `hasAttachments=false`
-  (2026-10-15). An image without alt text was not checked.
+  (2026-10-15).
 
 ### 3.7 Delta after moves and deletes
 
@@ -188,9 +178,9 @@ Live, 2026-10-02: a delta snapshot taken before the §4.2 changes and read after
 
 ### 3.8 Calendar through the Teams client Graph profile
 
-The Outlook Graph profile has no calendar scope; an `event` search with it answered 403 (2026-10-10).
-Adding `Calendars.Read` to that first-party client is untested and may fail with `AADSTS65002`. The Teams
-client's Graph token already carries `Calendars.*` (§2). Live, read-only, 2026-10-12 and 2026-10-13:
+The Outlook Graph profile has no calendar scope; an `event` search with it answered 403 (2026-10-10). The
+Teams client's Graph token carries `Calendars.*` (§2). Live, read-only, 2026-10-12 and 2026-10-13, UTC windows
+only:
 
 - `GET /me/calendarView` with a window, `$top=100`, selected fields and `Prefer: outlook.body-content-type="text"`
   returned one week in one page: 16 events (11 occurrences, 4 single events, 1 exception), each with attendees
@@ -202,12 +192,8 @@ client's Graph token already carries `Calendars.*` (§2). Live, read-only, 2026-
   week, and hydrate through OWS `GetItem`.
 - Start and end times from `GetItem` and from both listings denote the same instants.
 - `POST /search/query` with `entityTypes=["event"]` and a word from one event's description returned 12 hits
-  in one page; the hydrated hit had the word in its description, not its subject. Whether it can restrict dates
-  or search the description alone is untested.
-- `GET /me/events/{id}?$select=subject,body` read one event. The other detail fields were not compared.
-
-Not tested: shared or delegated calendars (the token carries `Calendars.Read.Shared`), time zones other than
-UTC, and consent on a fresh account.
+  in one page; the hydrated hit had the word in its description, not its subject.
+- `GET /me/events/{id}?$select=subject,body` read one event's subject and description.
 
 ## 4. OWS (`/owa/service.svc`)
 
@@ -496,7 +482,7 @@ The `teams.microsoft.com` host answered 405 for this path.
 `EntityType: "Conversation"`, `ContentSources: ["Exchange"]` works (2026-10-02). `Source` carries
 `ConversationId` (a different encoding from Graph's), `ImmutableId` (readable through Graph), `ParentFolderId`,
 `From`, `UniqueSenders`, `MessageCount`, `Preview` and `HasAttachments`; the result set also has
-`TotalWithoutCollapsing`. It matched Graph `$search` on recall (§3.4), so mail search stays on Graph.
+`TotalWithoutCollapsing`. It matched Graph `$search` on recall (§3.4).
 
 ### 6.4 Teams messages and transcripts
 
@@ -521,15 +507,6 @@ Browser and Source, 2026-10-10:
 - Outlook Web also calls its own GraphQL (`/outlookgatewayb2/graphql`) for calendar groups, tabs, working
   hours, auth settings and meeting responses.
 
-## 7. Rejected alternatives and identifiers
+## 7. Outlook Web deep links
 
-- **Browser-token tools** ([outlook-cli](https://github.com/yusufaltunbicak/outlook-cli),
-  [owa-piggy](https://github.com/damsleth/owa-piggy)): useful route vocabulary, unacceptable authentication.
-- **Outlook REST v2:** retired; see Microsoft's [Graph comparison](https://learn.microsoft.com/en-us/outlook/rest/compare-graph).
-- **`GetAccessTokenForResource` over OWS:** a historical token-minting path; do not use
-  ([Black Hat 2019](https://i.blackhat.com/USA-19/Thursday/us-19-Jaiswal-Preventing-Authentication-Bypass-A-Tale-Of-Two-Researchers.pdf)).
-- **EWS:** follow Microsoft's [retirement guidance](https://learn.microsoft.com/en-us/exchange/clients-and-mobile-in-exchange-online/deprecation-of-ews-exchange-online).
-- The Exchange resource app id `00000002-0000-0ff1-ce00-000000000000` is not a client id.
-- `ab0455a0-8d03-46b9-b18b-df2f57b9e44c` appears in Outlook Web's consumer-auth configuration; unverified, do
-  not use.
-- Outlook Web deep links (Browser): `/mail/inbox/id/<id>` and `/owa/?viewmodel=ReadMessageItem&ItemID=<id>`.
+Browser: a message opens at `/mail/inbox/id/<id>` and `/owa/?viewmodel=ReadMessageItem&ItemID=<id>`.

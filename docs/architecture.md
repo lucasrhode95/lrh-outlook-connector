@@ -178,7 +178,18 @@ Graph handles mail-data reads and read-after-write checks; OWS handles mail chan
 
 The service depends only on the ports in [`remote/ports.py`](../src/outlook_connector/remote/ports.py); [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port, and each adapter requests its named profile from `lrh-m365-auth`. A write uses one backend and is never retried through another. The only cross-backend fallback is a read: calendar windows fall back from Graph to Outlook Web (§5.5).
 
-### 6.2 Adapting to another tenant or a policy change
+### 6.2 Routes not used
+
+- **Browser-token tools** ([outlook-cli](https://github.com/yusufaltunbicak/outlook-cli),
+  [owa-piggy](https://github.com/damsleth/owa-piggy)) show useful route names but borrow the browser's sign-in;
+  the connector signs in with its own tokens.
+- **`GetAccessTokenForResource` over OWS** is a historical token-minting path and is not used
+  ([Black Hat 2019](https://i.blackhat.com/USA-19/Thursday/us-19-Jaiswal-Preventing-Authentication-Bypass-A-Tale-Of-Two-Researchers.pdf)).
+- Outlook REST v2 and EWS are retired or retiring and are not used.
+- `ab0455a0-8d03-46b9-b18b-df2f57b9e44c`, seen in Outlook Web's consumer-auth configuration, is unverified and
+  not used. The Exchange resource app id `00000002-0000-0ff1-ce00-000000000000` is a resource, not a client.
+
+### 6.3 Adapting to another tenant or a policy change
 
 Re-run the relevant probes from [research/README.md](../research/README.md), record the result in the research log, and change the configured profiles and adapters to match. The domain, service, store and surfaces stay unchanged.
 
