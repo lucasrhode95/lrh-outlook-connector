@@ -555,7 +555,8 @@ function renderConversation(conversation) {
       "aria-expanded": String(conversation.expanded) },
       el("span", { class: "toggle", "aria-hidden": "true" }, icon(conversation.expanded ? "chevronDown" : "chevronRight")),
       el("div", { class: "lines" },
-        el("div", { class: "who" }, senders, el("span", { class: "conversation-count" }, countLabel(conversation, messages.length))),
+        // The names take the ellipsis so the message count stays visible.
+        el("div", { class: "who who-count" }, el("span", { class: "who-names" }, senders), el("span", { class: "conversation-count" }, countLabel(conversation, messages.length))),
         el("div", { class: "subject" }, kindBadge(meeting), el("span", {}, newest.subject || "(no subject)")),
         el("div", { class: "preview" }, newest.preview || ""),
         meetingPanel(meeting)),

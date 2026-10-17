@@ -44,7 +44,7 @@
   --reader-title: #2f506c;
   --exportbar-bg: #f4f7f9;
   color-scheme: light;
-  font-family: Arial, "Segoe UI", sans-serif;
+  font-family: "Segoe UI", system-ui, sans-serif;
   font-size: 14px;
   color: var(--text);
 }
@@ -360,7 +360,9 @@ input[type="search"]::-webkit-search-cancel-button { display: none; appearance: 
 .icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .icon.flagged { color: var(--danger); }
 .toggle { display: flex; justify-content: center; padding-top: 3px; color: var(--muted); user-select: none; }
-.conversation-count { margin-left: 6px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.lines .who-count { display: flex; align-items: center; }
+.who-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-count { flex: none; margin-left: 6px; padding: 1px 7px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); font-size: 11px; font-weight: 400; }
 .messages { padding-left: 24px; }
 .kind { display: inline-block; margin-right: 6px; padding: 2px 7px; border-radius: 7px; background: var(--accent-soft); color: var(--accent-bright); font-size: 11px; font-weight: 700; vertical-align: 1px; }
 .kind-cancelled, .kind-declined { background: var(--danger-soft); color: var(--danger); }

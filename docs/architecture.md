@@ -159,6 +159,27 @@ One SQLite database per account fingerprint: the account binding and the folder 
 - **MCP** ([`mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py)): FastMCP over stdio. FastMCP checks argument types; tools pass values to the service unchanged. Files are returned as local paths, never inline base64. The server instructions carry the usage rules agents need (scope, out of reach, copies, coverage and cursors, throttling, the 150 MB limit, access denied versus sign-in).
 - **Web** ([`surfaces/web/`](../src/outlook_connector/surfaces/web/)): a Starlette JSON API over the same service calls, bound to localhost, with a per-run session token and a localhost Host check on every call. `POST /api/export` returns one download with an `X-Export-Errors` header carrying the export's error line; `POST /api/heartbeat` keeps the idle timer alive while a tab is open. Port and idle defaults are in [`ui_settings.py`](../src/outlook_connector/surfaces/ui_settings.py). The UI is described in the README and shown in [`ui-preview.svg`](ui-preview.svg). Its export options (attachments, quoted history and how files are grouped) sit in a settings menu behind the cog, as in the Teams connector; the menu stays open while they change and closes on an outside click or Escape. Details worth knowing: attachment names come from one batched request per 200 messages, conversation sizes are requested after a list loads, a reader answer for a message no longer selected is ignored, and the profile and photo are read once per process.
 
+### 5.11 Local UI design rules
+
+Shared by the Outlook and Teams connector UIs; each keeps its own accent color, layout and product
+vocabulary.
+
+- **Type and shape:** the font stack `"Segoe UI", system-ui, sans-serif`; corners of about 4 px on fields
+  and buttons, 8–12 px on cards, menus and dialogs, and round avatars and icon buttons.
+- **Header:** the product name, then the search or filters, with the signed-in account (avatar and name)
+  at the far right.
+- **Settings:** options that apply to the download sit behind a cog beside the filters, as on/off switches
+  (`role="switch"`) or a segmented choice; the menu stays open while they change and closes on an outside
+  click or Escape.
+- **Selection and actions:** the footer holds the selection on the left (a count or pills, with
+  **Clear all**) and the status and actions on the right, the primary action last. Buttons never wrap.
+- **Date range:** the same picker in both UIs: weeks start on Sunday, future days are disabled, two clicks
+  in either order make the range, and × clears it.
+- **States:** one spinner per loading area; empty, loading, ready and failed states are distinct, and a
+  failure offers Retry. Message content is always rendered as text, never as HTML.
+- **Theme:** light and dark follow the system setting and change live, without a reload.
+- **Lifetime:** loopback only, a per-run session token, and a stop after 30 idle minutes.
+
 ## 6. Capability routing and portability
 
 Graph handles mail-data reads and read-after-write checks; OWS handles mail changes, inbox rules, event details and the calendar fallback; Cloud Settings handles signatures; Search v2 finds events. The Outlook profile is therefore needed by some read-only tools too. This routing reflects the tenant's grants (research §2), not a fixed split between reads and writes.
