@@ -1,10 +1,10 @@
 """Process logging for the long-running commands (``mcp``, ``ui``): a daily-rotated file per process.
 
-The MCP server logs to its file only, keeping stdout for the protocol; the UI also logs to stdout.
-Each process writes its own file, so concurrent processes never rotate the same one. Records never
-carry credentials: a redaction filter removes common credential forms before any output. Libraries
-that log full request URLs (``httpx``, ``httpcore``, whose queries can carry search terms) are held
-at WARNING.
+The same module runs in every lrh-* connector. The MCP server logs to its file only, keeping stdout for
+the protocol; the UI also logs to stdout. Each process writes its own file, so concurrent processes never
+rotate the same one. Records never carry credentials: a redaction filter removes common credential forms
+before any output. Libraries that log full request URLs (``httpx``, ``httpcore``) are held at WARNING,
+because their URLs carry search terms and mailbox ids.
 """
 
 from __future__ import annotations
@@ -32,7 +32,8 @@ _BEARER_SECRET = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 # A credential header's value runs to the end of the line: "Cookie: a=1; b=2", "Authorization: Basic x".
 _HEADER_SECRET = re.compile(r"(?im)\b(authorization|proxy-authorization|cookie|set-cookie)(\s*:\s*)[^\r\n]+")
 _ASSIGNED_SECRET = re.compile(
-    r"(?i)\b(access[_-]?token|refresh[_-]?token|id[_-]?token|authorization|cookie|client[_-]?secret)\b"
+    r"(?i)\b(access[_-]?token|refresh[_-]?token|id[_-]?token|skype[_-]?token|substrate[_-]?token|"
+    r"authorization|cookie|client[_-]?secret)\b"
     r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;&}]+)"
 )
 _QUERY_SECRET = re.compile(
