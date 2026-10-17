@@ -70,7 +70,7 @@ class TokenSource(Protocol):
 
 @contextlib.contextmanager
 def operation(name: str) -> Iterator[None]:
-    """Name what the code below is doing; errors raised inside it say so ("fetching message bodies")."""
+    """Name what the code below is doing; errors raised inside it say so."""
     token = _operation.set(name)
     try:
         yield
@@ -331,7 +331,7 @@ _CLAIMS = re.compile(r'claims="([^"]+)"')
 
 
 def _renewal(response: httpx.Response) -> dict[str, Any]:
-    """How to renew a token the service rejected: force a refresh, with the CAE claims challenge if any."""
+    """How to renew a rejected token: force a refresh, with the CAE claims challenge if any."""
     challenge = _CLAIMS.search(response.headers.get("www-authenticate", ""))
     if challenge:
         try:
@@ -351,13 +351,17 @@ def _retry_after(response: httpx.Response, attempt: int) -> float:
 
 
 def service_error(body: Any) -> tuple[str | None, str | None]:
-    """(code, message) of a Microsoft error body ``{"error": {"code", "message"}}``."""
-    error = body.get("error") if isinstance(body, dict) else None
-    if not isinstance(error, dict):
+    """(code, message) of a Microsoft error body ``{"error": {"code", "message"}}`` (or a flat variant)."""
+    if not isinstance(body, dict):
         return None, None
-    code = error.get("code") if isinstance(error.get("code"), str) else None
-    message = error.get("message") if isinstance(error.get("message"), str) else None
-    return code, message
+    error = body.get("error")
+    if isinstance(error, dict):
+        code = error.get("code") if isinstance(error.get("code"), str) else None
+        message = error.get("message") if isinstance(error.get("message"), str) else None
+        return code, message
+    code = body.get("errorCode") or body.get("code")
+    message = body.get("message")
+    return (str(code) if code is not None else None), (message if isinstance(message, str) else None)
 
 
 def error_code(response: httpx.Response) -> str | None:
@@ -372,7 +376,7 @@ def error_code(response: httpx.Response) -> str | None:
 
 def request_id(headers: Mapping[str, str]) -> str | None:
     lowered = {k.lower(): v for k, v in headers.items()}
-    value = lowered.get("request-id") or lowered.get("client-request-id")
+    value = lowered.get("request-id") or lowered.get("client-request-id") or lowered.get("ms-cv")
     return value[:64] if value else None
 
 
