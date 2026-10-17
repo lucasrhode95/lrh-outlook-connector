@@ -50,9 +50,10 @@ def with_markers(
 ) -> str:
     """``text`` (Exchange's text body) with a marker for each file the message carries.
 
-    ``html`` is the HTML of the same body (full or unique), or None when it was not read; then inline images
-    keep Exchange's placeholder and only the other markers are added. ``names`` overrides marker names (an
-    export uses the names of the files it wrote). Inline images this body does not reference get no marker.
+    ``html`` is the HTML of the same body (full or unique), or None when it was not read; then nothing tells
+    which inline files the body shows, so every one is listed after the text (an export downloads them
+    all in that case) and Exchange's placeholders stay. ``names`` overrides marker names (an export uses
+    the names of the files it wrote). With HTML, inline images this body does not reference get no marker.
 
     Assumes (not re-checked here): ``attachments`` is the listing of the message ``text`` and ``html`` come
     from.
@@ -84,7 +85,9 @@ def with_markers(
         out = out[:start] + marker + out[end:]
     unplaced = [by_cid[cid] for cid, _ in images if cid in by_cid and by_cid[cid].id not in placed]
     trailing = list({a.id: a for a in unplaced}.values())
-    trailing += [a for a in attachments if a.id in names and not (a.kind == "file" and a.is_inline)]
+    trailing += [
+        a for a in attachments if a.id in names and (html is None or not (a.kind == "file" and a.is_inline))
+    ]
     if not trailing:
         return out
     lines = "\n".join(_marker(a, names[a.id]) for a in trailing)

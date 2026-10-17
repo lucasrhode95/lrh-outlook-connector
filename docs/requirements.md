@@ -189,5 +189,5 @@ List all rules in priority order, marking unsupported rules read-only. Condition
 Logging, retries, bounds and errors are specified in [architecture §9](architecture.md#9-cross-cutting-concerns). The essentials:
 
 - Never log mail content, addresses, query text or credentials.
-- Never retry a write automatically. Reads, including each item of a Graph `$batch`, are retried on 429/502/503/504.
+- Retry a write only when it was provably not applied (the connection never opened, or 429 or 503), never one whose outcome is uncertain. Reads, including each item of a Graph `$batch`, are retried on 429/502/503/504.
 - "Not found" leaves the cause open: deleted, moved out of reach, or a wrong id.

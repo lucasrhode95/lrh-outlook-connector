@@ -46,11 +46,11 @@ def test_an_image_without_its_placeholder_is_listed_after_the_text_never_on_anot
     assert with_markers(text, [CHART], html=html) == "Hello [other words]\n\n[Image: image001.png]"
 
 
-def test_without_html_images_keep_their_placeholder_and_unreferenced_images_get_no_marker() -> None:
+def test_without_html_every_inline_file_follows_the_text_and_unreferenced_ones_need_html() -> None:
     logo = _file("a3", "logo.png", inline=True, cid="sig")
-    assert (
-        with_markers("Hi [chart]", [CHART, logo, REPORT], html=None)
-        == "Hi [chart]\n\n[File: budget-report.xlsx]"
+    # No HTML: an export downloads every inline file, so the text names each one.
+    assert with_markers("Hi [chart]", [CHART, logo, REPORT], html=None) == (
+        "Hi [chart]\n\n[Image: image001.png]\n[Image: logo.png]\n[File: budget-report.xlsx]"
     )
     html = '<img alt="chart" src="cid:image001.png@synthetic">'
     assert with_markers("Hi [chart]", [CHART, logo], html=html) == "Hi [Image: image001.png]"
