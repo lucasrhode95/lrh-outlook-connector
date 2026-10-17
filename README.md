@@ -136,6 +136,9 @@ uv run pytest
 node --test tests/surfaces/message_reader.test.cjs
 ```
 
+`lrh-m365-auth` follows its `main` branch, and `uv.lock` records the exact commit. Run
+`uv lock --upgrade-package lrh-m365-auth` to move to its latest commit.
+
 Logs: each `mcp` and `ui` process writes a daily-rotated file under `<data directory>/logs/`, kept for seven days; the UI also logs to stdout. Set `OUTLOOK_CONNECTOR_LOG_LEVEL=DEBUG` for request timings ([architecture §7](docs/architecture.md#7-data-and-identity)).
 
 Project references: [documentation index](docs/README.md) · [requirements](docs/requirements.md) · [architecture](docs/architecture.md) · [API research](docs/api-research.md) · [open roadmap](docs/roadmap.md).
