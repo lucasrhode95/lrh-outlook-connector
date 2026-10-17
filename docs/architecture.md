@@ -146,7 +146,9 @@ One SQLite database per account fingerprint: the account binding and the folder 
 - Conversations given to `set_read` expand to every message in scope. With more than 100 messages, `counts` covers all and `results` keeps explicit ids and anything not `done` or `unchanged`.
 - `move` refuses Deleted Items and hidden folders; `delete` leaves messages already in Deleted Items alone.
 
-**[`files.py`](../src/outlook_connector/service/files.py)** names a saved `.eml` from the downloaded Subject header.
+**[`markers.py`](../src/outlook_connector/service/markers.py)** names each file in message text (§8.6), for `get_message`, `get_conversation` and exports alike.
+
+**[`files.py`](../src/outlook_connector/service/files.py)** saves attachments by their marker names into the download cache, and names a saved `.eml` from the downloaded Subject header.
 
 **[`export/`](../src/outlook_connector/service/export/)**
 - [`orchestrator.py`](../src/outlook_connector/service/export/orchestrator.py): sources defer copy merging to one final pass, and the window pages with `skip_returned_copies=False`, so `also_in` names every folder. Explicit ids are read first and fail the export before anything is written. Bodies fetched while selecting are reused.
@@ -227,7 +229,7 @@ Re-run the relevant probes from [research/README.md](../research/README.md), rec
   - shared token cache: %USERPROFILE%/.lrh-m365-auth/token-cache.bin by default on Windows, or ~/.lrh-m365-auth/token-cache.bin elsewhere. `M365_AUTH_HOME` overrides it. `--unsecure` selects a separate plaintext development cache;
   - OUTLOOK_CONNECTOR_HOME overrides the data directory (tests, portability);
   - store: <data directory>/accounts/<fingerprint>/mail.sqlite3 (account binding and folder cache only);
-  - exports: <data directory>/exports/. Downloaded attachments and saved .eml files: <data directory>/downloads/. Both are removed after 7 days; cleanup tolerates a file another process removed first. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
+  - exports: <data directory>/exports/. Downloaded attachments: <data directory>/downloads/<source>/<name>, one folder per message attachment (a hash of the two ids). Saved .eml files: <data directory>/downloads/. Both are removed after 7 days; cleanup tolerates a file another process removed first. Attachment downloads during an export use an OS temp directory, removed when the export is packaged.
   - logs: <data directory>/logs/<command>-<start time>-<process id>.log, one file per `mcp` or `ui` process, rotated at midnight and kept 7 days ([`logs.py`](../src/outlook_connector/logs.py)). The MCP server logs to its file only, since stdout carries the protocol; the UI also logs to stdout. A filter redacts bearer tokens, credential headers, assigned secrets and secret query parameters ([`logs.py`](../src/outlook_connector/logs.py) is the same module in every `lrh-*` connector, and the shared sign-in library logs through the same handlers); `httpx` and `httpcore`, which log full request URLs, are held at WARNING. `OUTLOOK_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
 
 
@@ -292,6 +294,7 @@ Returns one message's body and its attachment metadata. `body` is `full` (defaul
 
 - An id that cannot be read returns `NotFound`, which does not guess the cause: the message may be deleted or moved out of reach, or the id may be wrong.
 - Attachments are listed even when Graph reports `hasAttachments=false`, so inline-only images still appear.
+- The text names each file with the markers of §8.6; `body="html"` returns the HTML unchanged.
 - Unlike lists and search, `get_message` reads an id in a hidden folder when Graph allows it (see §8.1).
 
 #### `get_conversation`
@@ -301,21 +304,26 @@ Returns a whole conversation across all folders, oldest first (sorted locally). 
 - Every message of the conversation is listed, however long it is; `max_chars` and `cursor` bound the bodies of one response.
 - A body that cannot be fetched sets `export_error` on its message, and that message's text shows an `[EXPORT ERROR]` block. Count messages with `export_error` rather than reading their text.
 - `coverage.complete` stays false while a failed body might succeed on a retry.
+- Bodies carry the markers of §8.6.
 
 ### 8.6 Attachments and saved files
 
+Message text names every file the message carries. An inline image the HTML body references by `cid:` reads `[Image: name]` where Exchange's text shows its alt text in brackets ([research §3.6](api-research.md#36-attachments-and-inline-images)); placeholders are matched in document order, and an image whose placeholder is not found is listed after the text instead. Files, forwarded messages and cloud links follow the text: `[File: name]`, `[Message: name.eml]`, `[Link: name]`. An inline image the body does not reference gets no marker. Names come from the attachment name, made safe as a file name and unique within the message (`report.pdf`, `report (2).pdf`). The HTML is read only for messages with inline files; one whose HTML or listing cannot be read keeps Exchange's placeholders and gets fewer markers.
+
 #### `list_attachments`
 
-Lists a message's attachments: `id`, `name`, `content_type`, `size`, `is_inline` and `kind`, which is `file`, `item` (a forwarded message), `reference` (a cloud link) or `unknown`. Inline images also carry a `content_id`, which matches the `cid:` reference in the body.
+Lists a message's attachments: `id`, `name`, `file_name` (the name the text and `download_attachment` use), `content_type`, `size`, `is_inline` and `kind`, which is `file`, `item` (a forwarded message), `reference` (a cloud link) or `unknown`. Inline images also carry a `content_id`, which matches the `cid:` reference in the body.
 
 - Inline-only attachments are listed even when Graph reports no attachments.
 
 #### `download_attachment`
 
-Saves one attachment under `<data directory>/downloads/` and returns its local path, name, content type and size. Read the file with your own file tools.
+Saves a message's files by the names its text shows, given in `names` (case-insensitive), or all of its files when `names` is omitted, and returns `files` (local path, name, content type and size of each) and `unavailable` (name and reason of each file it could not save). Read the files with your own file tools.
 
-- Downloads over 150 MiB are refused. Download a larger file directly from Outlook.
-- `reference` attachments are cloud links with no file content here, so they are refused. Fetching `item` attachments is best effort.
+- An unknown name is refused before anything is downloaded, and the error lists the names there are.
+- Each file is fetched once into the download cache, one folder per message attachment, and published under its name only when complete; a later call reuses it and keeps it another week.
+- Files over 150 MiB are not saved. Download a larger file directly from Outlook.
+- Cloud links (`[Link: name]`) have no file content here and are listed under `unavailable`. A call that saves nothing fails. Fetching `item` attachments is best effort.
 - A forwarded message (`kind: item`) is saved as an `.eml` file.
 
 #### `save_message_mime`
@@ -338,6 +346,7 @@ The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several fi
 - A copy of one message is exported once, and `also_in` names the other folders.
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
 - Inline images (74% of file attachments in the R1 mailbox, mostly signatures and quoted history) are included when their `cid:` appears in the rendered body. If the reference cannot be read, the image is included rather than dropped.
+- Each message's text names its files with the markers of §8.6, whether or not files are included, so every message's attachments are listed. A file the export wrote is named by its name in the folder, which is unique within the output file.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
 - Attachments over 150 MiB are marked and must be downloaded from Outlook.
 - The export runs inside the tool call. No progress is reported and no background job is left behind.

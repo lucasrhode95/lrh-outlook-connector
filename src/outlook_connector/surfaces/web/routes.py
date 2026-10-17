@@ -211,9 +211,13 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         return _json(content)
 
     async def attachment(request: Request) -> Response:
-        saved = await (await context.services()).files.download_attachment(
-            request.path_params["message_id"], request.path_params["attachment_id"]
-        )
+        services = await context.services()
+        message_id = request.path_params["message_id"]
+        attachments = await services.mailbox.attachments(message_id)
+        match = next((a for a in attachments if a.id == request.path_params["attachment_id"]), None)
+        if match is None or not match.file_name:
+            raise NotFound("No such attachment on this message.")
+        saved = (await services.files.download_attachment(message_id, [match.file_name])).files[0]
         return FileResponse(saved.path, media_type=saved.content_type, filename=saved.name)
 
     async def export(request: Request) -> Response:

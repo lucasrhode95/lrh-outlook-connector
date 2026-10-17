@@ -52,7 +52,7 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.domain.time import optional_utc
 from outlook_connector.remote.ports import FolderCount, MailReader
-from outlook_connector.service import cursors
+from outlook_connector.service import cursors, markers
 from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.scope import validate_scope
 from outlook_connector.store.db import Store
@@ -557,8 +557,9 @@ class Mailbox:
         return (await self.decorate([message]))[0]  # type: ignore[return-value]
 
     async def attachments(self, message_id: str) -> list[Attachment]:
+        """A message's attachments, each with the name its marker shows."""
         try:
-            return await self.reader.list_attachments(message_id)
+            return markers.named(await self.reader.list_attachments(message_id))
         except NotFound:
             raise NotFound(
                 f"Message {message_id} was not found; it may have been deleted, moved out of reach, "
@@ -575,7 +576,34 @@ class Mailbox:
         if len(ids) > MAX_SIZE_LOOKUPS:
             raise InvalidRequest(f"At most {MAX_SIZE_LOOKUPS} messages per request.")
         found, _ = await self.reader.list_attachments_many(ids) if ids else ({}, {})
-        return found
+        return {mid: markers.named(items) for mid, items in found.items()}
+
+    async def marker_inputs(
+        self, message_ids: list[str], body: BodyKind
+    ) -> tuple[dict[str, list[Attachment]], dict[str, str]]:
+        """What the text markers need for these messages: their attachments, and the HTML of the
+        ``body`` kind for those with inline files (to place the images). A message whose listing or
+        HTML could not be read is left out, and its text gets fewer markers.
+
+        Assumes (not re-checked here): the ids come from this connector's own results.
+        """
+        ids = list(dict.fromkeys(message_ids))
+        found, _ = await self.reader.list_attachments_many(ids) if ids else ({}, {})
+        return found, await self.inline_html(found, body)
+
+    async def inline_html(self, found: dict[str, list[Attachment]], body: BodyKind) -> dict[str, str]:
+        """The ``body`` HTML of each message in ``found`` with an inline file, by message id; a message
+        whose HTML could not be read is left out."""
+        inline = [mid for mid, items in found.items() if any(a.kind == "file" and a.is_inline for a in items)]
+        if not inline:
+            return {}
+        pages = (await self.reader.get_messages(inline, body_format="html")).messages
+        html = {
+            mid: page.unique_body_html if body == "unique" else page.body_html
+            for mid, page in pages.items()
+            if page
+        }
+        return {mid: value for mid, value in html.items() if value is not None}
 
     async def get_message(
         self,
@@ -594,7 +622,11 @@ class Mailbox:
         if offset < 0 or (max_chars is not None and not 1 <= max_chars <= 200_000):
             raise InvalidRequest("offset must be >= 0 and max_chars between 1 and 200000.")
         message = await self.message(message_id, body=body)
+        attachments = markers.named(message.attachments)
         text = message.body(body)
+        if body != "html":
+            html = await self.inline_html({message_id: attachments}, body)
+            text = markers.with_markers(text, attachments, html=html.get(message_id))
         end = len(text) if max_chars is None else min(len(text), offset + max_chars)
         return MessageContent(
             message=MessageSummary.model_validate(message.model_dump()),
@@ -603,7 +635,7 @@ class Mailbox:
             offset=offset,
             total_chars=len(text),
             next_offset=end if end < len(text) else None,
-            attachments=message.attachments,
+            attachments=attachments,
         )
 
     # ---------------------------------------------------------------- search

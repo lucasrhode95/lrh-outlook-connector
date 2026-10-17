@@ -77,7 +77,8 @@ async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(expo
     # logo.png (inline signature, not referenced) and junk m4 are out.
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/image001.png", f"{stem}/numbers.xlsx"]
     text = zip_text(artifact.path, f"{stem}.txt")
-    assert "Attachment: 2026-09-28 Relatório de exemplo semanal/numbers.xlsx" in text
+    # The text names each file it carries; the image has no alt text, so its marker follows the text.
+    assert "Follow-up with numbers\n\n[Image: image001.png]\n[File: numbers.xlsx]" in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
     assert "> First report" in text  # full body, including quoted history, by default
     assert "buy now" not in text and artifact.messages_excluded == {"deleted_or_junk": 1}
@@ -90,7 +91,8 @@ async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: 
         and artifact.content_type.startswith("text/plain")
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert "Attachment: numbers.xlsx" in text and "image001.png" not in text  # inline images are not listed
+    # Markers name the files even when they are not exported; an unreferenced inline image gets none.
+    assert "[File: numbers.xlsx]" in text and "[Image: image001.png]" in text and "logo.png" not in text
 
 
 async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
@@ -642,12 +644,53 @@ async def test_jsonl_export_with_attachment_files_is_a_zip(exports: Exports) -> 
     assert files and all(f in names for f in files)
 
 
-async def test_downloads_never_share_a_file(exports: Exports) -> None:
+async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
+    exports: Exports, fake: FakeGraph
+) -> None:
     files = Files(exports.mailbox)
     first, second = await asyncio.gather(
-        files.download_attachment("m3", "a1"), files.download_attachment("m3", "a1")
+        files.download_attachment("m3", ["numbers.xlsx"]), files.download_attachment("m3", ["NUMBERS.xlsx"])
     )
-    assert first.path != second.path and Path(first.path).read_bytes() == Path(second.path).read_bytes()
+    assert [f.name for f in first.files] == ["numbers.xlsx"] and first.files[0].path == second.files[0].path
+    assert Path(first.files[0].path).read_bytes() == b"xlsx-bytes"
+    fake.calls.clear()
+    again = await files.download_attachment("m3", ["numbers.xlsx"])
+    assert again.files[0].path == first.files[0].path
+    assert not any(call.endswith("/$value") for call in fake.calls)  # served from the download cache
+
+
+async def test_omitted_names_save_every_file_and_unknown_names_are_refused(exports: Exports) -> None:
+    files = Files(exports.mailbox)
+    saved = await files.download_attachment("m3")
+    assert sorted(f.name for f in saved.files) == ["image001.png", "logo.png", "numbers.xlsx"]
+    with pytest.raises(NotFound, match="Its files: numbers.xlsx, image001.png, logo.png"):
+        await files.download_attachment("m3", ["missing.pdf"])
+
+
+async def test_a_cloud_link_is_reported_unavailable_while_the_files_are_saved(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add(
+        FakeMessage(
+            "m-link", "Shared plan", "f-inbox", "2026-10-03T09:00:00Z", conversation="c-link",
+            attachments=[
+                FakeAttachment("l1", "plan.docx", kind="referenceAttachment"),
+                FakeAttachment("f1", "notes.txt", b"notes", "text/plain"),
+            ],
+        )
+    )  # fmt: skip
+    files = Files(exports.mailbox)
+    saved = await files.download_attachment("m-link")
+    assert [f.name for f in saved.files] == ["notes.txt"] and saved.unavailable == []
+    mixed = await files.download_attachment("m-link", ["plan.docx", "notes.txt"])
+    assert [f.name for f in mixed.files] == ["notes.txt"]
+    assert [u.name for u in mixed.unavailable] == ["plan.docx"] and "cloud link" in mixed.unavailable[
+        0
+    ].reason
+    with pytest.raises(InvalidRequest, match="Nothing was saved"):
+        await files.download_attachment("m-link", ["plan.docx"])
+    content = await exports.mailbox.get_message("m-link")
+    assert content.text.endswith("[Link: plan.docx]\n[File: notes.txt]")
 
 
 async def test_save_mime_names_the_file_from_its_subject_header(exports: Exports, fake: FakeGraph) -> None:
@@ -673,7 +716,7 @@ async def test_identical_attachment_files_are_stored_once(exports: Exports, fake
     artifact = await exports.export(ExportRequest(conversation_ids=["c-sig"], include_attachments=True))
     stem = "2026-10-01 Status"
     assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/logo.png"] and artifact.attachment_files == 1
-    assert zip_text(artifact.path, f"{stem}.txt").count(f"Attachment: {stem}/logo.png") == 2
+    assert zip_text(artifact.path, f"{stem}.txt").count("[File: logo.png]") == 2  # both name the one file
 
 
 async def test_export_merges_copies_once_after_combining_selection_sources(

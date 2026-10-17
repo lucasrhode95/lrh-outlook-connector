@@ -49,7 +49,7 @@ from outlook_connector.domain.models import (
     SignatureList,
     SignatureWriteResult,
 )
-from outlook_connector.service.files import SavedFile
+from outlook_connector.service.files import SavedFile, SavedFiles
 
 INSTRUCTIONS = """\
 The signed-in user's own Outlook mailbox. Microsoft Graph handles core mail-data reads; Outlook \
@@ -106,9 +106,12 @@ list_messages(include_total=true) gives the server's count for the window, to pl
 When Junk Email and Deleted Items hold most of the mailbox, a mailbox-wide list_messages reads folder \
 by folder (full pages, a bit slower) and coverage.notes says so: pass that note on to the user.
 - Mail deleted on the server is gone: nothing is kept locally.
-- Attachments: list_attachments, then download_attachment saves the raw file and returns its local \
-path for you to read with your own file tools. Downloads are limited to 150 MiB; for a larger attachment, \
-download it directly from Outlook. save_message_mime saves the original .eml.
+- Attachments: message text names every file: [File: name], [Image: name] where an inline image sits, \
+[Message: name.eml] for a forwarded message and [Link: name] for a cloud link. download_attachment saves \
+files by those names (all of them when names is omitted) and returns local paths for you to read with \
+your own file tools; list_attachments adds sizes and types. Downloads are limited to 150 MiB; for a larger \
+attachment, download it directly from Outlook. Cloud links are not downloaded. save_message_mime saves \
+the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
 are included and merged. Folder/date-window selections follow scope; conversations follow \
 scope.deleted_items but keep sent and meeting mail. \
@@ -388,15 +391,24 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def list_attachments(message_id: str) -> list[Attachment]:
-        """List attachment metadata, including inline content ids when available."""
+        """List attachment metadata: file_name (the name the text and download_attachment use), size,
+        content type, kind and inline content ids when available."""
         return await (await services()).mailbox.attachments(message_id)
 
     @mcp.tool(annotations=LOCAL_FILE)
-    async def download_attachment(message_id: str, attachment_id: str) -> SavedFile:
-        """Save an attachment under 150 MiB; download larger files from Outlook.
+    async def download_attachment(
+        message_id: str,
+        names: Annotated[
+            list[str] | None,
+            Field(description="File names as the message text shows them; omit for all of its files."),
+        ] = None,
+    ) -> SavedFiles:
+        """Save a message's files by the names its text shows ([File: …], [Image: …], [Message: …]).
 
-        Forwarded emails are saved as .eml."""
-        return await (await services()).files.download_attachment(message_id, attachment_id)
+        Each file must be under 150 MiB; download larger files from Outlook. Forwarded emails are saved
+        as .eml; cloud links are not downloaded. A file that cannot be saved is listed under unavailable
+        while the others are saved."""
+        return await (await services()).files.download_attachment(message_id, names)
 
     @mcp.tool(annotations=LOCAL_FILE)
     async def save_message_mime(message_id: str) -> SavedFile:

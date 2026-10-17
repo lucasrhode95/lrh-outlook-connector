@@ -72,13 +72,3 @@ def dedupe(name: str, taken: set[str]) -> str:
         counter += 1
     taken.add(candidate.lower())
     return candidate
-
-
-def size_label(size: int | None) -> str:
-    if size is None:
-        return "size unknown"
-    if size < 1024:
-        return f"{size} B"
-    if size < 1024 * 1024:
-        return f"{size / 1024:.0f} KB"
-    return f"{size / (1024 * 1024):.1f} MB"

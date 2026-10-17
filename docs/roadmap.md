@@ -38,16 +38,6 @@ resource. The alternative, `Calendars.Read` on `outlook.graph`, needs its preaut
 
 ### Enhancements
 
-#### Attachments and inline images by name
-
-Build the design recorded in [requirements §10](requirements.md#10-reading-content-mcp), shared with the
-Teams connector. Example: a reply whose HTML holds `<img alt="chart" src="cid:image001.png@…">` and a
-`budget-report.xlsx` attachment reads `… see below [Image: image001.png] … [File: budget-report.xlsx]`,
-and `download_attachment(message_id=…, names=["budget-report.xlsx"])` returns one path. Settle while
-building: render the text from the HTML to place markers exactly, or replace Exchange's placeholder
-(which relies on the alt text); and whether `list_attachments` is still needed once the text carries the
-markers.
-
 #### Attach local files to drafts
 
 Build the design recorded in [requirements §12.1](requirements.md#121-drafts-sending-and-signatures): an
@@ -80,6 +70,12 @@ dated result in the research record.
 
 The `m365.search` and `teams.graph` calendar grants are verified on one account only. Check them on a new
 account before relying on them.
+
+### Inline image placeholders
+
+Attachment markers replace the bracketed alt text that Exchange's text body shows for an inline image
+([research §3.6](api-research.md#36-attachments-and-inline-images)). Check what that text shows for an image
+without alt text, and for two images with the same alt text; today such an image's marker follows the text.
 
 ### Mail search route
 

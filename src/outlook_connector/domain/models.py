@@ -145,6 +145,8 @@ class Attachment(Compact):
     is_inline: bool = False
     kind: Literal["file", "item", "reference", "unknown"] = "unknown"
     content_id: str | None = None
+    # The name the message text, download_attachment and exports use: unique within the message.
+    file_name: str | None = None
 
 
 class Message(MessageSummary):
