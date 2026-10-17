@@ -129,7 +129,7 @@
   <text class="section-title code" x="915" y="756">signatures.py</text>
   <text class="detail" x="915" y="791">native signatures</text>
   <text class="detail" x="915" y="819">default for drafts</text>
-  <text class="detail" x="915" y="847">each write sent once</text>
+  <text class="detail" x="915" y="847">writes resent only on 429/503</text>
 
   <rect x="1166" y="720" width="248" height="160" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="1182" y="756">passive_html.py</text>
