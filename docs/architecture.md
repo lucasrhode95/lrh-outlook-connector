@@ -27,7 +27,7 @@ There is no daemon. MCP and the UI run only for their active client or session; 
 | `outlook-connector mcp` | One stdio process per MCP client session | core + MCP |
 | `outlook-connector ui [--port]` | Localhost web server; exits on Ctrl+C or after an idle timeout | core + web stack |
 | `outlook-connector auth [--sign-out] [--unsecure]` | Prepares every shared profile, or signs out | shared auth |
-| `outlook-connector status [--check] [--json]` | Offline profile and cache status; `--check` acquires tokens but does not prove API authorization | shared auth |
+| `outlook-connector status [--check]` | Offline profile and cache status, in the same shape as `auth_status`; `--check` acquires tokens but does not prove API authorization | shared auth |
 
 Consequences of short-lived processes:
 
@@ -249,7 +249,7 @@ The MCP server exposes 30 tools, grouped below by task. The [README](../README.m
 
 #### `auth_status`
 
-Reports the signed-in account and, for each profile, whether a client credential is cached, when a cached access token expires and what the profile is for. It works offline and also returns the sign-in command. Call it first when something fails, to see whether sign-in is missing.
+Reports the signed-in account and, for each profile, whether a client credential is cached, when a cached access token expires and what the profile is for. It works offline and also returns the sign-in command. The report is built by `status_report` in the shared auth library, the same function every connector's `auth_status` uses, so the tools and `status` cannot disagree. Call it first when something fails, to see whether sign-in is missing.
 
 - A cached token shows that sign-in state exists. It does not prove that a particular operation is allowed. `outlook-connector status --check` tests token acquisition for each profile but does not verify service authorization.
 

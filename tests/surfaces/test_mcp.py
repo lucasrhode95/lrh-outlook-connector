@@ -52,7 +52,7 @@ class FakeTokens:
         }
         return AccessToken(profile=profile, value=jwt(claims), source="cache", expires_on=None)
 
-    def sign_in_command(self, profile: str) -> str:
+    def sign_in_command(self, profile: str | None = None) -> str:
         return "outlook-connector auth"
 
     def status(self) -> CacheStatus:

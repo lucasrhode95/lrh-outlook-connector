@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-
 import pytest
 from m365_auth import PROFILES, TokenProvider
 
@@ -58,22 +56,15 @@ def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
     assert script.shown_flows == 4  # uncached resources need separate device flows
 
 
-def test_status_json_is_offline_and_parseable(capsys: pytest.CaptureFixture[str]) -> None:
+def test_status_is_offline_and_lists_every_profile(capsys: pytest.CaptureFixture[str]) -> None:
     provider = TokenProvider(unsecure=True, login_command="outlook-connector auth")
     seed_cache(provider._cache(), client_id=GRAPH_CLIENT, scope="https://graph.microsoft.com/Mail.Read")
     script = Script()
-    assert run(["status", "--json", "--unsecure"], script) == cli.EXIT_OK
-    data = json.loads(capsys.readouterr().out)
-    assert [p["profile"] for p in data["profiles"]] == list(PROFILES)
-    assert data["cache"]["mode"] == "plaintext-development"
-    assert [p["client_credential_cached"] for p in data["profiles"]] == [
-        True,
-        False,
-        False,
-        False,
-        False,
-        False,
-    ]
+    assert run(["status", "--unsecure"], script) == cli.EXIT_OK
+    text = capsys.readouterr().out.splitlines()
+    headings = [line.split(" ")[0] for line in text if line.startswith("[")]
+    assert headings == [f"[{name}]" for name in PROFILES]
+    assert "Token cache: plaintext-development" in " ".join(text)
     assert script.created == []
 
 
@@ -111,4 +102,5 @@ def test_auth_parser_rejects_profile_arguments(profile: str) -> None:
 
 
 def test_status_parser_and_project_data_path_remain_available() -> None:
-    assert cli.build_parser().parse_args(["status", "--json"]).json
+    with pytest.raises(SystemExit):  # the machine-readable form is the auth_status tool
+        cli.build_parser().parse_args(["status", "--json"])

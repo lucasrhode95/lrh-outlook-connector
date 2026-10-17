@@ -9,13 +9,12 @@ from __future__ import annotations
 import argparse
 import contextlib
 import functools
-import json
 import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import cast
 
-from m365_auth import AccessToken, CacheStatus, TokenProvider
+from m365_auth import AccessToken, TokenProvider, check_profiles, status_lines
 
 from outlook_connector import config
 from outlook_connector.domain.errors import AuthenticationRequired, ConnectorError
@@ -127,18 +126,8 @@ def _auth(args: argparse.Namespace) -> int:
 def _status(args: argparse.Namespace) -> int:
     """Show cached client credentials; ``--check`` also attempts each profile's token silently."""
     provider = _tokens(args)
-    status = provider.status()
-    checks: dict[str, dict[str, object]] = {}
-    if args.check:
-        for name in provider.profile_names:
-            try:
-                checks[name] = {"ok": True, **_token_facts(provider.get_token(name))}
-            except ConnectorError as exc:
-                checks[name] = {"ok": False, "error": str(exc)}
-    if args.json:
-        print(json.dumps(_status_dict(status, checks), indent=2))
-    else:
-        _print_status(status, checks)
+    checks = check_profiles(provider) if args.check else {}
+    print("\n".join(status_lines(provider, checks)))
     # Core mail data needs Graph; inbox rules, signatures and mail changes need Outlook.
     graph_ok = checks.get("outlook.graph", {"ok": True})["ok"]
     return EXIT_OK if graph_ok else EXIT_AUTH_REQUIRED
@@ -169,7 +158,6 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also acquire each profile's token silently; this checks token acquisition, not API access.",
     )
-    status.add_argument("--json", action="store_true", help="Machine-readable output.")
     _add_unsecure(status)
 
     mcp = sub.add_parser("mcp", help="Run the MCP server over stdio (started by your MCP client).")
@@ -224,46 +212,6 @@ def _print_token_summary(token: AccessToken) -> None:
         print(f"  mail scopes: {', '.join(mail_scopes)}")
     print(f"  granted scope count: {facts['scope_count']}")
     print(f"  token from:  {facts['source']}, expires {facts['expires_on']}")
-
-
-def _status_dict(status: CacheStatus, checks: dict[str, dict[str, object]]) -> dict[str, object]:
-    return {
-        "cache": {"mode": status.mode, "path": str(status.path), "exists": status.exists},
-        "accounts": [{"username": a.username, "fingerprint": a.fingerprint} for a in status.accounts],
-        "profiles": [
-            {
-                "profile": p.profile,
-                "purpose": p.purpose,
-                "client_id": p.client_id,
-                "scopes": list(p.scopes),
-                "client_credential_cached": p.client_credential_cached,
-                "access_token_expires_on": _iso(p.access_token_expires_on),
-                **({"check": checks[p.profile]} if p.profile in checks else {}),
-            }
-            for p in status.profiles
-        ],
-    }
-
-
-def _print_status(status: CacheStatus, checks: dict[str, dict[str, object]]) -> None:
-    print(f"Token cache: {status.mode}, {status.path}" + ("" if status.exists else " (not created yet)"))
-    if not status.accounts:
-        print("Account:     not signed in")
-    for account in status.accounts:
-        print(f"Account:     {account.username} (fingerprint {account.fingerprint})")
-    for p in status.profiles:
-        state = "cached" if p.client_credential_cached else "not cached"
-        print(f"\n[{p.profile}] {p.purpose}")
-        print(f"  client {p.client_id} -> {' '.join(p.scopes)}")
-        print(
-            f"  client credential {state}; access token valid until {_iso(p.access_token_expires_on) or '-'}"
-        )
-        if p.profile in checks:
-            check = checks[p.profile]
-            if check["ok"]:
-                print(f"  check: token acquisition ok ({check['source']}); not a service-permission test")
-            else:
-                print(f"  check: FAILED - {check['error']}")
 
 
 def _iso(epoch: int | None) -> str | None:

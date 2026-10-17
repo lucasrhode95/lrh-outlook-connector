@@ -692,7 +692,7 @@ class StaticTokens:
             self.renewals.append(renewal)
         return self._T()
 
-    def sign_in_command(self, profile: str) -> str:
+    def sign_in_command(self, profile: str | None = None) -> str:
         return "outlook-connector auth"
 
 
