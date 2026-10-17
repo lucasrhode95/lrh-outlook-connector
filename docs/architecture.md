@@ -66,7 +66,7 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 ### 5.2 [`remote/transport.py`](../src/outlook_connector/remote/transport.py)
 
 - One `httpx.AsyncClient` per process. [`remote/urls.py`](../src/outlook_connector/remote/urls.py) is the only outbound URL policy: an HTTPS host allowlist, Graph continuation links kept under the versioned Graph root, no redirects. Responses are size-capped; downloads stream.
-- One auth/retry state machine for requests and downloads. Only idempotent requests retry (GETs, and read-style POSTs such as a `$batch` of GETs), honoring 429 and Retry-After. A write is sent once: no answer or a 5xx raises `WriteOutcomeUnknown`; a 4xx or 429 is a definite failure.
+- One auth/retry state machine for requests and downloads. Only idempotent requests retry (GETs, and read-style POSTs such as a `$batch` of GETs), honoring 429 and Retry-After. A write is retried, a bounded number of times and honoring Retry-After, only when the failure proves nothing was applied: the connection never opened, or Microsoft answered 429 or 503. No answer or any other 5xx raises `WriteOutcomeUnknown` and is never resent; another 4xx is a definite failure.
 - At most **4 requests in flight** per process (Exchange allows about 4 concurrent requests per app and mailbox, and 10,000 per 10 minutes).
 - **401** renews the token once (force refresh, or the claims challenge from `WWW-Authenticate`); a second 401 raises `AuthenticationRequired`. **403** is access denied for that item, never a sign-in problem.
 - Errors name the operation in progress ("While fetching message bodies"), the HTTP status, the service code, a shortened message and the request id. Logs carry metadata only.
@@ -449,7 +449,7 @@ Changes follow one confirmation flow:
 
 1. Call `create_rule`, `update_rule`, `reorder_rules` or `delete_rule` without `user_confirmation`. The result has `status: proposed`, the exact change, and a `confirmation` code bound to the current state of the rules.
 2. Show the person that exact change. Repeat the same request with the code only after they approve it. Never supply the code yourself.
-3. The change is sent once and read back. `status` is then `done`, `failed` or `unknown`; for `unknown`, check Outlook before repeating.
+3. The change is never resent unless Microsoft refused it as throttled or unavailable (429, 503), then read back. `status` is then `done`, `failed` or `unknown`; for `unknown`, check Outlook before repeating.
 
 If the rules changed after the proposal, the code no longer matches and the change is refused.
 
@@ -471,7 +471,7 @@ Sets the order of the supported rules. `rule_ids` must list every supported rule
 
 #### `delete_rule`
 
-Deletes one supported rule. It is sent once and never retried.
+Deletes one supported rule. It is never resent unless Microsoft refused it as throttled or unavailable (429, 503).
 
 The web UI serves the same read operations through the local UI, plus attachment downloads, conversation-size lookups, exports, status, profile details and a heartbeat. The web surface is implemented in [`surfaces/web/`](../src/outlook_connector/surfaces/web/); every API call requires the per-run session token and a localhost Host header. GET requests take scope as `sent_items`, `meeting_mail` and `deleted_items` query parameters; JSON requests use a nested `scope` object. Write tools are MCP-first.
 

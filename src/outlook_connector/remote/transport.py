@@ -2,9 +2,11 @@
 
 - One ``httpx.AsyncClient`` per process (keep-alive within a call).
 - No redirects, and only allowlisted hosts.
-- Retries only when the caller marks the request idempotent (GETs by default), honoring
-  429 / Retry-After. Writes (``write=True``) are sent once: an answer that never completes, or a
-  server error, raises ``WriteOutcomeUnknown`` because the write may have happened.
+- Reads (GETs by default, or a request the caller marks idempotent) retry transient failures,
+  honoring 429 / Retry-After. Writes (``write=True``) retry only failures that prove nothing was
+  applied: the connection never opened, or the service answered 429 or 503. A write sent without a
+  complete answer, or answered with any other server error, raises ``WriteOutcomeUnknown`` and is
+  never resent, because it may have happened.
 - Concurrency limiter: Exchange Online allows 4 concurrent requests per app and mailbox.
 - Logs metadata only: no URLs with query text, no bodies, no tokens.
 - Errors name the operation in progress (``operation()``), the service error code and message
@@ -45,8 +47,9 @@ from outlook_connector.remote.urls import validate_url
 log = logging.getLogger(__name__)
 
 RETRY_STATUSES = frozenset({429, 502, 503, 504})
+WRITE_RETRY_STATUSES = frozenset({429, 503})  # throttled or unavailable: the write was not processed
 MAX_JSON_BYTES = 32 * 1024 * 1024
-MAX_ATTEMPTS = 4  # per retried request (GETs and read-style POSTs); writes are sent once
+MAX_ATTEMPTS = 4  # per retried request; a write is retried only when nothing was applied
 MAX_ERROR_TEXT = 200
 
 _operation: ContextVar[str | None] = ContextVar("operation", default=None)
@@ -179,7 +182,8 @@ class Transport:
         """One auth and retry state machine for ordinary requests and streamed downloads."""
         validate_url(url)
         should_retry = False if write else (method.upper() == "GET" if retry is None else retry)
-        attempts = MAX_ATTEMPTS if should_retry else 1
+        retryable = WRITE_RETRY_STATUSES if write else (RETRY_STATUSES if should_retry else frozenset())
+        attempts = MAX_ATTEMPTS if (write or should_retry) else 1
         renewal: dict[str, Any] | None = None
         renewed = False
         attempt = 0
@@ -215,10 +219,14 @@ class Transport:
                         renewed, renewal = True, _renewal(response)
                         attempt -= 1
                         wait = 0
-                    elif response.status_code in RETRY_STATUSES and attempt < attempts:
+                    elif response.status_code in retryable and attempt < attempts:
                         wait = _retry_after(response, attempt)
                     elif not response.is_success:
-                        if write and response.status_code >= 500:
+                        if (
+                            write
+                            and response.status_code >= 500
+                            and response.status_code not in WRITE_RETRY_STATUSES
+                        ):
                             raise _unknown(
                                 url,
                                 f"HTTP {response.status_code}, {error_code(response) or 'no error code'}",

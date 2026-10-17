@@ -128,11 +128,22 @@ async def test_a_success_without_readable_results_is_an_unknown_outcome(fake: Fa
             await writer_for(fake).send_draft("test-draft", "k")
 
 
-async def test_throttled_write_is_not_retried(fake: FakeGraph) -> None:
-    fake.ows_next = [429]
+async def test_a_write_refused_as_throttled_or_unavailable_is_retried(fake: FakeGraph) -> None:
+    # 429 and 503 prove the write was not processed, so it is sent again, a bounded number of times.
+    fake.messages["m1"].is_draft = True
+    for script in (429, 503):
+        fake.ows_calls.clear()
+        fake.ows_next = [script]
+        await writer_for(fake).send_draft("m1", fake.messages["m1"].change_key())
+        assert len(fake.ows_calls) == 2
+        fake.messages["m1"].is_draft = True
+
+
+async def test_a_write_still_throttled_after_every_attempt_reports_throttling(fake: FakeGraph) -> None:
+    fake.ows_next = [429, 429, 429, 429]
     with pytest.raises(Throttled):
         await writer_for(fake).send_draft("test-draft", "k")
-    assert len(fake.ows_calls) == 1
+    assert len(fake.ows_calls) == 4
 
 
 async def test_rejected_token_is_renewed_once_before_the_write_is_sent(fake: FakeGraph) -> None:

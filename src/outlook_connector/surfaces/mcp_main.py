@@ -134,7 +134,8 @@ many small ones. On a throttling error, wait at least a minute before retrying.
 Outlook sign-in. list_signatures reports Outlook's exact, case-sensitive native names, the new-message
 and reply/forward defaults, and whether contents are readable. get_signature returns the HTML and
 text. create_signature, update_signature, delete_signature and set_default_signature change Outlook
-settings once; they are not retried. Names cannot contain commas. A deleted signature can
+settings and are not repeated unless Outlook refused them as throttled or unavailable.
+Names cannot contain commas. A deleted signature can
 remain selected as a dangling default, so set a valid default after deletion when needed. To copy an
 Outlook draft signature, get its HTML, download its CID-referenced inline images, replace each CID
 image with a data:image URI containing those bytes, then save the resulting HTML as a native
@@ -164,7 +165,8 @@ on messages the user asked about, and say which ones before changing many.
  delete_rule, first omit user_confirmation and show the persistent change and returned RULE code. \
 Only after explicit human confirmation repeat the exact request with that code. \
 Never confirm on the user's behalf. \
-Each write is sent once and read back; unknown means check Outlook before repeating. \
+Each write is sent again only when Outlook refused it as throttled or unavailable, then read back; \
+unknown means check Outlook before repeating. \
 Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
 - Core mail-data reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature \
   access use `outlook.api`, prepared by `outlook-connector auth`.

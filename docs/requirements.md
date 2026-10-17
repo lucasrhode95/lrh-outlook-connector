@@ -88,7 +88,7 @@ pairs are never requested again.
 ## 6. Backend
 
 - **Prefer documented Graph when the endpoint and granted profile support the capability; use Outlook-specific services for gaps.** Here Graph handles core mail-data reads and post-write checks; OWS handles mail changes and inbox rules; Outlook Cloud Settings handles native signatures. This split is tenant-specific; [architecture §6](architecture.md#6-capability-routing-and-portability) describes the routing and how to re-route.
-- One backend per capability. A failed or ambiguous write is never retried, and never retried through a different backend.
+- One backend per capability. A write is retried automatically, a bounded number of times and honoring `Retry-After`, only when the failure proves it was not applied (never sent, or answered 429 or 503); an ambiguous write is never resent, and no write is ever retried through a different backend.
 
 ## 7. Data model and local cache
 
@@ -156,7 +156,7 @@ The output never contains tokens, signed URLs or authorization headers.
 - **Bodies:** exactly one of text (escaped, whitespace preserved) or HTML. HTML passes through except active content, markup left open at the end, and elements that change how the rest of the markup is read.
 - **Read-back:** a create requires Graph read-back. Read-back retries are bounded; a failure returns the reliable saved id and never creates another draft.
 - **Send:** only an existing draft, exactly as stored, after explicit human approval. The connector checks the bound account, cannot change the message while sending, and never retries an ambiguous send: it reads Sent Items when it can, otherwise reports unknown. Live tests use self-sends only.
-- **Native signatures** are managed through Outlook Cloud Settings, account-bound; each write is sent once. `create_draft` inserts the native default (new mail or reply) after the body, unless a name is chosen or signatures are turned off. A missing selected signature fails without fallback. Add-in-generated, recipient-dependent signatures are out of scope.
+- **Native signatures** are managed through Outlook Cloud Settings, account-bound; each write is never resent unless Microsoft refused it as throttled or unavailable (429, 503). `create_draft` inserts the native default (new mail or reply) after the body, unless a name is chosen or signatures are turned off. A missing selected signature fails without fallback. Add-in-generated, recipient-dependent signatures are out of scope.
 
 ### 11.2 Mailbox mutations
 
