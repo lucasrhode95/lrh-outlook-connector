@@ -165,7 +165,8 @@ Shared by the Outlook and Teams connector UIs; each keeps its own accent color, 
 vocabulary.
 
 - **Type and shape:** the font stack `"Segoe UI", system-ui, sans-serif`; corners of about 4 px on fields
-  and buttons, 8–12 px on cards, menus and dialogs, and round avatars and icon buttons.
+  and buttons, 8–12 px on cards, menus and dialogs, and round avatars and icon buttons. Pills, chips
+  and badges keep small radii of their own.
 - **Header:** the product name, then the search or filters, with the signed-in account (avatar and name)
   at the far right.
 - **Settings:** options that apply to the download sit behind a cog beside the filters, as on/off switches
@@ -179,6 +180,8 @@ vocabulary.
   failure offers Retry. Message content is always rendered as text, never as HTML.
 - **Theme:** light and dark follow the system setting and change live, without a reload.
 - **Lifetime:** loopback only, a per-run session token, and a stop after 30 idle minutes.
+
+**Residual differences.** Outlook keeps rounder corners than this rule on its search fields (10–12 px), folder buttons (12 px), icon buttons (9 px), segmented control (10 px), message rows (13 px) and app frame (20–26 px). Its colors, layout and vocabulary are its own, and it has not been restyled to the rule.
 
 ## 6. Capability routing and portability
 
