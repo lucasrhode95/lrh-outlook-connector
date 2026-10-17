@@ -84,7 +84,7 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - A conversation listing cannot use `$orderby` with the `conversationId` filter, so the service sorts; Graph pages it, and the connector reads every page (research §3.5).
 - `count_messages` returns per-folder counts in one `$batch` (`$count`, `ConsistencyLevel: eventual`); a failed folder is left out instead of hiding the others.
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
-- Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MB guard stops larger ones.
+- Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
 
 ### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py), calendar adapters
@@ -156,7 +156,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 
 ### 5.10 [`surfaces/`](../src/outlook_connector/surfaces/)
 
-- **MCP** ([`mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py)): FastMCP over stdio. FastMCP checks argument types; tools pass values to the service unchanged. Files are returned as local paths, never inline base64. The server instructions carry the usage rules agents need (scope, out of reach, copies, coverage and cursors, throttling, the 150 MB limit, access denied versus sign-in).
+- **MCP** ([`mcp_main.py`](../src/outlook_connector/surfaces/mcp_main.py)): FastMCP over stdio. FastMCP checks argument types; tools pass values to the service unchanged. Files are returned as local paths, never inline base64. The server instructions carry the usage rules agents need (scope, out of reach, copies, coverage and cursors, throttling, the 150 MiB limit, access denied versus sign-in).
 - **Web** ([`surfaces/web/`](../src/outlook_connector/surfaces/web/)): a Starlette JSON API over the same service calls, bound to localhost, with a per-run session token and a localhost Host check on every call. `POST /api/export` returns one download with an `X-Export-Errors` header carrying the export's error line; `POST /api/heartbeat` keeps the idle timer alive while a tab is open. Port and idle defaults are in [`ui_settings.py`](../src/outlook_connector/surfaces/ui_settings.py). The UI is described in the README and shown in [`ui-preview.svg`](ui-preview.svg). Its export options (attachments, quoted history and how files are grouped) sit in a settings menu behind the cog, as in the Teams connector; the menu stays open while they change and closes on an outside click or Escape. Details worth knowing: attachment names come from one batched request per 200 messages, conversation sizes are requested after a list loads, a reader answer for a message no longer selected is ignored, and the profile and photo are read once per process.
 
 ### 5.11 Local UI design rules
@@ -311,7 +311,7 @@ Lists a message's attachments: `id`, `name`, `content_type`, `size`, `is_inline`
 
 Saves one attachment under `<data directory>/downloads/` and returns its local path, name, content type and size. Read the file with your own file tools.
 
-- Downloads over 150 MB are refused. Download a larger file directly from Outlook.
+- Downloads over 150 MiB are refused. Download a larger file directly from Outlook.
 - `reference` attachments are cloud links with no file content here, so they are refused. Fetching `item` attachments is best effort.
 - A forwarded message (`kind: item`) is saved as an `.eml` file.
 
@@ -319,7 +319,7 @@ Saves one attachment under `<data directory>/downloads/` and returns its local p
 
 Saves the original message, headers and all, as an `.eml` file named from its Subject header, and returns its path.
 
-- The same 150 MB limit applies.
+- The same 150 MiB limit applies.
 
 ### 8.7 Exports
 
@@ -336,7 +336,7 @@ The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several fi
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
 - Inline images (74% of file attachments in the R1 mailbox, mostly signatures and quoted history) are included when their `cid:` appears in the rendered body. If the reference cannot be read, the image is included rather than dropped.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
-- Attachments over 150 MB are marked and must be downloaded from Outlook.
+- Attachments over 150 MiB are marked and must be downloaded from Outlook.
 - The export runs inside the tool call. No progress is reported and no background job is left behind.
 - Output goes to `<data directory>/exports/` and is kept for seven days.
 

@@ -27,7 +27,8 @@ Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 conne
 `status` shows the signed-in account and its cached profiles without touching the network. To switch accounts, run `auth --sign-out`, then `auth` again. Which profile serves which tool is in [architecture §6](docs/architecture.md#6-capability-routing-and-portability).
 
 > Credentials are entered only on Microsoft's sign-in page. Tokens stay in the shared encrypted cache
-> (`~/.lrh-m365-auth`, or `M365_AUTH_HOME`). If encryption is unavailable, sign-in fails closed.
+> (`%USERPROFILE%/.lrh-m365-auth` on Windows, the XDG data folder elsewhere, or `M365_AUTH_HOME`).
+> If encryption is unavailable, sign-in fails closed.
 
 Outlook's data (the folder cache, exports, downloads and logs) is stored under
 `%USERPROFILE%\.lrh-outlook-connector` on Windows, or `~/.local/share/lrh-outlook-connector` on other

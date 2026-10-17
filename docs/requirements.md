@@ -129,7 +129,7 @@ pairs are never requested again.
 
 - `get_message` returns metadata plus a bounded full body with continuation, and attachment metadata, including inline-only attachments.
 - The local UI reader shows the whole chosen body from one server read; a failure never shows part of it as complete.
-- **Attachments are returned as raw files** for the agent's client to read. No server-side text extraction. Attachment and MIME downloads have a local 150 MB limit; larger files are downloaded from Outlook.
+- **Attachments are returned as raw files** for the agent's client to read. No server-side text extraction. Attachment and MIME downloads have a local 150 MiB limit; larger files are downloaded from Outlook.
 - **Attachments by name** (decided 2026-10-15, [roadmap](roadmap.md#enhancements)): the design shared with the Teams connector. One text extraction serves reads and exports; files and inline images appear in the text as markers named from the message; `download_attachment` fetches the named files of one message to local paths and fetches each attachment once; exports write each file under its marker name. Outlook specifics: the marker takes the place where Exchange's text body already shows an inline image's alt text in brackets; names come from the attachment name, made unique within the message with ` (2)`; `download_attachment` takes `message_id` and `names` (all files when omitted) instead of an attachment id; forwarded messages become `[Message: name.eml]`, cloud attachments `[Link: name] <url>` and are never downloaded; download-once keys on the immutable message and attachment ids, and identical bytes are stored once by SHA-256. Until it is built, the rules below and in [architecture §8.6–8.7](architecture.md#86-attachments-and-saved-files) describe the current behavior.
 - MIME is delivered as a file, never inside JSON.
 - **Read tools never change mailbox state, including read state.** They are annotated `readOnlyHint=true`.
@@ -156,7 +156,7 @@ The selection is any mix of **whole conversations**, **individual messages** and
 | other 5xx, no response | Microsoft service or network problem | yes | retry later |
 | 403 | access denied for this item (e.g. encrypted or protected) | no | retrying will not help |
 | 404 | deleted or moved in Outlook during the export | no | refresh and select it again |
-| connector download exceeds 150 MB | known local connector limit | no | download the attachment directly from Outlook |
+| connector download exceeds 150 MiB | known local connector limit | no | download the attachment directly from Outlook |
 | anything else | unexpected error | no | report it with the request id |
 
 The output never contains tokens, signed URLs or authorization headers.
