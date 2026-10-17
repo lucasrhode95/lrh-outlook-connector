@@ -15,13 +15,13 @@ from pathlib import PurePath
 from outlook_connector.domain.models import Attachment
 
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Win32 device names, superscript digits included ("Naming Files, Paths, and Namespaces").
 _RESERVED = {
     "con",
     "prn",
     "aux",
     "nul",
-    *(f"com{i}" for i in range(1, 10)),
-    *(f"lpt{i}" for i in range(1, 10)),
+    *(f"{port}{digit}" for port in ("com", "lpt") for digit in "0123456789¹²³"),
 }
 MAX_NAME = 120
 
