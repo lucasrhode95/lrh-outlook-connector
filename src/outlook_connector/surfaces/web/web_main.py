@@ -56,8 +56,8 @@ def serve_ui(
                     f"Outlook connector UI did not start at {url}; check the startup error above.",
                     flush=True,
                 )
-            elif open_browser and not await asyncio.to_thread(webbrowser.open, url):
-                print(f"Open this address in your browser: {url}", flush=True)
+            elif open_browser:
+                _open_browser(url)
             await server_task
         finally:
             watcher.cancel()
@@ -73,6 +73,17 @@ def serve_ui(
         flush=True,
     )
     asyncio.run(serve())
+
+
+def _open_browser(url: str) -> None:
+    """Open the browser on a daemon thread. A launcher that waits for the browser must not hold up the UI:
+    the thread is never awaited, and it does not keep the process alive."""
+
+    def open_or_report() -> None:
+        if not webbrowser.open(url):
+            print(f"Open this address in your browser: {url}", flush=True)
+
+    threading.Thread(target=open_or_report, daemon=True).start()
 
 
 def _free_port(preferred: int) -> int:
