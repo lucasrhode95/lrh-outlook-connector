@@ -1,4 +1,4 @@
-"""The single export path (requirements §10), used by both the local UI and MCP.
+"""The single export path (requirements §11), used by both the local UI and MCP.
 
 selection (conversations + messages + folder/date window) → copies merged → bodies (Graph $batch) →
 attachments (policy) → grouping (per conversation / all / none) →
@@ -77,7 +77,7 @@ class Exports:
         self.reader = conversations.mailbox.reader
 
     async def export(self, request: ExportRequest) -> ExportArtifact:
-        """Export a selection to one local file (requirements §10).
+        """Export a selection to one local file (requirements §11).
 
         Entry point: the request is structurally validated as an ExportRequest. This method checks
         the export limit and that something is selected; _select enforces the selected-message cap.

@@ -17,9 +17,23 @@ A local application for **one user's own Exchange Online mailbox**. It has two s
 
 Both surfaces are thin adapters over one shared service, and neither may limit the other. Outlook, Teams and SharePoint are separately installed products that share one sign-in (`lrh-m365-auth`); product adapters and domain decisions stay in their owning connector.
 
-**Ownership (2026-10-12).** Outlook owns Exchange mail, attachments and calendar events: schedule, recurrence, agenda, organizer, invitees, event attachment metadata and any join link. Teams owns a Teams meeting's chat, recordings, transcripts, recap and notes. Only verified identifiers link an event to those resources. A meeting on another platform does not become a Teams meeting. General OneDrive and SharePoint file search belongs to the SharePoint connector.
+## 2. Ownership (2026-10-17)
 
-## 2. Use cases
+The same in every `lrh-*` connector. Each connector owns one product, and all share one sign-in
+(`lrh-m365-auth`):
+
+- **Outlook** owns Exchange mail and its attachments, and calendar events: schedule, recurrence, agenda,
+  organizer, invitees, event attachment metadata and any join link.
+- **Teams** owns chats and channels, message attachments, and a Teams meeting's chat, recordings,
+  transcripts, recap and notes.
+- **SharePoint** owns discovery and retrieval of general OneDrive and SharePoint files.
+
+A file linked from an email or a Teams message stays part of that message; the stored file itself is
+retrieved through SharePoint. Only verified identifiers connect records across products. A shared
+search endpoint, or a similar name, does not change who owns a resource, and a meeting on another
+platform does not become a Teams meeting.
+
+## 3. Use cases
 
 ### Agentic (MCP)
 
@@ -42,7 +56,7 @@ Both surfaces are thin adapters over one shared service, and neither may limit t
 | U1 | Browse messages **grouped by conversation**. Select whole conversations and/or individual messages, choose export options, and get **one download**. |
 | U2 | Search messages by subject and participants, and by content through online search. Instantly filter what's already loaded. |
 
-## 3. Non-goals
+## 4. Non-goals
 
 - Shared/delegated mailboxes, even though `Mail.Read.Shared` is granted.
 - Exchange Online / In-Place Archive: a **separate archive mailbox**. The account reports `HasArchive=false`, and Graph does not support it. This is *not* the normal **Archive folder** (the target of Outlook's Archive button), which is in the primary mailbox and fully in scope (Graph alias `archive`).
@@ -52,7 +66,7 @@ Both surfaces are thin adapters over one shared service, and neither may limit t
 - Server-side text extraction from attachments. Agents receive the raw file.
 - Branch-aware conversation reconstruction (parked; its header check is in the roadmap).
 
-## 4. Authentication (decided)
+## 5. Authentication (decided)
 
 No new Entra registration exists or will be made. The shared `lrh-m365-auth` package owns
 MSAL `PublicClientApplication` instances and one encrypted token cache used by Outlook, Teams and
@@ -78,19 +92,19 @@ pairs are never requested again.
 - Cross-process cache locking and account-generation checks protect concurrent processes and invalidate remembered credentials after sign-out or an account switch.
 - Offline status separates cached client credentials from resource access-token expiry. `status --check` attempts token acquisition per profile but does not prove service authorization.
 
-## 5. Account binding and identity
+## 6. Account binding and identity
 
 - The SQLite database is bound to a privacy-preserving fingerprint of stable token claims (`tid` + `oid`), never a display name or email address. If a different or unknown owner appears, keep the existing DB untouched and use a separate one.
 - Item key: `(account fingerprint, mailbox id, Graph immutable ID)`. Every Graph call sends `Prefer: IdType="ImmutableId"`.
 - Also store, as metadata only and never as the primary key: `internetMessageId`, `conversationId`, `parentFolderId`, `changeKey`.
 - Writes address items by the same Graph immutable id, converted for OWS by one helper (research §4.2). Ids survive moves.
 
-## 6. Backend
+## 7. Backend
 
 - **Prefer documented Graph when the endpoint and granted profile support the capability; use Outlook-specific services for gaps.** Here Graph handles core mail-data reads and post-write checks; OWS handles mail changes and inbox rules; Outlook Cloud Settings handles native signatures. This split is tenant-specific; [architecture §6](architecture.md#6-capability-routing-and-portability) describes the routing and how to re-route.
 - One backend per capability. A write is retried automatically, a bounded number of times and honoring `Retry-After`, only when the failure proves it was not applied (never sent, or answered 429 or 503); an ambiguous write is never resent, and no write is ever retried through a different backend.
 
-## 7. Data model and local cache
+## 8. Data model and local cache
 
 - **Folders** are cached for 10 minutes. An older cache waits for a refresh (about 23 folders in under a second).
 - **Message metadata is not mirrored or cached.** Every list, search and conversation call reads the server. Decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes (research §3.2).
@@ -99,7 +113,7 @@ pairs are never requested again.
 - Every message exposes one `received_at` timestamp: Graph's `receivedDateTime`, otherwise `sentDateTime`.
 - Development DBs can be reset freely. No migrations.
 
-## 8. Listing, conversations and search
+## 9. Listing, conversations and search
 
 - **One scope object** (`sent_items`, `meeting_mail`, `deleted_items`) is shared by list, search, conversations, exports and read-state changes. Defaults show sent and meeting mail and hide Deleted Items and Junk. Results count what was left out. The full rule is in [architecture §8.1](architecture.md#81-shared-rules).
 - **Out of reach:** hidden folders, Sync Issues and non-mail items are never listed, searched or selected by folder, date window or conversation. **A message id named explicitly is authoritative** (decided 2026-10-13): reads, exports and the change tools act on it wherever Graph can; the change tools still refuse items outside the mail folders.
@@ -111,7 +125,7 @@ pairs are never requested again.
 - **Calendar is a separate domain.** Window listing (`list_calendar_events`) reads Graph first and falls back to Outlook Web only when the Graph read fails; topic search across the calendar (`search_calendar_events`) uses Search v2; `get_calendar_event` hydrates one event. Neither searches Teams chats, recaps, recordings or transcripts.
 - Every result reports coverage: whether more follow (a cursor), what the folder rules left out, and partial flags.
 
-## 9. Reading content (MCP)
+## 10. Reading content (MCP)
 
 - `get_message` returns metadata plus a bounded full body with continuation, and attachment metadata, including inline-only attachments.
 - The local UI reader shows the whole chosen body from one server read; a failure never shows part of it as complete.
@@ -120,7 +134,7 @@ pairs are never requested again.
 - MIME is delivered as a file, never inside JSON.
 - **Read tools never change mailbox state, including read state.** They are annotated `readOnlyHint=true`.
 
-## 10. Export
+## 11. Export
 
 The selection is any mix of **whole conversations**, **individual messages** and a **folder and/or date window**, deduplicated by message and by copy. Scope never selects anything; scope alone is refused. At most 2,000 logical messages; a larger selection is refused with its count rather than cut. Options and defaults are in [architecture §8.7](architecture.md#87-exports): attachments on (non-inline, plus inline images the body references; no URL rewriting), one TXT per conversation, `txt` or `jsonl`, full bodies.
 
@@ -147,9 +161,9 @@ The selection is any mix of **whole conversations**, **individual messages** and
 
 The output never contains tokens, signed URLs or authorization headers.
 
-## 11. Writes
+## 12. Writes
 
-### 11.1 Drafts, sending and signatures
+### 12.1 Drafts, sending and signatures
 
 - **Agent-authored mail always enters Drafts first.** Drafts are composed once and never patched; a change creates a full replacement, verifies its read-back, then moves the old draft to Deleted Items. Never delete first. No Send As.
 - **Local file attachments on drafts** (decided 2026-10-15, [roadmap](roadmap.md#attach-local-files-to-drafts); not yet built): `create_draft` takes local file paths, any path allowed; an unreadable file fails the call with the ordinary error. A replacement draft carries only the files its call lists. A request too large for one Outlook Web request, or a draft over the stored-size limit, is refused before sending with a readable "too large" error, never reported as an unknown outcome; `send_draft` refuses a draft over the send limit ([research §4.6](api-research.md#46-message-size-limits)).
@@ -158,7 +172,7 @@ The output never contains tokens, signed URLs or authorization headers.
 - **Send:** only an existing draft, exactly as stored, after explicit human approval. The connector checks the bound account, cannot change the message while sending, and never retries an ambiguous send: it reads Sent Items when it can, otherwise reports unknown. Live tests use self-sends only.
 - **Native signatures** are managed through Outlook Cloud Settings, account-bound; each write is never resent unless Microsoft refused it as throttled or unavailable (429, 503). `create_draft` inserts the native default (new mail or reply) after the body, unless a name is chosen or signatures are turned off. A missing selected signature fails without fallback. Add-in-generated, recipient-dependent signatures are out of scope.
 
-### 11.2 Mailbox mutations
+### 12.2 Mailbox mutations
 
 In priority order: **move to folder** (including Archive), **move to Deleted Items** (the only delete; no purge), **mark read/unread** (also per conversation), **flag**. Categories are parked (decided 2026-10-03). Creating folders is out of scope until requested.
 
@@ -166,11 +180,11 @@ In priority order: **move to folder** (including Archive), **move to Deleted Ite
 - **Per-item results:** `done`, `unchanged`, `not_found`, `failed` or `unknown`. Partial failure is reported, never hidden. Nothing is retried; an ambiguous result is read back.
 - **Limits:** at most 100 explicit ids per call.
 
-### 11.3 Inbox rules (W9)
+### 12.3 Inbox rules (W9)
 
 List all rules in priority order, marking unsupported rules read-only. Conditions: From, Sent to, Subject contains and Subject-or-body contains. Actions: Move to folder and Stop processing more rules. Every create, update, toggle, reorder or delete requires a proposed write, explicit human confirmation bound to the account and the complete current rule state, one OWS write and a fresh read-back. Unsupported rules are never rewritten. Unknown outcomes must be checked in Outlook before repeating.
 
-## 12. Operational rules
+## 13. Operational rules
 
 Logging, retries, bounds and errors are specified in [architecture §9](architecture.md#9-cross-cutting-concerns). The essentials:
 

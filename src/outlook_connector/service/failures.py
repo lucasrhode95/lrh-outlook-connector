@@ -1,4 +1,4 @@
-"""One classification of failed Microsoft requests for exports and conversations (requirements §10).
+"""One classification of failed Microsoft requests for exports and conversations (requirements §11).
 
 Every gap in an export or a conversation body is an ExportError: the step, Microsoft's answer (status,
 code, message, request id), the likely cause, whether retrying can help, and what to do. It is

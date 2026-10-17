@@ -40,7 +40,7 @@ resource. The alternative, `Calendars.Read` on `outlook.graph`, needs its preaut
 
 #### Attachments and inline images by name
 
-Build the design recorded in [requirements §9](requirements.md#9-reading-content-mcp), shared with the
+Build the design recorded in [requirements §10](requirements.md#10-reading-content-mcp), shared with the
 Teams connector. Example: a reply whose HTML holds `<img alt="chart" src="cid:image001.png@…">` and a
 `budget-report.xlsx` attachment reads `… see below [Image: image001.png] … [File: budget-report.xlsx]`,
 and `download_attachment(message_id=…, names=["budget-report.xlsx"])` returns one path. Settle while
@@ -50,7 +50,7 @@ markers.
 
 #### Attach local files to drafts
 
-Build the design recorded in [requirements §11.1](requirements.md#111-drafts-sending-and-signatures): an
+Build the design recorded in [requirements §12.1](requirements.md#121-drafts-sending-and-signatures): an
 `attachments` list on `create_draft`, sent as non-inline `FileAttachment:#Exchange` entries in the same
 `CreateItem` call that already carries the signature's inline images
 ([`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py); shape in

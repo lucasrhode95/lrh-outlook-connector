@@ -136,6 +136,6 @@ what Outlook Web itself does while you perform one deliberate action:
 **Captures are credentials.** They contain live access and refresh tokens, cookies, canaries,
 mailbox content and addresses. Never commit them, share them, or turn them into test fixtures.
 Use them only to learn request contracts, which are then re-implemented with our own app-owned
-tokens. Browser credentials must never be reused (requirements §4).
+tokens. Browser credentials must never be reused (requirements §5).
 
 Probe profiles are named `graph`, `outlook`, and `search`. Keep local probe configuration keys consistent with these names and sign in with `auth.py graph` or `auth.py outlook` when a matching probe token is missing.

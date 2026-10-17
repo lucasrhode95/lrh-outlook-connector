@@ -375,7 +375,7 @@ class ExportArtifact(Compact):
     error_summary: str | None = None  # the file header's "Export errors: ..." line
 
 
-# ---------------------------------------------------------------- writes (requirements §11)
+# ---------------------------------------------------------------- writes (requirements §12)
 
 MAX_RECIPIENTS = 100
 MAX_BODY_CHARS = 100_000

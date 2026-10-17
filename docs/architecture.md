@@ -128,7 +128,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 
 **[`conversations.py`](../src/outlook_connector/service/conversations.py)** fetches, sorts oldest first, and hydrates bodies in `$batch`; a body that fails becomes that message's `export_error`.
 
-**[`failures.py`](../src/outlook_connector/service/failures.py)** is the one classification of failed Microsoft requests (the table is in requirements §10) and the one renderer of the `[EXPORT ERROR]` block and the export's "Export errors" line.
+**[`failures.py`](../src/outlook_connector/service/failures.py)** is the one classification of failed Microsoft requests (the table is in requirements §11) and the one renderer of the `[EXPORT ERROR]` block and the export's "Export errors" line.
 
 **[`writes.py`](../src/outlook_connector/service/writes.py) and [`signatures.py`](../src/outlook_connector/service/signatures.py)**
 - Text bodies become escaped minimal HTML that keeps whitespace and NBSP. HTML bodies and signatures pass one checker, [`passive_html.py`](../src/outlook_connector/service/passive_html.py): no active content, no elements that change how the rest is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`), no markup left open at the end.

@@ -1,6 +1,6 @@
 """Raw files for agents and the UI: attachments and MIME (.eml) saved under the data directory.
 
-Agents receive raw files and read them with their own tools (requirements §9). Files are kept
+Agents receive raw files and read them with their own tools (requirements §10). Files are kept
 for a week, like exports.
 """
 
