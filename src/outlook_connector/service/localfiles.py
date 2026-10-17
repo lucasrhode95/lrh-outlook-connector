@@ -20,9 +20,9 @@ from outlook_connector import config
 KEEP_SECONDS = 7 * 24 * 3600
 
 
-def kept_dir(name: str, *, root: Path | None = None) -> Path:
-    """Return the ``name`` folder under ``root`` (default: the data directory), removing expired files."""
-    directory = (root if root is not None else config.data_dir()) / name
+def kept_dir(name: str) -> Path:
+    """Return the ``name`` folder under the data directory, removing expired files."""
+    directory = config.data_dir() / name
     directory.mkdir(parents=True, exist_ok=True)
     _remove_expired(directory, time.time() - KEEP_SECONDS)
     return directory

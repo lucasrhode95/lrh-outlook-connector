@@ -54,9 +54,10 @@ def safe_name(name: str | None, *, fallback: str, eml: bool = False) -> str:
     cleaned = _UNSAFE.sub("_", (name or "").strip()).strip(" .") or fallback
     if eml and not cleaned.lower().endswith(".eml"):
         cleaned += ".eml"
+    # Win32 reserves a device name followed by any extension (CON.backup.txt), so check before the first dot.
+    if cleaned.split(".", 1)[0].rstrip(" ").lower() in _RESERVED:
+        cleaned = f"_{cleaned}"
     stem, suffix = PurePath(cleaned).stem, PurePath(cleaned).suffix
-    if stem.lower() in _RESERVED:
-        stem = f"_{stem}"
     if len(stem) + len(suffix) > MAX_NAME:
         stem = stem[: MAX_NAME - len(suffix)]
     return stem + suffix

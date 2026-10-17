@@ -6,9 +6,15 @@ from pathlib import Path
 
 import pytest
 
+from outlook_connector import config
 from outlook_connector.service import localfiles
 
 DAY = 24 * 3600
+
+
+@pytest.fixture(autouse=True)
+def _data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
 
 
 def _age(path: Path, days: float) -> None:
@@ -25,7 +31,7 @@ def test_expired_files_are_removed_and_fresh_files_are_kept(tmp_path: Path) -> N
     fresh.write_bytes(b"new")
     _age(expired, 8)
 
-    localfiles.kept_dir("downloads", root=tmp_path)
+    localfiles.kept_dir("downloads")
 
     assert not expired.exists()
     assert fresh.read_bytes() == b"new"
@@ -51,7 +57,7 @@ def test_an_expired_file_held_open_elsewhere_is_kept_and_cleanup_goes_on(
 
     monkeypatch.setattr(localfiles.os, "replace", refuse_locked)
 
-    localfiles.kept_dir("downloads", root=tmp_path)
+    localfiles.kept_dir("downloads")
 
     assert locked.read_bytes() == b"in use"
     assert not other.exists()
@@ -78,7 +84,7 @@ def test_a_file_that_replaces_an_expired_one_is_restored_not_deleted(
 
     monkeypatch.setattr(localfiles.os, "replace", swap_before_claim)
 
-    localfiles.kept_dir("downloads", root=tmp_path)
+    localfiles.kept_dir("downloads")
 
     assert target.read_bytes() == b"fresh download"
     assert sorted(path.name for path in folder.iterdir()) == ["report.pdf"]

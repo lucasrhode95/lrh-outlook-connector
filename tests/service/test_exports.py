@@ -601,6 +601,7 @@ def test_recipients_are_separated_by_semicolons() -> None:
 def test_safe_names() -> None:
     assert safe_name("a/b:c*?.pdf", fallback="x") == "a_b_c__.pdf"
     assert safe_name("CON.txt", fallback="x") == "_CON.txt"
+    assert safe_name("CON.backup.txt", fallback="x") == "_CON.backup.txt"
     assert safe_name("   ", fallback="file") == "file"
     taken: set[str] = set()
     assert [dedupe(n, taken) for n in ("r.pdf", "R.pdf", "r.pdf")] == ["r.pdf", "R (2).pdf", "r (3).pdf"]
