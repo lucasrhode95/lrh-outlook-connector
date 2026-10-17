@@ -39,7 +39,7 @@ GONE = (
 )
 UNEXPECTED = ("unexpected error", False, "report it with the request id", "unexpected error")
 DOWNLOAD_LIMIT = (
-    "attachment exceeds the connector's 150 MB download limit",
+    "attachment exceeds the connector's 150 MiB download limit",
     False,
     "download the attachment directly from Outlook",
     "connector download limit",

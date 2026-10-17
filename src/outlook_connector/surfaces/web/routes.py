@@ -29,12 +29,19 @@ from outlook_connector.domain.errors import (
     ConnectorError,
     InvalidRequest,
     NotFound,
+    PermissionDenied,
     Throttled,
 )
 from outlook_connector.domain.models import ExportRequest, Scope
 
 STATIC = resources.files("outlook_connector.surfaces.web") / "static"
-_STATUS = {AuthenticationRequired: 401, InvalidRequest: 400, NotFound: 404, Throttled: 429}
+_STATUS = {
+    AuthenticationRequired: 401,
+    InvalidRequest: 400,
+    PermissionDenied: 403,
+    NotFound: 404,
+    Throttled: 429,
+}
 
 
 class Activity:

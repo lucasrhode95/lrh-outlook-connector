@@ -189,8 +189,8 @@ async def test_download_limit_is_classified_and_recommends_outlook(
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
     assert artifact.export_errors == {"downloading an attachment": 1}
     text = zip_text(artifact.path, "2026-09-29 Relatório de exemplo semanal.txt")
-    assert "  Error:  Download exceeds the connector's local 150 MB limit." in text
-    assert "  Likely: attachment exceeds the connector's 150 MB download limit" in text
+    assert "  Error:  The file exceeds the connector's 150 MiB download limit." in text
+    assert "  Likely: attachment exceeds the connector's 150 MiB download limit" in text
     assert "  Fix:    download the attachment directly from Outlook" in text
     assert artifact.error_summary == (
         "Export errors: 1 attachment (1 connector download limit) could not be exported; "

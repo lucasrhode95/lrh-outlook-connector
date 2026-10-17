@@ -37,6 +37,7 @@ from outlook_connector.domain.errors import (
     Failure,
     InvalidRequest,
     NotFound,
+    PermissionDenied,
     Throttled,
     Upstream,
     WriteOutcomeUnknown,
@@ -421,7 +422,7 @@ def _failure_error(status: int, prefix: str, where: str, text: str, detail: str 
     if status == 400:
         return InvalidRequest(f"{prefix}{where} rejected the request ({text}).{suffix}")
     if status == 403:  # authorization denied for this item or action; the sign-in itself is fine
-        return Upstream(f"{prefix}{where} denied access ({text}).{suffix}")
+        return PermissionDenied(f"{prefix}{where} denied access ({text}).{suffix}")
     return Upstream(f"{prefix}{where} returned an error ({text}).{suffix}")
 
 

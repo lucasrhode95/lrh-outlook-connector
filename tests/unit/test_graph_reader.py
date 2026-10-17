@@ -14,6 +14,7 @@ from outlook_connector.domain.errors import (
     Failure,
     InvalidRequest,
     NotFound,
+    PermissionDenied,
     Throttled,
     Upstream,
 )
@@ -309,7 +310,7 @@ async def test_download_limit_is_a_typed_connector_error(fake: FakeGraph, tmp_pa
             "/me/messages/m3/attachments/a1/$value", tmp_path / "oversized.bin", max_bytes=3
         )
     assert caught.value.limit_bytes == 3
-    assert str(caught.value) == ("Download exceeds the connector's local limit of 3 bytes.")
+    assert str(caught.value) == "The file exceeds the connector's 3 bytes download limit."
 
 
 async def test_downloads_are_retried_after_throttling_and_dropped_connections(
@@ -404,7 +405,7 @@ async def test_access_denied_is_not_a_sign_in_problem(
         return original(method, path, params, prefer, request)
 
     monkeypatch.setattr(fake, "route", deny)
-    with pytest.raises(Upstream, match="denied access"):
+    with pytest.raises(PermissionDenied, match="denied access"):
         await reader_for(fake).get_message("m1")
 
 
