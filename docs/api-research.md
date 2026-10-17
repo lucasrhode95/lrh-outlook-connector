@@ -163,7 +163,7 @@ Live, 2026-10-02, 40 messages and 176 attachments; and later checks:
   (2026-10-08).
 - The text body Graph returns shows an inline image as its alt text in brackets at its place
   (`[synthetic pixel]`), and a message whose only attachment is inline reports `hasAttachments=false`
-  (2026-10-15).
+  (2026-10-15). Only an image with alt text was checked; one without is untested.
 
 ### 3.7 Delta after moves and deletes
 
