@@ -505,4 +505,4 @@ The web UI serves the same read operations through the local UI, plus attachment
 | Throttling | Exchange Online: about 4 concurrent requests and 10,000 requests per 10 minutes per app and mailbox; each $batch item counts. At most 4 requests and 2 batches in flight per process. Clients are told the limits (MCP instructions, error messages). |
 | Bounds | Every list/search/conversation/body response is size-bounded with a cursor. Binary content goes through resources or files. |
 | Errors | Domain errors from the service, naming the operation, service code/message and request id. 401 → renew once, then AuthenticationRequired; 403 → `PermissionDenied` (no new sign-in; the web surface answers 403). The MCP surface returns tool errors, the web surface returns HTTP status + JSON. Bulk operations report per-item gaps instead of failing whole. |
-| Security | Localhost-only web binding. Host allowlist for outbound calls. No arbitrary URL fetching. No browser credentials, ever. |
+| Security | Localhost-only web binding. Host allowlist for outbound calls. No arbitrary URL fetching. No browser credentials, ever. UI responses send `nosniff` and `no-referrer`. |
