@@ -163,7 +163,17 @@ Live, 2026-10-02, 40 messages and 176 attachments; and later checks:
   (2026-10-08).
 - The text body Graph returns shows an inline image as its alt text in brackets at its place
   (`[synthetic pixel]`), and a message whose only attachment is inline reports `hasAttachments=false`
-  (2026-10-15). Only an image with alt text was checked; one without is untested.
+  (2026-10-15).
+- Live, 2026-10-18: one synthetic OWS `CreateItem`/`SaveOnly` draft with eight CID images covered missing,
+  empty, repeated and distinct `alt` attributes. Graph reads through the Outlook Graph profile, with
+  and without `Prefer: outlook.body-content-type="text"`, preserved missing/empty HTML attributes;
+  the text body used `[cid:content-id]` when `alt` was missing or empty, and `[alt text]` otherwise.
+  Two images with the same alt text produced the same label twice; no unique alt text was generated.
+- On the same date, two binary PNG clipboard pastes into Outlook Web produced two image nodes with no
+  `alt` attribute and distinct CIDs. Graph's text body used their respective `[cid:content-id]` values.
+  Full and unique text bodies agreed in both tests. These were unsent drafts in one environment, not
+  evidence of every Outlook client's paste behavior or changes during delivery; both drafts were moved
+  to Deleted Items after read-back.
 
 ### 3.7 Delta after moves and deletes
 
