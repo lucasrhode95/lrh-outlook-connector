@@ -86,7 +86,7 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
 - Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
-- Source-declared HTML bodies pass through [`html_body.py`](../src/outlook_connector/remote/html_body.py) into ordered `TextPart` and `ImagePart` values ([`domain/body.py`](../src/outlook_connector/domain/body.py)). Image content ids stay separate from text until rendering; source-declared plain text is never parsed as HTML. These internal parts are not serialized or persisted.
+- [`html_body.py`](../src/outlook_connector/remote/html_body.py) maps HTML bodies to ordered text and image parts ([`domain/body.py`](../src/outlook_connector/domain/body.py)); attachment rendering is described in §8.6.
 
 ### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py), calendar adapters
 
@@ -147,7 +147,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 - Conversations given to `set_read` expand to every message in scope. With more than 100 messages, `counts` covers all and `results` keeps explicit ids and anything not `done` or `unchanged`.
 - `move` refuses Deleted Items and hidden folders; `delete` leaves messages already in Deleted Items alone.
 
-**[`markers.py`](../src/outlook_connector/service/markers.py)** renders ordered source body parts and names attachments (§8.6), for `get_message`, `get_conversation` and exports alike. It matches typed image references to attachment content ids; it never searches rendered text or marker strings for metadata.
+**[`markers.py`](../src/outlook_connector/service/markers.py)** renders message text and attachment names (§8.6), for `get_message`, `get_conversation` and exports alike.
 
 **[`files.py`](../src/outlook_connector/service/files.py)** saves attachments by their marker names into the download cache, and names a saved `.eml` from the downloaded Subject header.
 
@@ -309,9 +309,11 @@ Returns a whole conversation across all folders, oldest first (sorted locally). 
 
 ### 8.6 Attachments and saved files
 
-Inline images read `[Image: name]` at their source position. For messages with inline files, source HTML is mapped to ordered text and image parts before rendering; an image node's `cid` is matched to a unique attachment `content_id`. Full and unique bodies carry separate parts. Alt text, bracketed prose and already-rendered markers never determine attachment identity or position. Rendering preserves semantic paragraphs, lists, links, tables, quotes and preformatted text; browser/CSS layout is not reproduced. Unsupported structures (conditional/VML images, CSS CID backgrounds, picture/srcset and raw-text containers) leave parts unavailable: server text stays and inline files are retained with explicitly unknown positions.
+Inline images read `[Image: name]` within the body. Files, forwarded messages and cloud links follow it as `[File: name]`, `[Message: name.eml]` and `[Link: name]`. Names come from attachment metadata, made safe and unique within the message (`report.pdf`, `report (2).pdf`); exports use the final stored name.
 
-Files, forwarded messages and cloud links follow the body as `[File: name]`, `[Message: name.eml]` and `[Link: name]`. Source-listed inline files absent from the selected source body are omitted from its markers and export downloads; the attachment metadata listing remains complete. If the source body cannot be read or the content id is missing or ambiguous, retained files are explicitly listed under `Inline attachments without a body position:`. A source image without a unique matching attachment gets an unavailable-image placeholder at its position; external images are labeled separately and never fetched. Names come from attachment metadata, made safe and unique within the message (`report.pdf`, `report (2).pdf`); exports substitute the final stored name during rendering. If the attachment listing cannot be read, no file identities are invented.
+For messages with inline files, HTML is mapped to ordered `TextPart` and `ImagePart` values before rendering. Each image's `cid` matches a unique attachment `content_id`. This preserves placement without confusing ordinary prose with image references. Full and unique bodies carry separate parts; plain-text bodies are never parsed as HTML. These internal parts are not serialized or persisted. The renderer preserves semantic formatting, not browser/CSS layout.
+
+Inline files absent from the selected body are omitted from its markers and export downloads; attachment metadata remains complete. When source structure cannot be read or supported, server text stays. Files whose position cannot be established are retained under `Inline attachments without a body position:`. Unmatched image references get an unavailable-image placeholder; external images are labeled but never fetched.
 
 #### `list_attachments`
 
@@ -348,7 +350,7 @@ The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several fi
 - Explicit message ids are authoritative: they are exported wherever Graph can read them, hidden folders included. If any cannot be read, the export fails before writing a file: `NotFound` if they are gone, `Throttled` if they stay throttled after retries, `Upstream` otherwise. The error gives the count and the first ids.
 - A copy of one message is exported once, and `also_in` names the other folders.
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
-- Regular file and forwarded-message attachments are included. Inline files are selected by typed image references from the selected source body, never by searching flattened text. When source structure or a content id is unavailable, the file is retained with no assumed body position.
+- Regular files and forwarded messages are included; inline files follow the selection rules in §8.6.
 - Each message's text names the files selected by §8.6, whether or not file bytes are included. A file the export wrote is named by its final name in the folder, unique within the output file. JSONL without file bytes still carries every known attachment's metadata, including inline files absent from the selected body.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
 - Attachments over 150 MiB are marked and must be downloaded from Outlook.

@@ -112,11 +112,6 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `create_draft`, `send_draft` | [`service/writes.py`](src/outlook_connector/service/writes.py) | Create drafts and send an existing draft |
 | `set_read_state`, `set_flag`, `move_messages`, `delete_messages` | [`service/mutations.py`](src/outlook_connector/service/mutations.py) | Change read state, flags and message locations |
 
-Inline image markers keep their source position in message text and exports. Regular attachments follow
-the body. If an inline file's position is unavailable, its listing says so explicitly; an inline file
-absent from the selected source body is omitted from the export. Attachment metadata remains available
-through `get_message` and `list_attachments`.
-
 ## Microsoft 365 connectors
 
 This repository is part of the `lrh-*` **Microsoft 365** connectors: local tools that give MCP agents
