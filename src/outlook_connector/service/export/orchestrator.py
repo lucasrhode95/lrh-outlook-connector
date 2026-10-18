@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from outlook_connector.domain.body import BodyPart
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Throttled, Upstream
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
@@ -69,7 +70,6 @@ class Fetched:
     missing: dict[str, ExportError]  # message id -> why it has no body
     attachments: dict[str, list[Attachment]]
     attachment_failures: dict[str, ExportError]  # message id -> why its attachments could not be listed
-    html: dict[str, str]  # message id -> body HTML (of the exported kind), for messages with inline files
 
 
 class Exports:
@@ -97,12 +97,13 @@ class Exports:
             )
         bodies, missing = await self.conversations.bodies(summaries, known=selection.known)
         found, attachment_failures = await self._attachments(summaries, skip=set(missing))
-        html = await self.mailbox.inline_html(found, request.body)
-        fetched = Fetched(bodies, missing, found, attachment_failures, html)
+        await self.mailbox.inline_body_parts(bodies, found)
+        fetched = Fetched(bodies, missing, found, attachment_failures)
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
         try:
+            parts = {mid: page.parts(request.body) for mid, page in bodies.items()}
             downloads = (
-                await self._download(summaries, found, html, workdir) if request.include_attachments else {}
+                await self._download(summaries, found, parts, workdir) if request.include_attachments else {}
             )
             failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, ExportError)]
             summary = error_summary(list(missing.values()), failed_files, list(attachment_failures.values()))
@@ -252,20 +253,19 @@ class Exports:
         self,
         summaries: list[MessageSummary],
         found: dict[str, list[Attachment]],
-        html: dict[str, str],
+        parts: dict[str, list[BodyPart] | None],
         workdir: Path,
     ) -> dict[str, Downloaded]:
         """Download the attachments the policy wants, each to its own file in ``workdir``; a failed download
         becomes an ExportError.
 
         Assumes (not re-checked here): ``summaries`` is the final selection and ``found`` the attachment
-        listing from ``_attachments`` for it, and ``html`` the body HTML of the exported kind.
+        listing from ``_attachments`` for it. ``parts`` carries the same messages' selected source bodies.
         """
         jobs: list[tuple[str, Attachment, Path]] = []
         for index, summary in enumerate(summaries):
-            page_html = html.get(summary.id)
             for position, attachment in enumerate(found.get(summary.id, [])):
-                if policy.wanted(attachment, body_html=page_html):
+                if policy.wanted(attachment, parts=parts.get(summary.id)):
                     jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
 
         async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | ExportError:
@@ -376,9 +376,9 @@ class Exports:
             else markers.with_markers(
                 fetched.bodies[message.id].body(request.body),
                 listed,
-                html=fetched.html.get(message.id),
+                parts=fetched.bodies[message.id].parts(request.body),
                 names=names,
-            ).strip()
+            ).strip("\r\n")
             or "(No text content.)"
         )
         return RenderedMessage(

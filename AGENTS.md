@@ -25,6 +25,12 @@ Validate untrusted input once at the entry point that receives it, and let inter
 validated contract. Document entry-point validation and internal assumptions in docstrings. When adding a
 caller to a routine that assumes sanitized input, make sure that caller provides it.
 
+Extract needed metadata from source fields and source structure (including HTML and card payloads)
+before rendering. Carry those facts and ordered content references through mapping into typed domain
+models. Do not reconstruct type, sender, ownership, origin, or attachment identity from flattened,
+normalized, or exported text, or from fixed textual markers. Parsing source structure, searching content,
+and transforming presentation are valid operations; rendered output must not become a metadata source.
+
 Order modules top-down: public entry points first, then called functions, then private helpers and
 formatting. Keep calls followable with named functions; prefer explicit branches over string-based
 dispatch. Import the names used. Keep test-only seams in tests; constructor injection that is part of the

@@ -5,6 +5,7 @@ import sqlite3
 import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 import httpx
 import pytest
@@ -21,7 +22,7 @@ from outlook_connector.service import mailbox as mailbox_service
 from outlook_connector.service.conversations import Conversations, base_subject
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.store.db import Store
-from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
+from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 
 @pytest.fixture
@@ -263,11 +264,45 @@ async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(ma
     assert [t.text for t in conversation.messages] == [
         "First report\n\nregards",
         "Thanks!\n\n> First report",
-        "Follow-up with numbers\n\n[Image: image001.png]\n[File: numbers.xlsx]",
+        "Follow-up with numbers [Image: image001.png]\n\n[File: numbers.xlsx]",
     ]
     assert conversation.subject == "Relatório de exemplo semanal"
     assert any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)
     assert conversation.coverage.excluded == {"deleted_or_junk": 1}
+
+
+@pytest.mark.parametrize("body", ["full", "unique"])
+async def test_message_and_conversation_use_source_image_order_and_exact_body_kind(
+    mailbox: Mailbox, fake: FakeGraph, body: Literal["full", "unique"]
+) -> None:
+    fake.add(
+        FakeMessage(
+            "source-order",
+            "Source order",
+            "f-inbox",
+            "2026-10-01T08:00:00Z",
+            conversation="c-source-order",
+            text="Flattened [chart] [chart] [Image: invented.png]",
+            unique_text="Flattened unique [chart]",
+            html='<p>Full [Image: invented.png] <img alt="chart" src="cid:second"> middle '
+            '<img alt="chart" src="cid:first"> end.</p><blockquote>Quoted history</blockquote>',
+            unique_html='<p>Unique <img alt="chart" src="cid:first"> end.</p>',
+            attachments=[
+                FakeAttachment("first-file", "first.png", b"first", inline=True, content_id="first"),
+                FakeAttachment("second-file", "second.png", b"second", inline=True, content_id="second"),
+            ],
+        )
+    )
+    expected = (
+        "Full [Image: invented.png] [Image: second.png] middle [Image: first.png] end.\n\n> Quoted history"
+        if body == "full"
+        else "Unique [Image: first.png] end."
+    )
+    page = await mailbox.get_message("source-order", body=body)
+    conversation = await Conversations(mailbox).get_conversation("c-source-order", body=body)
+    assert page.text == expected
+    assert conversation.messages[0].text == expected
+    assert {a.file_name for a in page.attachments} == {"first.png", "second.png"}
 
 
 async def test_conversation_scope_includes_deleted_items_and_junk(mailbox: Mailbox) -> None:

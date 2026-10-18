@@ -5,6 +5,7 @@ import json
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import httpx
 import pytest
@@ -73,12 +74,15 @@ async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(expo
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
     assert artifact.filename.endswith(".zip") and artifact.message_count == 3
     stem = "2026-09-28 Relatório de exemplo semanal"
-    # numbers.xlsx (regular) and image001.png (inline, referenced by the unique body) are in;
-    # logo.png (inline signature, not referenced) and junk m4 are out.
-    assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/image001.png", f"{stem}/numbers.xlsx"]
+    # The chart is referenced by the selected source body; the unreferenced signature and junk are out.
+    assert zip_names(artifact.path) == [
+        f"{stem}.txt",
+        f"{stem}/image001.png",
+        f"{stem}/numbers.xlsx",
+    ]
     text = zip_text(artifact.path, f"{stem}.txt")
-    # The text names each file it carries; the image has no alt text, so its marker follows the text.
-    assert "Follow-up with numbers\n\n[Image: image001.png]\n[File: numbers.xlsx]" in text
+    assert "Follow-up with numbers [Image: image001.png]\n\n[File: numbers.xlsx]" in text
+    assert "logo.png" not in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
     assert "> First report" in text  # full body, including quoted history, by default
     assert "buy now" not in text and artifact.messages_excluded == {"deleted_or_junk": 1}
@@ -91,7 +95,6 @@ async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: 
         and artifact.content_type.startswith("text/plain")
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    # Markers name the files even when they are not exported; an unreferenced inline image gets none.
     assert "[File: numbers.xlsx]" in text and "[Image: image001.png]" in text and "logo.png" not in text
 
 
@@ -111,7 +114,9 @@ async def test_export_defaults_include_quoted_history_and_attachments(exports: E
 async def test_a_download_that_times_out_is_marked_not_fatal(exports: Exports, fake: FakeGraph) -> None:
     fake.drop_downloads = 100  # every download attempt loses its connection (read timeout)
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
-    assert artifact.export_errors == {"downloading an attachment": 2}  # numbers.xlsx, image001.png
+    assert artifact.export_errors == {
+        "downloading an attachment": 2
+    }  # regular file and source-referenced chart
     text = Path(artifact.path).read_text(encoding="utf-8")  # no file was downloaded: a flat TXT
     assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
     assert "  Likely: Microsoft service or network problem\n" in text
@@ -258,6 +263,60 @@ async def test_server_deleted_message_is_gone_from_the_export(exports: Exports, 
     assert artifact.message_count == 2 and "Thanks!" not in text and "DELETED" not in text
 
 
+@pytest.mark.parametrize("body", ["full", "unique"])
+@pytest.mark.parametrize("format", ["txt", "jsonl"])
+async def test_export_renders_source_image_order_with_the_final_safe_file_names(
+    exports: Exports, fake: FakeGraph, body: Literal["full", "unique"], format: Literal["txt", "jsonl"]
+) -> None:
+    fake.add(
+        FakeMessage(
+            "source-export",
+            "Source export",
+            "f-inbox",
+            "2026-10-01T08:00:00Z",
+            conversation="c-source-export",
+            text="Flattened [same] [same] [Image: invented.png]",
+            html='<p>Full <img alt="same" src="cid:second"> between '
+            '<img alt="same" src="cid:first"> end.</p>',
+            unique_html='<p>Unique <img src="cid:first"> end.</p>',
+            attachments=[
+                FakeAttachment("first-file", "picture.png", b"first", inline=True, content_id="first"),
+                FakeAttachment("second-file", "picture.png", b"second", inline=True, content_id="second"),
+            ],
+        )
+    )
+    artifact = await exports.export(ExportRequest(message_ids=["source-export"], body=body, format=format))
+    content_file = next(name for name in zip_names(artifact.path) if name.endswith(f".{format}"))
+    content = zip_text(artifact.path, content_file)
+    rendered = json.loads(content)["body"] if format == "jsonl" else content
+    if body == "full":
+        assert "Full [Image: picture (2).png] between [Image: picture.png] end." in rendered
+        assert "without a body position" not in rendered
+    else:
+        assert "Unique [Image: picture.png] end." in rendered
+        assert "Full" not in rendered
+    assert "Flattened" not in rendered
+    assert any(name.endswith("picture (2).png") for name in zip_names(artifact.path)) == (body == "full")
+
+
+async def test_source_preformatted_body_keeps_initial_indentation_through_export(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add(
+        FakeMessage(
+            "source-code",
+            "Code",
+            "f-inbox",
+            "2026-10-01T08:00:00Z",
+            html='<pre>  first<img src="cid:icon">\n    second</pre>',
+            attachments=[FakeAttachment("icon-file", "icon.png", b"icon", inline=True, content_id="icon")],
+        )
+    )
+    artifact = await exports.export(ExportRequest(message_ids=["source-code"]))
+    text_file = next(name for name in zip_names(artifact.path) if name.endswith(".txt"))
+    assert "\n  first [Image: icon.png]\n    second\n" in zip_text(artifact.path, text_file)
+
+
 async def test_inline_only_attachments_are_found_when_exporting_files(
     exports: Exports, fake: FakeGraph
 ) -> None:
@@ -278,7 +337,9 @@ async def test_inline_only_attachments_are_found_when_exporting_files(
     assert "2026-09-30 Chart/chart.png" in zip_names(artifact.path)
 
 
-async def test_inline_image_with_unknown_content_id_is_exported(exports: Exports, fake: FakeGraph) -> None:
+async def test_inline_image_absent_from_the_source_body_is_not_exported(
+    exports: Exports, fake: FakeGraph
+) -> None:
     fake.add(
         FakeMessage(
             "unknown-cid",
@@ -286,15 +347,49 @@ async def test_inline_image_with_unknown_content_id_is_exported(exports: Exports
             "f-inbox",
             "2026-09-30T08:00:00Z",
             conversation="c-unknown-cid",
-            attachments=[FakeAttachment("unknown-cid-image", "image.png", b"png", "image/png", inline=True)],
+            text="cid:c1 [Image: image.png]",
+            attachments=[
+                FakeAttachment(
+                    "unreferenced-image", "image.png", b"png", "image/png", inline=True, content_id="c1"
+                )
+            ],
             html="<p>No image reference is available.</p>",
         )
     )
     artifact = await exports.export(ExportRequest(message_ids=["unknown-cid"], include_attachments=True))
-    assert any(name.endswith("image.png") for name in zip_names(artifact.path))
+    assert artifact.attachment_files == 0
+    text = Path(artifact.path).read_text(encoding="utf-8")
+    assert "No image reference is available." in text and "[Image: image.png]" not in text
 
 
-async def test_inline_image_is_exported_when_html_cannot_be_read(
+async def test_unsupported_source_layout_retains_the_file_without_inventing_a_position(
+    exports: Exports, fake: FakeGraph
+) -> None:
+    fake.add(
+        FakeMessage(
+            "source-background",
+            "Background",
+            "f-inbox",
+            "2026-10-01T08:00:00Z",
+            text="Server text keeps this message readable.",
+            html='<div style="background-image: url(cid:background)">Source text</div>',
+            attachments=[
+                FakeAttachment(
+                    "background-file", "background.png", b"image", inline=True, content_id="background"
+                )
+            ],
+        )
+    )
+    artifact = await exports.export(ExportRequest(message_ids=["source-background"]))
+    text_file = next(name for name in zip_names(artifact.path) if name.endswith(".txt"))
+    assert (
+        "Server text keeps this message readable.\n\nInline attachments without a body position:\n"
+        "[Image: background.png]"
+    ) in zip_text(artifact.path, text_file)
+    assert any(name.endswith("background.png") for name in zip_names(artifact.path))
+
+
+async def test_unreadable_source_html_keeps_text_and_labels_unavailable_inline_positions(
     exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake.add(
@@ -316,16 +411,16 @@ async def test_inline_image_is_exported_when_html_cannot_be_read(
 
     async def fail_html(ids: list[str], *, body_format: BodyFormat = "text") -> FetchedMessages:
         if body_format == "html":
-            return FetchedMessages(
-                failed={
-                    mid: Failure(status=500, code="Injected", message="Synthetic failure.") for mid in ids
-                }
-            )
+            return FetchedMessages(failed={mid: Failure(status=500, code="SyntheticFailure") for mid in ids})
         return await original(ids, body_format=body_format)
 
     monkeypatch.setattr(exports.reader, "get_messages", fail_html)
     artifact = await exports.export(ExportRequest(message_ids=["unknown-body"], include_attachments=True))
     assert any(name.endswith("image.png") for name in zip_names(artifact.path))
+    text_file = next(name for name in zip_names(artifact.path) if name.endswith(".txt"))
+    assert "Hello\n\nInline attachments without a body position:\n[Image: image.png]" in zip_text(
+        artifact.path, text_file
+    )
 
 
 async def test_inline_content_ids_come_from_batched_attachment_lists(
@@ -363,6 +458,7 @@ async def test_inline_content_ids_come_from_batched_attachment_lists(
     artifact = await exports.export(ExportRequest(message_ids=ids, include_attachments=True, combine="all"))
     assert attachment_listing_batches == [12]
     assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
+    assert not any(name.endswith("logo.png") for name in zip_names(artifact.path))
 
 
 HINT = "Refresh the list (or list/search again) and retry the export. Nothing was exported."
@@ -566,6 +662,14 @@ async def test_jsonl_failed_attachment_record_carries_its_export_error(
     assert failed["export_error"]["step"] == "downloading an attachment" and "file" not in failed
     assert failed["export_error"]["status"] == 503 and failed["export_error"]["request_id"].startswith("req-")
     assert all("export_error" not in a for a in record["attachments"] if a["name"] != "numbers.xlsx")
+
+
+async def test_jsonl_without_file_bytes_still_lists_inline_attachment_metadata(exports: Exports) -> None:
+    artifact = await exports.export(
+        ExportRequest(message_ids=["m3"], format="jsonl", include_attachments=False)
+    )
+    record = json.loads(Path(artifact.path).read_text(encoding="utf-8"))
+    assert {a["name"] for a in record["attachments"]} == {"numbers.xlsx", "image001.png", "logo.png"}
 
 
 async def test_bulk_export_stays_within_batch_limits_under_throttling(
