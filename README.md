@@ -103,14 +103,19 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, join URL and attachment metadata |
 | `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
 | `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
-| `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List attachment metadata: the file names the text shows, sizes, types and inline image IDs |
-| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's files locally by the names its text shows (`[File: …]`, `[Image: …]`) |
+| `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List all attachment metadata: file names, sizes, types and inline image IDs |
+| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's files locally by their listed names, also used in text markers |
 | `save_message_mime` | [`service/files.py`](src/outlook_connector/service/files.py) | Save the original message as an .eml file |
 | `export_messages` | [`service/export/`](src/outlook_connector/service/export/) | Export conversations, messages or a folder/date window |
 | `list_rules`, `create_rule`, `update_rule`, `reorder_rules`, `delete_rule` | [`service/rules.py`](src/outlook_connector/service/rules.py) | Read rules or propose and confirm supported changes |
 | `list_signatures`, `get_signature`, `create_signature`, `update_signature`, `delete_signature`, `set_default_signature` | [`service/signatures.py`](src/outlook_connector/service/signatures.py) | Read and manage native Outlook signatures |
 | `create_draft`, `send_draft` | [`service/writes.py`](src/outlook_connector/service/writes.py) | Create drafts and send an existing draft |
 | `set_read_state`, `set_flag`, `move_messages`, `delete_messages` | [`service/mutations.py`](src/outlook_connector/service/mutations.py) | Change read state, flags and message locations |
+
+Inline image markers keep their source position in message text and exports. Regular attachments follow
+the body. If an inline file's position is unavailable, its listing says so explicitly; an inline file
+absent from the selected source body is omitted from the export. Attachment metadata remains available
+through `get_message` and `list_attachments`.
 
 ## Microsoft 365 connectors
 
