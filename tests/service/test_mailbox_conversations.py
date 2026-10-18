@@ -263,7 +263,7 @@ async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(ma
     assert [t.text for t in conversation.messages] == [
         "First report\n\nregards",
         "Thanks!\n\n> First report",
-        "Follow-up with numbers\n\n[Image: image001.png]\n[File: numbers.xlsx]",
+        "Follow-up with numbers\n\n[File: numbers.xlsx]\n[Image: image001.png]\n[Image: logo.png]",
     ]
     assert conversation.subject == "Relatório de exemplo semanal"
     assert any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)

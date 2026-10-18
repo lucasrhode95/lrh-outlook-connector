@@ -1,9 +1,6 @@
 """Attachment selection policy and safe file names (requirements §11, research §3.6).
 
-- Non-inline file attachments are exported.
-- Item attachments (forwarded mail) are exported as .eml.
-- Inline images only when the rendered body (unique or full) references their cid:.
-  If the content id or rendered body is unavailable, include the image rather than drop it.
+- File attachments, including inline images, and item attachments (forwarded mail) are exported.
 - Reference (cloud) attachments are listed, never downloaded.
 """
 
@@ -26,28 +23,16 @@ _RESERVED = {
 MAX_NAME = 120
 
 
-def wanted(attachment: Attachment, *, body_html: str | None) -> bool:
-    """Whether the export includes this attachment.
-
-    Assumes (not re-checked here): body_html belongs to the attachment's message. If either it or
-    the attachment content id is unavailable, inline inclusion fails open.
-    """
+def wanted(attachment: Attachment) -> bool:
+    """Whether the export includes this attachment, based only on its source kind."""
     if attachment.kind == "item":
         return True
-    if attachment.kind != "file":
-        return False
-    if not attachment.is_inline:
-        return True
-    if not attachment.content_id or body_html is None:
-        return True
-    return f"cid:{attachment.content_id}" in body_html
+    return attachment.kind == "file"
 
 
 def listed(attachment: Attachment) -> bool:
-    """Attachments mentioned in the TXT when files are not included: the ones a reader cares about."""
-    return attachment.kind in ("item", "reference") or (
-        attachment.kind == "file" and not attachment.is_inline
-    )
+    """Known attachments listed in JSONL when their file bytes are not included."""
+    return attachment.kind in ("file", "item", "reference")
 
 
 def safe_name(name: str | None, *, fallback: str, eml: bool = False) -> str:

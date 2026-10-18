@@ -11,7 +11,6 @@ import pytest
 
 from outlook_connector.domain.errors import (
     DownloadLimitExceeded,
-    Failure,
     InvalidRequest,
     NotFound,
     Throttled,
@@ -73,12 +72,16 @@ async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(expo
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
     assert artifact.filename.endswith(".zip") and artifact.message_count == 3
     stem = "2026-09-28 Relatório de exemplo semanal"
-    # numbers.xlsx (regular) and image001.png (inline, referenced by the unique body) are in;
-    # logo.png (inline signature, not referenced) and junk m4 are out.
-    assert zip_names(artifact.path) == [f"{stem}.txt", f"{stem}/image001.png", f"{stem}/numbers.xlsx"]
+    # All three source-listed files are in, including the inline signature; junk m4 is out.
+    assert zip_names(artifact.path) == [
+        f"{stem}.txt",
+        f"{stem}/image001.png",
+        f"{stem}/logo.png",
+        f"{stem}/numbers.xlsx",
+    ]
     text = zip_text(artifact.path, f"{stem}.txt")
-    # The text names each file it carries; the image has no alt text, so its marker follows the text.
-    assert "Follow-up with numbers\n\n[Image: image001.png]\n[File: numbers.xlsx]" in text
+    # Every source-listed file gets a marker after the body.
+    assert "Follow-up with numbers\n\n[File: numbers.xlsx]\n[Image: image001.png]\n[Image: logo.png]" in text
     assert text.index("First report") < text.index("Thanks!") < text.index("Follow-up with numbers")
     assert "> First report" in text  # full body, including quoted history, by default
     assert "buy now" not in text and artifact.messages_excluded == {"deleted_or_junk": 1}
@@ -91,8 +94,8 @@ async def test_without_attachments_a_single_conversation_is_a_flat_txt(exports: 
         and artifact.content_type.startswith("text/plain")
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    # Markers name the files even when they are not exported; an unreferenced inline image gets none.
-    assert "[File: numbers.xlsx]" in text and "[Image: image001.png]" in text and "logo.png" not in text
+    # Markers name every source-listed file even when the export omits the file bytes.
+    assert all(marker in text for marker in ("[File: numbers.xlsx]", "[Image: image001.png]", "logo.png"))
 
 
 async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
@@ -102,7 +105,7 @@ async def test_full_body_keeps_quoted_history(exports: Exports) -> None:
 
 async def test_export_defaults_include_quoted_history_and_attachments(exports: Exports) -> None:
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"]))
-    assert artifact.filename.endswith(".zip") and artifact.attachment_files == 2
+    assert artifact.filename.endswith(".zip") and artifact.attachment_files == 3
     assert any(name.endswith("numbers.xlsx") for name in zip_names(artifact.path))
     text_name = next(name for name in zip_names(artifact.path) if name.endswith(".txt"))
     assert "> First report" in zip_text(artifact.path, text_name)
@@ -111,7 +114,7 @@ async def test_export_defaults_include_quoted_history_and_attachments(exports: E
 async def test_a_download_that_times_out_is_marked_not_fatal(exports: Exports, fake: FakeGraph) -> None:
     fake.drop_downloads = 100  # every download attempt loses its connection (read timeout)
     artifact = await exports.export(ExportRequest(message_ids=["m3"], include_attachments=True))
-    assert artifact.export_errors == {"downloading an attachment": 2}  # numbers.xlsx, image001.png
+    assert artifact.export_errors == {"downloading an attachment": 3}  # all source-listed files
     text = Path(artifact.path).read_text(encoding="utf-8")  # no file was downloaded: a flat TXT
     assert "[EXPORT ERROR] The attachment numbers.xlsx could not be downloaded.\n" in text
     assert "  Likely: Microsoft service or network problem\n" in text
@@ -278,7 +281,9 @@ async def test_inline_only_attachments_are_found_when_exporting_files(
     assert "2026-09-30 Chart/chart.png" in zip_names(artifact.path)
 
 
-async def test_inline_image_with_unknown_content_id_is_exported(exports: Exports, fake: FakeGraph) -> None:
+async def test_inline_image_is_exported_when_body_does_not_reference_its_content_id(
+    exports: Exports, fake: FakeGraph
+) -> None:
     fake.add(
         FakeMessage(
             "unknown-cid",
@@ -286,7 +291,11 @@ async def test_inline_image_with_unknown_content_id_is_exported(exports: Exports
             "f-inbox",
             "2026-09-30T08:00:00Z",
             conversation="c-unknown-cid",
-            attachments=[FakeAttachment("unknown-cid-image", "image.png", b"png", "image/png", inline=True)],
+            attachments=[
+                FakeAttachment(
+                    "unreferenced-image", "image.png", b"png", "image/png", inline=True, content_id="c1"
+                )
+            ],
             html="<p>No image reference is available.</p>",
         )
     )
@@ -294,7 +303,7 @@ async def test_inline_image_with_unknown_content_id_is_exported(exports: Exports
     assert any(name.endswith("image.png") for name in zip_names(artifact.path))
 
 
-async def test_inline_image_is_exported_when_html_cannot_be_read(
+async def test_inline_attachment_export_does_not_read_html(
     exports: Exports, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake.add(
@@ -316,11 +325,7 @@ async def test_inline_image_is_exported_when_html_cannot_be_read(
 
     async def fail_html(ids: list[str], *, body_format: BodyFormat = "text") -> FetchedMessages:
         if body_format == "html":
-            return FetchedMessages(
-                failed={
-                    mid: Failure(status=500, code="Injected", message="Synthetic failure.") for mid in ids
-                }
-            )
+            raise AssertionError("attachment export must not inspect message HTML")
         return await original(ids, body_format=body_format)
 
     monkeypatch.setattr(exports.reader, "get_messages", fail_html)
@@ -363,6 +368,7 @@ async def test_inline_content_ids_come_from_batched_attachment_lists(
     artifact = await exports.export(ExportRequest(message_ids=ids, include_attachments=True, combine="all"))
     assert attachment_listing_batches == [12]
     assert sum(name.endswith("pic.png") for name in zip_names(artifact.path)) == 1  # identical bytes, once
+    assert sum(name.endswith("logo.png") for name in zip_names(artifact.path)) == 1
 
 
 HINT = "Refresh the list (or list/search again) and retry the export. Nothing was exported."
@@ -566,6 +572,14 @@ async def test_jsonl_failed_attachment_record_carries_its_export_error(
     assert failed["export_error"]["step"] == "downloading an attachment" and "file" not in failed
     assert failed["export_error"]["status"] == 503 and failed["export_error"]["request_id"].startswith("req-")
     assert all("export_error" not in a for a in record["attachments"] if a["name"] != "numbers.xlsx")
+
+
+async def test_jsonl_without_file_bytes_still_lists_inline_attachment_metadata(exports: Exports) -> None:
+    artifact = await exports.export(
+        ExportRequest(message_ids=["m3"], format="jsonl", include_attachments=False)
+    )
+    record = json.loads(Path(artifact.path).read_text(encoding="utf-8"))
+    assert {a["name"] for a in record["attachments"]} == {"numbers.xlsx", "image001.png", "logo.png"}
 
 
 async def test_bulk_export_stays_within_batch_limits_under_throttling(

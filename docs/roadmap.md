@@ -8,7 +8,7 @@ Work is split by what it needs: **implementation** is code still to write; **dec
 user; **live verification** checks something on a real mailbox before it is built or relied on, and
 becomes implementation only if the check succeeds.
 
-Snapshot **2026-10-17**.
+Snapshot **2026-10-18**.
 
 ## Implementation
 
@@ -70,12 +70,6 @@ dated result in the research record.
 
 The `m365.search` and `teams.graph` calendar grants are verified on one account only. Check them on a new
 account before relying on them.
-
-### Inline image placeholders
-
-Attachment markers replace the bracketed alt text that Exchange's text body shows for an inline image
-([research §3.6](api-research.md#36-attachments-and-inline-images)). Check what that text shows for an image
-without alt text, and for two images with the same alt text; today such an image's marker follows the text.
 
 ### Mail search route
 

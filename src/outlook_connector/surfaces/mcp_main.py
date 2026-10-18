@@ -106,7 +106,7 @@ list_messages(include_total=true) gives the server's count for the window, to pl
 When Junk Email and Deleted Items hold most of the mailbox, a mailbox-wide list_messages reads folder \
 by folder (full pages, a bit slower) and coverage.notes says so: pass that note on to the user.
 - Mail deleted on the server is gone: nothing is kept locally.
-- Attachments: message text names every file: [File: name], [Image: name] where an inline image sits, \
+- Attachments: message text names every file after the body: [File: name], [Image: name], \
 [Message: name.eml] for a forwarded message and [Link: name] for a cloud link. download_attachment saves \
 files by those names (all of them when names is omitted) and returns local paths for you to read with \
 your own file tools; list_attachments adds sizes and types. Downloads are limited to 150 MiB; for a larger \
@@ -127,9 +127,8 @@ writes one JSON record per message (ids, dates, folder, people, body): use it to
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
 be exported are marked [EXPORT ERROR] in TXT and carry an export_error object in JSONL (step, \
 status, likely_cause, retry, fix).
-- Inline export images: known CID references in the rendered body are included.
-  If the content id or rendered body cannot be read, include the image so a read gap
-  does not silently drop it.
+- Inline export images are included based on attachment metadata; message text and HTML do not \
+  affect inclusion.
 - Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
@@ -463,8 +462,7 @@ def build_server(context: AppContext) -> FastMCP:
         body="unique" to omit quoted history, or include_attachments=false to omit attachment files.
         Scope alone is not a selection.
         The result counts exclusions and body gaps.
-        With attachments, inline images are included when their CID is found in the rendered body;
-        if the content id or body cannot be read, the image is included rather than silently dropped.
+        Inline images are included based on attachment metadata, without inspecting message text or HTML.
         """
         request = ExportRequest(
             conversation_ids=conversation_ids or [],
