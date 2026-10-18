@@ -53,6 +53,13 @@ which are untested.
 
 ## Decisions
 
+### Reading text and inline image placement
+
+Choose how to preserve Exchange's reading text while locating inline images from source structure,
+using the [2026-10-18 conversion results](api-research.md#html-to-text-body). Encoded CID differences,
+literal marker collisions and hidden gateway previews prevent treating plain-text placeholders as
+authoritative metadata; a local HTML renderer is not yet a settled alternative.
+
 ### Default conversation scope
 
 `get_conversation` leaves out Deleted Items and Junk Email unless `scope.deleted_items=true`, the same
@@ -65,6 +72,21 @@ conversations by default, since a conversation is usually read for its whole his
 
 Checks against a real mailbox. Each needs the user's authorization for the live read it makes; record the
 dated result in the research record.
+
+### HTML-to-text conversion across mail clients
+
+The [2026-10-18 matrix](api-research.md#html-to-text-body) covers OWS-created drafts and self-delivery,
+Outlook Web binary paste and integration-authored Gmail MIME replies. Repeat with Outlook desktop,
+Apple Mail and Gmail's browser/mobile editor, including their generated CIDs, native quotation and
+`uniqueBody` behavior. Check VML-only images without an HTML fallback, other percent-escape spellings,
+and whether other deployments' mail filters expose or duplicate hidden previews.
+
+### CID attachment carry-over in replies
+
+An OWS reply to the Gmail test reply retained the quoted image nodes but omitted the two encoded-CID
+and angle-bracket edge-case files before sending ([research §3.6](api-research.md#html-to-text-body)).
+Isolate URI decoding and MIME `Content-ID` normalization with valid CID variants, compare native-client
+replies, and establish which layer loses the attachments before choosing a handling policy.
 
 ### Fresh-account consent
 

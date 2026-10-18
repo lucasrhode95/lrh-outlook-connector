@@ -311,9 +311,7 @@ Returns a whole conversation across all folders, oldest first (sorted locally). 
 
 Inline images read `[Image: name]` within the body. Files, forwarded messages and cloud links follow it as `[File: name]`, `[Message: name.eml]` and `[Link: name]`. Names come from attachment metadata, made safe and unique within the message (`report.pdf`, `report (2).pdf`); exports use the final stored name.
 
-For messages with inline files, HTML is mapped to ordered `TextPart` and `ImagePart` values before rendering. Each image's `cid` matches a unique attachment `content_id`. This preserves placement without confusing ordinary prose with image references. Full and unique bodies carry separate parts; plain-text bodies are never parsed as HTML. These internal parts are not serialized or persisted. The renderer preserves semantic formatting, not browser/CSS layout.
-
-Inline files absent from the selected body are omitted from its markers and export downloads; attachment metadata remains complete. When source structure cannot be read or supported, server text stays. Files whose position cannot be established are retained under `Inline attachments without a body position:`. Unmatched image references get an unavailable-image placeholder; external images are labeled but never fetched.
+Exchange's HTML-to-text conversion, requested with `Prefer: outlook.body-content-type="text"`, is the reading-text baseline; its output patterns and losses are recorded in [research §3.6](api-research.md#html-to-text-body). Inline markers take identity from attachment metadata and placement from source HTML references; Exchange's textual placeholders alone are insufficient because encoding, alt text and ordinary prose can change or duplicate them. The choice between retaining Exchange's text with source-validated placement and rendering structured body parts locally remains open; the branch's HTML renderer is not a settled design.
 
 #### `list_attachments`
 
