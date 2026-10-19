@@ -103,15 +103,31 @@ When the user asks you to install or enable a connector:
 - Use the user's own account. Never copy another installation's authentication cache, credentials,
   or private data.
 - Configure the user's MCP client using the README's launch command and the checkout's absolute
-  path. Preserve existing client settings.
+  path. Preserve existing client settings. Set the MCP command to the absolute path of the uv
+  executable, not just `uv`: the desktop app may have a different or older PATH than the terminal.
+  On Windows, resolve it with `(Get-Command uv -CommandType Application).Source`; on macOS/Linux,
+  use `command -v uv` and confirm it names an executable. If it is not on PATH after installation,
+  locate it in the installer's destination and invoke it by its full path. Verify that executable
+  with `--version` before configuring the client. Keep the executable path and arguments separate
+  in MCP configuration; escape Windows backslashes in JSON.
 - Verify authentication status and perform a small read-only operation appropriate to the requested
   connector. Successful sign-in alone does not establish service access.
-- Report the installation location, verification result, and any remaining action, including
-  restarting the MCP client if required.
+- After adding or changing MCP configuration, give the user these explicit restart steps:
+  save their work; close ALL VS Code windows or all windows of their chat app; on Windows, check
+  the system tray beside the clock, including hidden icons, and use Quit/Exit if Claude, VS Code,
+  or the relevant client is still running there; then reopen the app. Closing one window, opening
+  a new chat, or restarting only the terminal is not a full app restart and may retain the old PATH
+  or MCP configuration. Do not terminate the user's applications yourself.
+- Before the user closes the app, report the installation paths, verification results, and the
+  next step to run after reopening: check that the installed MCP tools appear and make a small
+  read-only request through the client. If this requires ending the current agent session, explain
+  that verification must continue after reopening. Distinguish command-line verification from
+  verification through the restarted client; do not claim the latter succeeded before checking it.
 - Include copyable UI launch commands for installed Outlook and Teams connectors:
   `uv run --directory "<absolute checkout path>" outlook-connector ui` and
   `uv run --directory "<absolute checkout path>" teams-connector ui`, respectively. Substitute the
-  actual checkout paths. SharePoint has no local UI.
+  actual checkout paths and the resolved uv executable path, with quoting appropriate to the user's
+  shell (PowerShell needs `&` before a quoted executable path). SharePoint has no local UI.
 - Give a few example requests the user can now make through the installed MCP connectors, tailored
   to the capabilities verified during setup: for example, find an email by subject, search meeting
   transcripts for a phrase, or find a OneDrive or SharePoint file by topic.
