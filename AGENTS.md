@@ -87,13 +87,17 @@ scripts require an explicit private config file rather than embedded fallback se
 
 ## Installation and onboarding
 
-When the user asks you to install or enable a connector:
+Use this procedure when the user requests installation or setup. The user's request determines which
+connectors to install, where they belong, and which client to configure; these instructions describe
+the setup process. Before making changes, briefly explain the destination, prerequisites to install,
+and client settings to update. Follow any locations or preferences the user has already provided.
 
 - Follow the connector's README for commands and configuration. Install missing prerequisites, including
   Git and uv. Let uv provision Python 3.12+ when needed.
-- Use an existing checkout when available. Otherwise, clone the requested repositories under
-  `~/m365-connectors` (`%USERPROFILE%\m365-connectors` on Windows). Do not install into a temporary
-  directory.
+- Reuse an existing checkout intended for this installation. For new clones, use the user's chosen
+  persistent folder or their established workspace. If no destination is established, ask where
+  they want the repositories stored. The checkout must remain available because the MCP client
+  launches the connector from that path; explain this when discussing the location.
 - Install only the requested connectors. The shared `lrh-m365-auth` library is installed automatically
   as a dependency.
 - Run `uv sync --locked` in each connector repository.
