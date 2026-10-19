@@ -85,6 +85,30 @@ scripts require an explicit private config file rather than embedded fallback se
 
 # Outlook connector rules
 
+## Installation and onboarding
+
+When the user asks you to install or enable a connector:
+
+- Follow the connector's README for commands and configuration. Install missing prerequisites, including
+  Git and uv. Let uv provision Python 3.12+ when needed.
+- Use an existing checkout when available. Otherwise, clone the requested repositories under
+  `~/m365-connectors` (`%USERPROFILE%\m365-connectors` on Windows). Do not install into a temporary
+  directory.
+- Install only the requested connectors. The shared `lrh-m365-auth` library is installed automatically
+  as a dependency.
+- Run `uv sync --locked` in each connector repository.
+- Run the connector's `auth` command as a continuing process. Read its output promptly and show the
+  user Microsoft's sign-in URL and temporary device code. Ask them to complete sign-in in their
+  browser while the command remains running. Relay additional approval prompts as they appear.
+- Use the user's own account. Never copy another installation's authentication cache, credentials,
+  or private data.
+- Configure the user's MCP client using the README's launch command and the checkout's absolute
+  path. Preserve existing client settings.
+- Verify authentication status and perform a small read-only operation appropriate to the requested
+  connector. Successful sign-in alone does not establish service access.
+- Report the installation location, verification result, and any remaining action, including
+  restarting the MCP client if required.
+
 ## The project
 
 A local connector for one user's Exchange Online mailbox: an MCP server for agents and a small local web UI. Core mail-data reads go through Microsoft Graph. Outlook Web Service (OWS) handles mail changes and inbox-rule access; Outlook Cloud Settings handles native signature settings.
