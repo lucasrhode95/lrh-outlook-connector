@@ -85,33 +85,6 @@ scripts require an explicit private config file rather than embedded fallback se
 
 # Outlook connector rules
 
-## Installation and onboarding
-
-For a user-requested installation, follow the README and these steps:
-
-1. If the user has a folder open, use it as the workspace. Otherwise, ask where they would prefer
-   to keep the connectors. Reuse suitable checkouts and briefly explain the setup plan.
-2. Install missing Git and uv; uv can provide Python 3.12+. Clone only the requested connectors.
-   The shared auth library installs automatically. Keep the checkouts in place for future launches.
-3. Find uv's full executable path and test it with `--version`. On Windows, use
-   `(Get-Command uv -CommandType Application).Source`; on macOS/Linux, `command -v uv`.
-   If PATH cannot find it, check the installer's destination.
-4. Run `uv sync --locked` in each connector repository, using uv's full path if needed.
-5. Run the connector's `auth` command and keep it running. Show the user Microsoft's URL and device
-   code promptly; they sign in with their own account in the browser. Relay further prompts.
-6. Add MCP configuration using the README, uv's full path, and each checkout's full path.
-   Desktop apps may have a different PATH. Preserve existing settings.
-7. Check authentication status and make a small read-only request. Report what worked and what
-   still needs verification inside the user's MCP client.
-8. Give the user copyable Outlook/Teams UI commands (`outlook-connector ui` / `teams-connector ui`)
-   with the actual uv and checkout paths. Quote for their shell; PowerShell needs `&` before a
-   quoted executable. SharePoint has no UI. Include a few example MCP requests.
-9. Explain the full restart: save work, close ALL VS Code or chat-app windows, then check the
-   Windows system tray beside the clock (including hidden icons) and Quit/Exit any remaining
-   client instance. Reopen the app. A new chat or terminal is not enough. Let the user do this.
-10. After reopening, check that MCP tools appear and make a small read-only request through the
-    client. If the session ends at restart, leave this as the explicit next step, not a passed check.
-
 ## The project
 
 A local connector for one user's Exchange Online mailbox: an MCP server for agents and a small local web UI. Core mail-data reads go through Microsoft Graph. Outlook Web Service (OWS) handles mail changes and inbox-rule access; Outlook Cloud Settings handles native signature settings.
