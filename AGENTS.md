@@ -87,54 +87,30 @@ scripts require an explicit private config file rather than embedded fallback se
 
 ## Installation and onboarding
 
-Use this procedure when the user requests installation or setup. The user's request determines which
-connectors to install, where they belong, and which client to configure; these instructions describe
-the setup process. Before making changes, briefly explain the destination, prerequisites to install,
-and client settings to update. Follow any locations or preferences the user has already provided.
+For a user-requested installation, follow the README and these steps:
 
-- Follow the connector's README for commands and configuration. Install missing prerequisites, including
-  Git and uv. Let uv provision Python 3.12+ when needed.
-- Reuse an existing checkout intended for this installation. For new clones, use the user's chosen
-  persistent folder or their established workspace. If no destination is established, ask where
-  they want the repositories stored. The checkout must remain available because the MCP client
-  launches the connector from that path; explain this when discussing the location.
-- Install only the requested connectors. The shared `lrh-m365-auth` library is installed automatically
-  as a dependency.
-- Run `uv sync --locked` in each connector repository.
-- Run the connector's `auth` command as a continuing process. Read its output promptly and show the
-  user Microsoft's sign-in URL and temporary device code. Ask them to complete sign-in in their
-  browser while the command remains running. Relay additional approval prompts as they appear.
-- Use the user's own account. Never copy another installation's authentication cache, credentials,
-  or private data.
-- Configure the user's MCP client using the README's launch command and the checkout's absolute
-  path. Preserve existing client settings. Set the MCP command to the absolute path of the uv
-  executable, not just `uv`: the desktop app may have a different or older PATH than the terminal.
-  On Windows, resolve it with `(Get-Command uv -CommandType Application).Source`; on macOS/Linux,
-  use `command -v uv` and confirm it names an executable. If it is not on PATH after installation,
-  locate it in the installer's destination and invoke it by its full path. Verify that executable
-  with `--version` before configuring the client. Keep the executable path and arguments separate
-  in MCP configuration; escape Windows backslashes in JSON.
-- Verify authentication status and perform a small read-only operation appropriate to the requested
-  connector. Successful sign-in alone does not establish service access.
-- After adding or changing MCP configuration, give the user these explicit restart steps:
-  save their work; close ALL VS Code windows or all windows of their chat app; on Windows, check
-  the system tray beside the clock, including hidden icons, and use Quit/Exit if Claude, VS Code,
-  or the relevant client is still running there; then reopen the app. Closing one window, opening
-  a new chat, or restarting only the terminal is not a full app restart and may retain the old PATH
-  or MCP configuration. Do not terminate the user's applications yourself.
-- Before the user closes the app, report the installation paths, verification results, and the
-  next step to run after reopening: check that the installed MCP tools appear and make a small
-  read-only request through the client. If this requires ending the current agent session, explain
-  that verification must continue after reopening. Distinguish command-line verification from
-  verification through the restarted client; do not claim the latter succeeded before checking it.
-- Include copyable UI launch commands for installed Outlook and Teams connectors:
-  `uv run --directory "<absolute checkout path>" outlook-connector ui` and
-  `uv run --directory "<absolute checkout path>" teams-connector ui`, respectively. Substitute the
-  actual checkout paths and the resolved uv executable path, with quoting appropriate to the user's
-  shell (PowerShell needs `&` before a quoted executable path). SharePoint has no local UI.
-- Give a few example requests the user can now make through the installed MCP connectors, tailored
-  to the capabilities verified during setup: for example, find an email by subject, search meeting
-  transcripts for a phrase, or find a OneDrive or SharePoint file by topic.
+1. If the user has a folder open, use it as the workspace. Otherwise, ask where they would prefer
+   to keep the connectors. Reuse suitable checkouts and briefly explain the setup plan.
+2. Install missing Git and uv; uv can provide Python 3.12+. Clone only the requested connectors.
+   The shared auth library installs automatically. Keep the checkouts in place for future launches.
+3. Find uv's full executable path and test it with `--version`. On Windows, use
+   `(Get-Command uv -CommandType Application).Source`; on macOS/Linux, `command -v uv`.
+   If PATH cannot find it, check the installer's destination.
+4. Run `uv sync --locked` in each connector repository, using uv's full path if needed.
+5. Run the connector's `auth` command and keep it running. Show the user Microsoft's URL and device
+   code promptly; they sign in with their own account in the browser. Relay further prompts.
+6. Add MCP configuration using the README, uv's full path, and each checkout's full path.
+   Desktop apps may have a different PATH. Preserve existing settings.
+7. Check authentication status and make a small read-only request. Report what worked and what
+   still needs verification inside the user's MCP client.
+8. Give the user copyable Outlook/Teams UI commands (`outlook-connector ui` / `teams-connector ui`)
+   with the actual uv and checkout paths. Quote for their shell; PowerShell needs `&` before a
+   quoted executable. SharePoint has no UI. Include a few example MCP requests.
+9. Explain the full restart: save work, close ALL VS Code or chat-app windows, then check the
+   Windows system tray beside the clock (including hidden icons) and Quit/Exit any remaining
+   client instance. Reopen the app. A new chat or terminal is not enough. Let the user do this.
+10. After reopening, check that MCP tools appear and make a small read-only request through the
+    client. If the session ends at restart, leave this as the explicit next step, not a passed check.
 
 ## The project
 
