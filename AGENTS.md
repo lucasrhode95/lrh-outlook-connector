@@ -108,6 +108,13 @@ When the user asks you to install or enable a connector:
   connector. Successful sign-in alone does not establish service access.
 - Report the installation location, verification result, and any remaining action, including
   restarting the MCP client if required.
+- Include copyable UI launch commands for installed Outlook and Teams connectors:
+  `uv run --directory "<absolute checkout path>" outlook-connector ui` and
+  `uv run --directory "<absolute checkout path>" teams-connector ui`, respectively. Substitute the
+  actual checkout paths. SharePoint has no local UI.
+- Give a few example requests the user can now make through the installed MCP connectors, tailored
+  to the capabilities verified during setup: for example, find an email by subject, search meeting
+  transcripts for a phrase, or find a OneDrive or SharePoint file by topic.
 
 ## The project
 
