@@ -18,9 +18,9 @@ def parse_html(source: str) -> list[BodyPart] | None:
     """Extract body order and image references from HTML explicitly identified as such by the source.
 
     This is a presentation transform: semantic blocks, lists, links, tables, quotes and preformatted
-    text are kept; browser/CSS layout is not reproduced. Unsupported image/layout structures or malformed
-    declarations return None, so callers retain the server text and cannot assume an inline file is absent.
-    No remote image or stylesheet is fetched.
+    text are kept; browser/CSS layout is not reproduced. Unsupported image/layout structures, malformed
+    declarations, or visibility a descendant restores return None, so callers retain the server text and
+    cannot assume an inline file is absent. No remote image or stylesheet is fetched.
     """
     parser = _BodyParser()
     try:
@@ -37,6 +37,7 @@ class _BodyParser(HTMLParser):
         self.parts: list[BodyPart] = []
         self.unsupported = False
         self._hidden: list[str] = []
+        self._invisible: list[str] = []  # visibility:hidden, which descendants may override
         self._pre = 0
         self._quotes = 0
         self._lists: list[int | None] = []
@@ -44,9 +45,23 @@ class _BodyParser(HTMLParser):
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = dict(attrs)
-        if self._hidden or tag in _HIDDEN or _is_hidden(values):
+        style = _declarations(values.get("style") or "")
+        display = style.get("display", "none" if "hidden" in values else None)
+        if self._hidden or tag in _HIDDEN or display == "none":
             if tag not in _VOID:
                 self._hidden.append(tag)
+            return
+        visibility = style.get("visibility")
+        if visibility in {"hidden", "collapse"}:
+            if tag not in _VOID:
+                self._invisible.append(tag)
+            return
+        if self._invisible:
+            # A descendant may restore inherited visibility; its position is ambiguous here.
+            if visibility not in {None, "inherit", "unset"}:
+                self.unsupported = True
+            if tag not in _VOID:
+                self._invisible.append(tag)
             return
         if _unsupported_structure(tag, values):
             self.unsupported = True
@@ -93,6 +108,11 @@ class _BodyParser(HTMLParser):
                 index = len(self._hidden) - 1 - self._hidden[::-1].index(tag)
                 del self._hidden[index:]
             return
+        if self._invisible:
+            if tag in self._invisible:
+                index = len(self._invisible) - 1 - self._invisible[::-1].index(tag)
+                del self._invisible[index:]
+            return
         if tag in _PARAGRAPH:
             self._break(2)
         elif tag in _BLOCK or tag == "li":
@@ -120,12 +140,12 @@ class _BodyParser(HTMLParser):
             self.handle_endtag(tag)
 
     def handle_data(self, data: str) -> None:
-        if not self._hidden:
+        if not self._hidden and not self._invisible:
             self._text(data if self._pre else re.sub(r"\s+", " ", data))
 
     def handle_comment(self, data: str) -> None:
         # Conditional Outlook/VML image branches do not have one unambiguous HTML position.
-        if self._hidden:
+        if self._hidden or self._invisible:
             return
         if data.lstrip().casefold().startswith("[if") and re.search(
             r"<(?:img|v:imagedata|svg|picture|object|embed)\b", data, re.IGNORECASE
@@ -172,15 +192,20 @@ class _BodyParser(HTMLParser):
         self._raw_text("\n" * max(0, lines - trailing))
 
 
-def _is_hidden(attrs: dict[str, str | None]) -> bool:
-    if "hidden" in attrs:
-        return True
-    for declaration in (attrs.get("style") or "").split(";"):
-        name, _, value = declaration.partition(":")
-        value = value.partition("!")[0].strip().casefold()
-        if (name.strip().casefold(), value) in {("display", "none"), ("visibility", "hidden")}:
-            return True
-    return False
+def _declarations(style: str) -> dict[str, str]:
+    """Inline style after its own cascade: the last declaration wins unless an earlier one is !important."""
+    winners: dict[str, tuple[str, bool]] = {}
+    for declaration in style.split(";"):
+        name, colon, value = declaration.partition(":")
+        name = name.strip().casefold()
+        if not name or not colon:
+            continue
+        value, bang, priority = value.partition("!")
+        important = bool(bang) and priority.strip().casefold() == "important"
+        if name in winners and winners[name][1] and not important:
+            continue
+        winners[name] = (value.strip().casefold(), important)
+    return {name: value for name, (value, _) in winners.items()}
 
 
 def _unsupported_structure(tag: str, attrs: dict[str, str | None]) -> bool:

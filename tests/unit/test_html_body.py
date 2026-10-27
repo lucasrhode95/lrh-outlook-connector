@@ -97,6 +97,45 @@ def test_unsupported_or_malformed_structure_does_not_claim_complete_image_positi
     assert parse_html(source) is None
 
 
+@pytest.mark.parametrize(
+    "style",
+    [
+        "display:none; display:block",
+        "visibility:hidden; visibility:visible",
+        "display:none; display:block !important",
+    ],
+)
+def test_later_inline_declarations_override_earlier_hiding(style: str) -> None:
+    assert parse_html(f'<span style="{style}">Shown<img src="cid:chart"></span>') == [
+        TextPart("Shown"),
+        ImagePart("chart"),
+    ]
+
+
+def test_important_hiding_survives_a_later_ordinary_declaration() -> None:
+    parts = parse_html('<div style="display:none !important; display:block">Hidden<img src="cid:x"></div>End')
+    assert parts == [TextPart("End")]
+
+
+def test_author_display_overrides_the_hidden_attribute() -> None:
+    assert parse_html('<span hidden style="display:inline">Shown</span>') == [TextPart("Shown")]
+
+
+def test_descendant_restoring_inherited_visibility_is_not_claimed_complete() -> None:
+    source = (
+        '<div style="visibility:hidden">Hidden<span style="visibility:visible"><img src="cid:x"></span></div>'
+    )
+    assert parse_html(source) is None
+
+
+def test_inherited_invisibility_without_override_hides_the_subtree() -> None:
+    parts = parse_html(
+        '<div style="visibility:hidden">Hidden<span style="visibility:inherit">'
+        '<img src="cid:x"></span></div>End'
+    )
+    assert parts == [TextPart("End")]
+
+
 def test_comment_markup_cannot_create_an_image_reference() -> None:
     assert parse_html('<!-- <img src="cid:fake"> --><img src="cid:real">') == [ImagePart("real")]
 
