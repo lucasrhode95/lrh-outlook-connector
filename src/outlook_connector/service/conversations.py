@@ -110,7 +110,7 @@ class Conversations:
             while index < len(items) and next_start is None:
                 chunk = items[index : index + BODY_BATCH]
                 bodies, missing = await self.bodies(chunk)
-                found, html = await self.mailbox.marker_inputs(list(bodies), body)
+                found = await self.mailbox.marker_inputs(bodies)
                 for offset, summary in enumerate(chunk):
                     error = missing.get(summary.id)
                     text = (
@@ -119,7 +119,7 @@ class Conversations:
                         else markers.with_markers(
                             bodies[summary.id].body(body),
                             found.get(summary.id, []),
-                            html=html.get(summary.id),
+                            parts=bodies[summary.id].parts(body),
                         )
                     )
                     if len(text) > budget and entries:

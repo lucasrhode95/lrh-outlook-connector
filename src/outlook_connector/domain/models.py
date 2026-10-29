@@ -19,6 +19,7 @@ from pydantic import (
     model_serializer,
 )
 
+from outlook_connector.domain.body import BodyPart
 from outlook_connector.domain.time import optional_utc
 
 BodyKind = Literal["unique", "full", "html"]
@@ -145,7 +146,7 @@ class Attachment(Compact):
     is_inline: bool = False
     kind: Literal["file", "item", "reference", "unknown"] = "unknown"
     content_id: str | None = None
-    # The name the message text, download_attachment and exports use: unique within the message.
+    # Shared name for attachment metadata, markers, downloads and exports: unique within the message.
     file_name: str | None = None
 
 
@@ -155,6 +156,9 @@ class Message(MessageSummary):
     unique_body_text: str | None = None  # body without quoted history, plain text
     body_html: str | None = None
     unique_body_html: str | None = None
+    # Internal source structure for rendering inline files; never recovered from body_text or markers.
+    body_parts: list[BodyPart] | None = Field(default=None, exclude=True)
+    unique_body_parts: list[BodyPart] | None = Field(default=None, exclude=True)
     attachments: list[Attachment] = Field(default_factory=list)
     # The server's version of the item when it was read (opaque). Internal: binds a draft send to
     # the draft that was read, so a change made meanwhile refuses the send. Never serialized.
@@ -166,6 +170,10 @@ class Message(MessageSummary):
         if kind == "unique":
             return self.unique_body_text if self.unique_body_text is not None else (self.body_text or "")
         return self.body_text or ""
+
+    def parts(self, kind: BodyKind) -> list[BodyPart] | None:
+        """Source parts of this exact body kind, or None when its structure was not retrieved."""
+        return self.unique_body_parts if kind == "unique" else self.body_parts
 
 
 class Coverage(Compact):

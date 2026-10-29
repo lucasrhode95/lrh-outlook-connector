@@ -743,8 +743,8 @@ def sample_mailbox() -> FakeGraph:
                 FakeAttachment("a2", "image001.png", b"png", "image/png", inline=True, content_id="img1"),
                 FakeAttachment("a3", "logo.png", b"png2", "image/png", inline=True, content_id="sig"),
             ],
-            html='<p>Follow-up</p><img src="cid:img1">',
-            unique_html='<p>Follow-up</p><img src="cid:img1">',
+            html='<p>Follow-up with numbers <img src="cid:img1"></p>',
+            unique_html='<p>Follow-up with numbers <img src="cid:img1"></p>',
         )
     )
     g.add(

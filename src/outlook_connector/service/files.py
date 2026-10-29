@@ -1,7 +1,7 @@
 """Raw files for agents and the UI: attachments and MIME (.eml) saved under the data directory.
 
-Agents receive raw files and read them with their own tools (requirements §10). Attachments are named
-as the message text names them. Files are kept for a week, like exports.
+Agents receive raw files and read them with their own tools (requirements §10). Attachment metadata,
+markers and downloads share file names. Files are kept for a week, like exports.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class Files:
         self.mailbox = mailbox
 
     async def download_attachment(self, message_id: str, names: list[str] | None = None) -> SavedFiles:
-        """Save the files a message names (its markers) as local files; all of them when ``names`` is None.
+        """Save files by their listed names; all downloadable files when ``names`` is None.
 
         Entry point: ``names`` is checked against the message's files before anything is downloaded
         (case-insensitive; an unknown name raises NotFound and lists the names there are). A cloud link, or

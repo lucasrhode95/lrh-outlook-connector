@@ -86,6 +86,7 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
 - Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
+- [`html_body.py`](../src/outlook_connector/remote/html_body.py) maps HTML bodies to ordered text and image parts ([`domain/body.py`](../src/outlook_connector/domain/body.py)); attachment rendering is described in §8.6.
 
 ### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py), calendar adapters
 
@@ -121,9 +122,9 @@ One SQLite database per account fingerprint: the account binding and the folder 
 **[`mailbox.py`](../src/outlook_connector/service/mailbox.py)**
 - The folder map is reused while younger than 10 minutes (whichever process saved it); otherwise the call waits for one refresh per process, and concurrent unknown-folder lookups share it.
 - **Scope categories** (the contract is §8.1) are derived once per folder map from each folder and its parents, in precedence hidden (also Sync Issues) > deleted_or_junk > outgoing. A folder deleted in Outlook sits in Deleted Items, so it counts as deleted. Meeting mail is filtered per message, so a meeting-only conversation disappears and one with real replies shows through.
-- **Out of reach:** hidden folders and items outside the mail folders (e.g. Teams meeting records) drop as `excluded.hidden`. An unknown folder id refreshes the folder list once; ids still unknown are remembered as outside. Sync Issues is recognized by name, since Graph does not always mark it hidden. Of several copies, a received copy is kept.
+- **Out of reach:** hidden folders and items outside the mail folders (e.g. Teams meeting records) drop as `excluded.hidden`. An unknown folder id refreshes the folder list once; ids still unknown are remembered as outside. Sync Issues is recognized by its well-known folder alias, since Graph does not always mark it hidden. Of several copies, a received copy is kept.
 - **Mailbox-wide listing** picks a method on every first page. When the folders the scope leaves out hold at least two thirds of the mailbox (`PER_FOLDER_SHARE`, from cached counts), it lists **folder by folder**: one `$count` batch picks the in-scope folders with mail in the window, first reads are sized by each folder's share, every eligible folder gets a current head read before the merge, and the newest `limit` win. The same batch counts the window's Deleted Items and Junk, reported on the first page only and only when every excluded folder was counted. Otherwise it lists `/me/messages` and filters after paging, skipping (bounded) pages that filter to nothing. Both give the same messages in the same order; the cursor keeps the method.
-- `get_message` with `max_chars=None` returns the whole body in one read (the web reader).
+- `get_message` with `max_chars=None` returns the whole body without continuation (the web reader). Messages with inline files also read their source HTML for body order, in batches.
 - Search asks KQL for a day more on each side (KQL takes dates only), then filters to the exact `since`/`until`.
 
 **[`conversations.py`](../src/outlook_connector/service/conversations.py)** fetches, sorts oldest first, and hydrates bodies in `$batch`; a body that fails becomes that message's `export_error`.
@@ -146,7 +147,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 - Conversations given to `set_read` expand to every message in scope. With more than 100 messages, `counts` covers all and `results` keeps explicit ids and anything not `done` or `unchanged`.
 - `move` refuses Deleted Items and hidden folders; `delete` leaves messages already in Deleted Items alone.
 
-**[`markers.py`](../src/outlook_connector/service/markers.py)** names each file in message text (§8.6), for `get_message`, `get_conversation` and exports alike.
+**[`markers.py`](../src/outlook_connector/service/markers.py)** renders message text and attachment names (§8.6), for `get_message`, `get_conversation` and exports alike.
 
 **[`files.py`](../src/outlook_connector/service/files.py)** saves attachments by their marker names into the download cache, and names a saved `.eml` from the downloaded Subject header.
 
@@ -308,7 +309,9 @@ Returns a whole conversation across all folders, oldest first (sorted locally). 
 
 ### 8.6 Attachments and saved files
 
-Message text names every file the message carries. An inline image the HTML body references by `cid:` reads `[Image: name]` where Exchange's text shows its alt text in brackets ([research §3.6](api-research.md#36-attachments-and-inline-images)); a placeholder is replaced only when the text holds exactly as many of it as the HTML has images with that alt text, so the k-th occurrence is the k-th image. Otherwise (no alt text, the same bracketed words in the prose, or text that differs) the marker is listed after the text instead. Files, forwarded messages and cloud links follow the text: `[File: name]`, `[Message: name.eml]`, `[Link: name]`. An inline image the body does not reference gets no marker. Names come from the attachment name, made safe as a file name and unique within the message (`report.pdf`, `report (2).pdf`). The HTML is read only for messages with inline files; one whose HTML cannot be read keeps Exchange's placeholders and lists every inline file after the text, and one whose listing cannot be read gets no markers.
+Inline images read `[Image: name]` within the body. Files, forwarded messages and cloud links follow it as `[File: name]`, `[Message: name.eml]` and `[Link: name]`. Names come from attachment metadata, made safe and unique within the message (`report.pdf`, `report (2).pdf`); exports use the final stored name.
+
+Exchange's HTML-to-text conversion, requested with `Prefer: outlook.body-content-type="text"`, is the reading-text baseline; its output patterns and losses are recorded in [research §3.6](api-research.md#html-to-text-body). Inline markers take identity from attachment metadata and placement from source HTML references; Exchange's textual placeholders alone are insufficient because encoding, alt text and ordinary prose can change or duplicate them. The choice between retaining Exchange's text with source-validated placement and rendering structured body parts locally remains open; the branch's HTML renderer is not a settled design.
 
 #### `list_attachments`
 
@@ -345,8 +348,8 @@ The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several fi
 - Explicit message ids are authoritative: they are exported wherever Graph can read them, hidden folders included. If any cannot be read, the export fails before writing a file: `NotFound` if they are gone, `Throttled` if they stay throttled after retries, `Upstream` otherwise. The error gives the count and the first ids.
 - A copy of one message is exported once, and `also_in` names the other folders.
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
-- Inline images (74% of file attachments in the R1 mailbox, mostly signatures and quoted history) are included when their `cid:` appears in the rendered body. If the reference cannot be read, the image is included rather than dropped.
-- Each message's text names its files with the markers of §8.6, whether or not files are included, so every message's attachments are listed. A file the export wrote is named by its name in the folder, which is unique within the output file.
+- Regular files and forwarded messages are included; inline files follow the selection rules in §8.6.
+- Each message's text names the files selected by §8.6, whether or not file bytes are included. A file the export wrote is named by its final name in the folder, unique within the output file. JSONL without file bytes still carries every known attachment's metadata, including inline files absent from the selected body.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
 - Attachments over 150 MiB are marked and must be downloaded from Outlook.
 - The export runs inside the tool call. No progress is reported and no background job is left behind.
