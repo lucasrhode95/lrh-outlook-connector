@@ -9,80 +9,118 @@ A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
 ## Requirements
 
-- Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
 - Use an Exchange Online mailbox.
-
-A separate Python installation is optional: uv selects an installed Python 3.12 or newer, or installs a managed version when needed.
 
 ## Setup
 
-```bash
-uv sync --locked
-uv run outlook-connector auth
-uv run outlook-connector status
-```
+1. **Install and connect.** Use the folder already open, or choose a folder if you have none.
+   Reuse an existing clone when appropriate; keep it in place because the client launches it there.
 
-Run the `auth` command above and it logs you in. All `lrh-*` Microsoft 365 connectors share one login engine (`lrh-m365-auth`), so one login covers them all. Microsoft may ask for more than one approval, because the connectors use different Microsoft clients.
+   - **With a prompt:** give your local agent:
+     `Install and configure https://github.com/lucasrhode95/lrh-outlook-connector following its README Setup section.`
+     The agent handles preparation and configuration below, then guides you through sign-in.
+   - **Manually:** install [Git](https://git-scm.com/downloads) and
+     [uv](https://docs.astral.sh/uv/getting-started/installation/). uv supplies Python 3.12+ if needed.
+     Find uv's full path with `(Get-Command uv -CommandType Application).Source` on Windows or
+     `command -v uv` on macOS/Linux. If PATH cannot find it, check the installer's destination.
+     Test that executable with `--version`, then clone and install:
 
-`status` shows the signed-in account and its cached profiles without touching the network. To switch accounts, run `auth --sign-out`, then `auth` again. Which profile serves which tool is in [architecture §6](docs/architecture.md#6-capability-routing-and-portability).
+     ```bash
+     git clone https://github.com/lucasrhode95/lrh-outlook-connector.git
+     cd lrh-outlook-connector
+     uv sync --locked
+     ```
 
-> Credentials are entered only on Microsoft's sign-in page. Tokens stay in the shared encrypted cache
-> (`%USERPROFILE%/.lrh-m365-auth` on Windows, the XDG data folder elsewhere, or `M365_AUTH_HOME`).
-> If encryption is unavailable, sign-in fails closed.
+     The shared auth library installs automatically. Use uv's full path if the shell cannot find it.
+   - **Codex CLI:** after manual preparation, register with
+     [Codex](https://learn.chatgpt.com/docs/extend/mcp?surface=cli):
+
+     ```bash
+     codex mcp add lrh-outlook-connector -- "/absolute/path/to/uv" run --directory "/absolute/path/to/lrh-outlook-connector" outlook-connector mcp
+     ```
+   - **Claude Code CLI:** after manual preparation, register with
+     [Claude Code](https://code.claude.com/docs/en/mcp):
+
+     ```bash
+     claude mcp add --transport stdio lrh-outlook-connector -- "/absolute/path/to/uv" run --directory "/absolute/path/to/lrh-outlook-connector" outlook-connector mcp
+     ```
+   - **GitHub Copilot CLI:** after manual preparation, register with
+     [Copilot](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers):
+
+     ```bash
+     copilot mcp add lrh-outlook-connector -- "/absolute/path/to/uv" run --directory "/absolute/path/to/lrh-outlook-connector" outlook-connector mcp
+     ```
+   - **GitHub Copilot in VS Code:** after manual preparation, merge this server into
+     `.vscode/mcp.json`, preserving existing servers
+     ([VS Code guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers)):
+
+     ```json
+     {
+       "servers": {
+         "lrh-outlook-connector": {
+           "type": "stdio",
+           "command": "/absolute/path/to/uv",
+           "args": ["run", "--directory", "/absolute/path/to/lrh-outlook-connector", "outlook-connector", "mcp"]
+         }
+       }
+     }
+     ```
+
+   Replace all sample paths with your actual executable and clone paths, including `uv.exe` on
+   Windows. Use uv's full path in MCP configuration: desktop apps may have a different PATH from
+   the terminal. In JSON, escape backslashes or use forward slashes.
+
+2. **Sign in once for all Microsoft connectors.** From any installed connector's folder, run
+   its `auth` command, for example here:
+
+   ```bash
+   uv run outlook-connector auth
+   ```
+
+   Keep this one process running. Open Microsoft's printed URL and enter each device code as it
+   appears, one at a time, using your own account. An agent should relay each prompt immediately.
+   Several codes can be normal: different Microsoft profiles may need separate approvals.
+   Do not start another `auth` command for each repository or run sign-ins in parallel.
+
+   Credentials go only to Microsoft; tokens stay in the shared encrypted cache
+   (`%USERPROFILE%/.lrh-m365-auth` on Windows, the XDG data folder elsewhere, or `M365_AUTH_HOME`).
+   Encryption is required. To switch accounts explicitly, run `auth --sign-out`, then `auth` again.
+
+3. **Restart the client completely.** Save your work and close **all** VS Code or chat-app windows.
+   On Windows, check the system tray beside the clock, including hidden icons, and Quit/Exit any
+   remaining client instance. Then reopen the app. A new chat or terminal is not a full restart.
+   An agent should leave these steps for you before its session ends, rather than close the app.
+
+4. **Verify and try it.** Check cached sign-in status from the connector folder:
+
+   ```bash
+   uv run outlook-connector status
+   ```
+
+   This is an offline check; also confirm the tools appear in the restarted client and make a
+   small read-only request, such as "Find emails about the quarterly plan".
+   An agent should report CLI and MCP verification separately, leaving any post-restart check as
+   pending until it is performed.
+
+   Open the local browser UI from the connector folder:
+
+   ```bash
+   uv run outlook-connector ui
+   ```
+
+   It stops after 30 minutes without activity. An agent should provide this command with the actual
+   uv and checkout paths (`run --directory "<checkout path>" outlook-connector ui`).
+
+Use uv's full path if the terminal cannot find it. In PowerShell, prefix a quoted executable path
+with `&`, for example `& "C:/path/to/uv.exe" --version`.
+
+### Local data
 
 Outlook's data (the folder cache, exports, downloads and logs) is stored under
 `%USERPROFILE%\.lrh-outlook-connector` on Windows, or `~/.local/share/lrh-outlook-connector` on other
 systems. Set `OUTLOOK_CONNECTOR_HOME` to override it.
 
-### Configure a local MCP client
-
-Replace `/path/to/lrh-outlook-connector` with the absolute path to your clone.
-
-**Claude Code** — add the server from a terminal:
-
-```bash
-claude mcp add --transport stdio lrh-outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
-```
-
-See the [Claude Code MCP guide](https://docs.anthropic.com/en/docs/claude-code/mcp).
-
-**Codex CLI** — register the same stdio command:
-
-```bash
-codex mcp add lrh-outlook-connector -- uv run --directory /path/to/lrh-outlook-connector outlook-connector mcp
-```
-
-See the [Codex MCP guide](https://developers.openai.com/codex/mcp/).
-
-**GitHub Copilot Chat in VS Code** — add this server to `.vscode/mcp.json` in your workspace:
-
-```json
-{
-  "servers": {
-    "lrh-outlook-connector": {
-      "type": "stdio",
-      "command": "uv",
-      "args": [
-        "run",
-        "--directory",
-        "/path/to/lrh-outlook-connector",
-        "outlook-connector",
-        "mcp"
-      ]
-    }
-  }
-}
-```
-
-Replace the sample path with your clone’s absolute path. In Windows JSON paths, escape backslashes (for example, `C:\\Users\\you\\lrh-outlook-connector`). This example requires Copilot Chat’s Agent mode with local MCP support; see [VS Code’s MCP guide](https://code.visualstudio.com/docs/copilot/chat/mcp-servers).
-
 > **Client compatibility:** These examples require a locally running agentic client that can launch a stdio MCP server. Hosted chat apps cannot start this local process, and this project provides no remote MCP endpoint. ChatGPT can still reach it through OpenAI's [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), where your plan and workspace allow custom MCP apps; files the server saves stay on the computer running the tunnel.
-
-The UI opens in your browser and stops after 30 minutes without activity:
-
-```bash
-uv run outlook-connector ui
-```
 
 ![150 percent screenshot of the local Outlook connector UI inside a macOS-style browser window. Mailbox content is synthetic.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/ui-preview.svg)
 
