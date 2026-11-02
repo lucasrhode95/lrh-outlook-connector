@@ -260,7 +260,7 @@
   <rect x="915" y="1588" width="245" height="116" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="929" y="1600" width="32" height="26" rx="5" fill="#2b6cb0"/>
   <text class="badge" x="945" y="1619" text-anchor="middle">G</text>
-  <text class="section-title" x="969" y="1620" style="font-size:21px">teams.graph</text>
+  <text class="section-title" x="969" y="1620" style="font-size:21px">outlook.calendar</text>
   <text class="detail" x="929" y="1656" style="font-size:19px">Teams client</text>
   <text class="detail" x="929" y="1684" style="font-size:19px">Graph calendar view</text>
 

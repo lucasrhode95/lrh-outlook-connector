@@ -34,10 +34,12 @@ def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
     spaces = token_result(aud="https://api.spaces.skype.com", scp="chat", source="identity_provider")
     csa = token_result(aud="https://chatsvcagg.teams.microsoft.com", scp="chat", source="cache")
     teams_graph = token_result(aud=GRAPH, scp="User.Read", source="cache")
+    calendar = token_result(aud=GRAPH, scp="Calendars.Read", source="identity_provider")
     script = Script(
         silent_by_scopes={
             PROFILES["teams.csa"].scopes: csa,
             PROFILES["teams.graph"].scopes: teams_graph,
+            PROFILES["outlook.calendar"].scopes: calendar,
         },
         device_by_scopes={
             PROFILES["outlook.graph"].scopes: graph,
@@ -52,6 +54,7 @@ def test_auth_bootstraps_all_products_with_profile_appropriate_scopes(
     assert "[outlook.graph] Ready" in out.out
     assert "[m365.search] Ready" in out.out
     assert "[teams.graph] Ready" in out.out
+    assert "[outlook.calendar] Ready" in out.out  # the Teams client's sign-in: no device flow of its own
     assert "PLAINTEXT" in out.err
     assert script.shown_flows == 4  # uncached resources need separate device flows
 

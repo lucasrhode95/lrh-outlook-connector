@@ -24,17 +24,7 @@ None open.
 
 ### Improvements
 
-#### A purpose-named calendar profile
-
-You call `list_calendar_events` with `contains=["budget"]` for next week. It works because it borrows the
-Teams client's Graph profile, `teams.graph`. The Outlook profile, `outlook.graph`, has no calendar scope
-([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)). If a later
-`lrh-m365-auth` release changes `teams.graph`, the Graph read fails and the call falls back to Outlook
-Web. Outlook Web returns no descriptions, so `contains` and `include_body` fail.
-
-**Change:** add a calendar profile to `lrh-m365-auth`, on the same client and resource, and point
-`config.CALENDAR_PROFILE` at it. The alternative, `Calendars.Read` on `outlook.graph`, needs its
-preauthorization checked first.
+None open.
 
 ### Enhancements
 
@@ -144,7 +134,7 @@ A second user installs the connector and runs `outlook-connector auth` for the f
 grants have only been checked on one account. If the new account is refused:
 
 - `m365.search`: `search_calendar_events` fails.
-- `teams.graph`: `list_calendar_events` falls back to Outlook Web, without descriptions.
+- `outlook.calendar` (the Teams client): `list_calendar_events` falls back to Outlook Web, without descriptions.
 
 **Check** both grants on a new account before relying on them.
 
@@ -206,7 +196,7 @@ works today. Only the signed-in user's default calendar is listed and searched. 
 - Secondary calendars the user created.
 - Calendars shared with or delegated to the user.
 
-**Check** with the `teams.graph` token
+**Check** with the `outlook.calendar` token
 ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)):
 
 - The user's own secondary calendars, with its calendar scope.
