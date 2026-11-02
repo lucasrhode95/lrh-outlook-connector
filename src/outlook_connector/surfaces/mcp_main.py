@@ -176,7 +176,9 @@ Enable/disable is a separate update. Reordering is refused while any unsupported
 - Core mail-data reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature \
   access use `outlook.api`, prepared by `outlook-connector auth`.
 - If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
-in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
+in a terminal; never attempt to sign in yourself. It can show up to three device codes, one after \
+another; if you relay them, tell the user to expect that before the first. \
+An "access denied" error is about that item, \
 not the sign-in: do not ask the user to sign in again for it.
 """
 
