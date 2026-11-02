@@ -249,15 +249,29 @@ class GraphMailReader(MailReader):
         return counts
 
     @_named("reading a message")
-    async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message:
+    async def get_message(
+        self, message_id: str, *, body_format: BodyFormat = "text", include_attachments: bool = True
+    ) -> Message:
         prefer = (PREFER_TEXT_BODY,) if body_format == "text" else ()
         data = await self._graph.get(
             f"/me/messages/{message_id}", {"$select": mapping.MESSAGE_FIELDS}, prefer=prefer
         )
         result = mapping.message(data, html=body_format == "html")
         # Graph's hasAttachments excludes inline-only attachments, so it cannot guard this lookup.
-        result.attachments = await self.list_attachments(message_id)
+        if include_attachments:
+            result.attachments = await self.list_attachments(message_id)
         return result
+
+    @_named("reading draft state")
+    async def draft_state(self, message_id: str) -> Message:
+        data = await self._graph.get(
+            f"/me/messages/{message_id}",
+            {
+                "$select": "id,isDraft,changeKey,parentFolderId",
+                "$expand": f"singleValueExtendedProperties($filter=id eq '{mapping.MESSAGE_SIZE_PROPERTY}')",
+            },
+        )
+        return mapping.message(data, html=False)
 
     @_named("fetching message bodies")
     async def get_messages(

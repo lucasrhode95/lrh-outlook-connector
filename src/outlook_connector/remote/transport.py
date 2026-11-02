@@ -279,13 +279,9 @@ class Transport:
     ) -> AsyncIterator[httpx.Response]:
         """Keep a streamed response open while its consumer reads it."""
         if stream:
-            if json_body is not None or content is not None:
-                raise AssertionError("A streamed download cannot carry a request body.")
             async with self._client.stream(method, url, headers=headers) as response:
                 yield response
         else:
-            if json_body is not None and content is not None:
-                raise AssertionError("A request cannot carry both JSON and raw content.")
             yield await self._client.request(method, url, headers=headers, json=json_body, content=content)
 
     @staticmethod

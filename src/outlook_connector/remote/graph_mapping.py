@@ -32,7 +32,8 @@ MEETING_KINDS: dict[str, MeetingKind] = {
     "meetingDeclined": "declined",
 }
 NEW_REQUEST = (None, "none", "newMeetingRequest")
-MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody,changeKey,size"
+MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody,changeKey"
+MESSAGE_SIZE_PROPERTY = "Integer 0x0E08"
 FOLDER_FIELDS = "id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount,isHidden"
 ATTACHMENT_FIELDS = "id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId"
 
@@ -114,7 +115,6 @@ def _summary_fields(data: dict[str, Any]) -> dict[str, Any]:
         "flagged": flag.get("flagStatus") == "flagged",
         "preview": data.get("bodyPreview"),
         "internet_message_id": data.get("internetMessageId"),
-        "size": data.get("size") if isinstance(data.get("size"), int) else None,
         "meeting": meeting(data),
     }
 
@@ -133,6 +133,7 @@ def message(data: dict[str, Any], *, html: bool) -> Message:
     fields: dict[str, Any] = _summary_fields(data) | {
         "bcc": recipients(data.get("bccRecipients")),
         "revision": data.get("changeKey") if isinstance(data.get("changeKey"), str) else None,
+        "size": _message_size(data),
     }
     if html:
         return Message(
@@ -141,6 +142,17 @@ def message(data: dict[str, Any], *, html: bool) -> Message:
             unique_body_html=unique,
         )
     return Message(**fields, body_text=body, unique_body_text=unique)
+
+
+def _message_size(data: dict[str, Any]) -> int | None:
+    """Read the MAPI stored size when the narrow draft-state request expanded it."""
+    for prop in data.get("singleValueExtendedProperties") or []:
+        if isinstance(prop, dict) and prop.get("id") == MESSAGE_SIZE_PROPERTY:
+            try:
+                return int(prop["value"])
+            except (KeyError, TypeError, ValueError):
+                return None
+    return None
 
 
 def attachment(data: dict[str, Any], message_id: str) -> Attachment:

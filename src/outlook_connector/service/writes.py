@@ -9,6 +9,7 @@ import tempfile
 from collections import Counter
 from html import escape
 from pathlib import Path
+from typing import NoReturn
 
 from m365_auth import Account
 
@@ -61,48 +62,23 @@ class Writes:
             raise WriteOutcomeUnknown(
                 "Outlook did not report a draft id; check Drafts before creating again."
             )
-        failed_attachment: LocalAttachment | None = None
-        try:
-            for attachment in resolved.local_attachments:
-                failed_attachment = attachment
-                current = await self.mailbox.message(draft_id)
+        for attachment in resolved.local_attachments:
+            try:
+                current = await self.mailbox.reader.draft_state(draft_id)
                 if not current.revision:
                     raise Upstream("Outlook did not report the saved draft version for attachment upload.")
                 await self.writer.add_local_attachment(draft_id, current.revision, attachment)
-        except ConnectorError as exc:
-            if failed_attachment is None:
-                raise
-            deleted = await self._discard_draft(draft_id)
-            disposition = (
-                "The draft was moved to Deleted Items."
-                if deleted
-                else ("The draft could not be moved to Deleted Items; check Drafts before continuing.")
-            )
-            raise Upstream(
-                f"Could not attach local file '{failed_attachment.name}': {exc} {disposition}"
-            ) from exc
-        result = await self._read_back(
+            except ConnectorError as exc:
+                await self._attachment_failure(draft_id, attachment, str(exc))
+        result, failed_local = await self._read_back(
             draft_id,
             expected=resolved.inline_images,
             expected_local=resolved.local_attachments,
         )
-        if resolved.local_attachments:
-            failed = next(
-                (item for item in resolved.local_attachments if not _attachment_is_confirmed(item, result)),
-                None,
+        if failed_local:
+            await self._attachment_failure(
+                draft_id, failed_local[0], "Graph could not confirm this file's name and size."
             )
-            if failed:
-                deleted = await self._discard_draft(draft_id)
-                disposition = (
-                    "The draft was moved to Deleted Items."
-                    if deleted
-                    else ("The draft could not be moved to Deleted Items; check Drafts before continuing.")
-                )
-                detail = next(
-                    (finding for finding in result.findings if failed.name in finding),
-                    "Graph could not confirm the attachment in the saved draft.",
-                )
-                raise Upstream(f"Could not verify local file '{failed.name}': {detail} {disposition}")
         if resolved.reply_to_message_id and result.verified:
             try:
                 assert original is not None
@@ -131,7 +107,7 @@ class Writes:
             await self.writer.send_draft(draft_id, draft.revision)
         except WriteOutcomeUnknown as exc:
             try:
-                item = await self.mailbox.message(draft_id)
+                item = await self.mailbox.reader.draft_state(draft_id)
                 sent = await self.mailbox.resolve_folder("sentitems")
                 if item.is_draft is False and item.folder_id == sent.id:
                     return SendResult(
@@ -148,7 +124,7 @@ class Writes:
         """Validate a public draft id against current server state."""
         if not draft_id.strip():
             raise InvalidRequest("draft_id must not be empty.")
-        message = await self.mailbox.message(draft_id)
+        message = await self.mailbox.reader.draft_state(draft_id)
         if not message.is_draft:
             raise InvalidRequest("The message is not an existing Outlook draft.")
         return message
@@ -204,18 +180,21 @@ class Writes:
         *,
         expected: list[InlineImage] | None = None,
         expected_local: list[LocalAttachment] | None = None,
-    ) -> DraftResult:
+    ) -> tuple[DraftResult, list[LocalAttachment]]:
         """Assumes (not re-checked here): reliable id from a single successful write. Retries reads only."""
         for attempt in range(3):
             try:
                 text = await self.mailbox.reader.get_message(draft_id)
-                page = await self.mailbox.reader.get_message(draft_id, body_format="html")
+                page = await self.mailbox.reader.get_message(
+                    draft_id, body_format="html", include_attachments=False
+                )
                 findings = []
+                failed_local: list[LocalAttachment] = []
                 if not (text.body_text or "").strip():
                     findings.append("The server draft body is empty or missing.")
                 cids = re.findall(r"cid:([^\"' >]+)", page.body_html or "", re.IGNORECASE)
                 if cids or expected or expected_local:
-                    attachments = await self.mailbox.reader.list_attachments(draft_id)
+                    attachments = text.attachments
                     present = {
                         attachment.content_id
                         for attachment in attachments
@@ -255,10 +234,11 @@ class Writes:
                             if found[key]:
                                 found[key] -= 1
                             else:
+                                failed_local.append(local)
                                 findings.append(
                                     f"Attachment '{local.name}' is missing or has a different size."
                                 )
-                return DraftResult(
+                result = DraftResult(
                     id=draft_id,
                     status="saved",
                     verified=True,
@@ -267,23 +247,31 @@ class Writes:
                     html_body=page.body_html,
                     findings=findings,
                 )
+                return result, failed_local
             except ConnectorError as exc:
                 if attempt == 2:
-                    return DraftResult(
+                    result = DraftResult(
                         id=draft_id,
                         status="failed",
                         verified=False,
                         findings=[f"Draft saved, but Graph read-back failed: {exc}"],
                     )
+                    return result, expected_local or []
                 await asyncio.sleep(0.2 * (attempt + 1))
         raise AssertionError("unreachable")
 
-    async def _discard_draft(self, draft_id: str) -> bool:
-        """Move a partial draft to Deleted Items; never purge it or retry an unclear result."""
+    async def _attachment_failure(self, draft_id: str, attachment: LocalAttachment, detail: str) -> NoReturn:
+        """Report a checked local file's failure and discard this call's known partial draft once."""
         try:
-            return (await self.writer.delete([draft_id])).get(draft_id) is None
+            deleted = (await self.writer.delete([draft_id]))[draft_id] is None
         except ConnectorError:
-            return False
+            deleted = False
+        disposition = (
+            "The draft was moved to Deleted Items."
+            if deleted
+            else "The draft could not be moved to Deleted Items; check Drafts before continuing."
+        )
+        raise Upstream(f"Could not attach local file '{attachment.path}': {detail} {disposition}")
 
     async def _reply_problem(self, original: Message, result: DraftResult) -> str | None:
         """Check quoted history using the original and read-back draft already fetched this call.
@@ -293,7 +281,9 @@ class Writes:
         """
         if result.message is None:
             return "the draft or the original could not be read back"
-        original_page = await self.mailbox.reader.get_message(original.id, body_format="html")
+        original_page = await self.mailbox.reader.get_message(
+            original.id, body_format="html", include_attachments=False
+        )
         if _flat(original.body_text) not in _flat(result.text_body):
             return "the quoted original is not the original's full text"
         # Exchange re-wraps the original's HTML when it quotes it, so the HTML is not compared as
@@ -301,12 +291,9 @@ class Writes:
         lost = _structure(original_page.body_html) - _structure(result.html_body)
         if lost:
             return "the quoted original lost formatting (" + ", ".join(sorted(lost.elements())) + ")"
-        found, failed = await self.mailbox.reader.list_attachments_many([original.id, result.id])
-        if failed:
-            return "its attachments could not be listed"
         hashes = {
-            original.id: await self._inline_hashes(original.id, found.get(original.id, [])),
-            result.id: await self._inline_hashes(result.id, found.get(result.id, [])),
+            original.id: await self._inline_hashes(original.id, original.attachments),
+            result.id: await self._inline_hashes(result.id, result.message.attachments),
         }
         missing = Counter(hashes[original.id]) - Counter(hashes[result.id])
         if missing:
@@ -354,11 +341,6 @@ def _local_attachments(paths: list[str]) -> list[LocalAttachment]:
             raise InvalidRequest(f"Cannot read local attachment '{path}': {exc}") from None
         out.append(LocalAttachment(path=str(path), name=path.name, size=size))
     return out
-
-
-def _attachment_is_confirmed(item: LocalAttachment, result: DraftResult) -> bool:
-    missing = f"Attachment '{item.name}' is missing or has a different size."
-    return result.verified and missing not in result.findings
 
 
 def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[list[str], list[str]]:

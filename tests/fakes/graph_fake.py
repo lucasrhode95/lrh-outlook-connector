@@ -123,9 +123,6 @@ class FakeMessage:
             "flag": {"flagStatus": "flagged" if self.flagged else "notFlagged"},
             "bodyPreview": self.text[:50],
             "internetMessageId": self.internet_id or f"<{self.id}@example.com>",
-            "size": self.size_override
-            if self.size_override is not None
-            else len(self.text.encode("utf-8")) + sum(len(a.data) for a in self.attachments),
             "changeKey": self.change_key(),
             "body": {"contentType": kind, "content": body},
             "uniqueBody": {"contentType": kind, "content": unique},
@@ -305,18 +302,23 @@ class FakeGraph:
 
     # ------------------------------------------------------------------ OWS (writes)
     def handle_ows(self, request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/owa/service.svc", request.url.path
+        upload = request.url.path == "/owa/service.svc/CreateAttachmentFromLocalFile"
+        assert upload or request.url.path == "/owa/service.svc", request.url.path
         assert request.headers.get("authorization", "").startswith("Bearer ")
         assert 'IdType="ImmutableId"' in request.headers.get("prefer", "")
-        action = request.url.params["action"]
+        action = "CreateAttachmentFromLocalFile" if upload else request.url.params["action"]
+        assert action != "CreateAttachmentFromLocalFile" or upload, "uploads use the dedicated path"
         assert request.headers.get("action") == action
         posted = request.headers.get("x-owa-urlpostdata")
+        if upload:
+            assert posted, "upload metadata must be in X-OWA-UrlPostData"
         envelope = json.loads(unquote(posted)) if posted else json.loads(request.content)
         if envelope["__type"] == f"{action}Request:#Exchange":  # bare request style (inbox rules)
             return self._ows_bare(action, envelope, request)
-        assert envelope["__type"] == f"{action}JsonRequest:#Exchange"
+        request_type = "CreateAttachment" if upload else action
+        assert envelope["__type"] == f"{request_type}JsonRequest:#Exchange"
         body = envelope["Body"]
-        assert body["__type"] == f"{action}Request:#Exchange"
+        assert body["__type"] == f"{request_type}Request:#Exchange"
         self.ows_calls.append((action, body))
         script = self.ows_next.pop(0) if self.ows_next else None
         if script == "no-answer":
@@ -600,8 +602,21 @@ class FakeGraph:
             msg = self.messages.get(m[1].removeprefix(REST_PREFIX))  # either id form is readable
             if not msg:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
+            if "size" in params.get("$select", "").split(","):
+                return (
+                    400,
+                    {"error": {"code": "Request_BadRequest", "message": "Unknown property size"}},
+                    None,
+                )
             # like Graph (live 2026-10-03): the id comes back in the form it was asked with
-            return 200, msg.json(text_body=text_body) | {"id": m[1]}, None
+            result = msg.json(text_body=text_body) | {"id": m[1]}
+            if "$expand" in params:
+                assert params["$expand"] == "singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')"
+                size = msg.size_override
+                if size is None:
+                    size = len(msg.text.encode("utf-8")) + sum(len(a.data) for a in msg.attachments)
+                result["singleValueExtendedProperties"] = [{"id": "Integer 0x0E08", "value": str(size)}]
+            return 200, result, None
         if m := re.fullmatch(r"/me/messages/([^/]+)/attachments", path):
             msg = self.messages.get(m[1])
             if not msg:

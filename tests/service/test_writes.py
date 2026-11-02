@@ -128,6 +128,36 @@ async def test_unreadable_local_attachment_fails_before_draft_creation(
     assert not fake.ows_calls
 
 
+async def test_local_draft_reuses_attachment_metadata_in_readback(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    path = tmp_path / "synthetic.txt"
+    path.write_bytes(b"synthetic")
+    await writes.create_draft(message(attachments=[str(path)], include_signature=False))
+    reads = [call for call in fake.calls if call.startswith("GET /v1.0/me/messages/")]
+    assert len(reads) == 4  # one state read, text plus attachments, and HTML only
+
+
+async def test_failed_verification_identifies_the_correct_same_named_local_file(
+    writes: Writes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = tmp_path / "first" / "report.txt", tmp_path / "second" / "report.txt"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"first")
+    second.write_bytes(b"second file")
+    listing = writes.mailbox.reader.list_attachments
+
+    async def missing_second(message_id: str) -> list[Any]:
+        attachments = await listing(message_id)
+        return attachments[:-1] if len(attachments) == 2 else attachments
+
+    monkeypatch.setattr(writes.mailbox.reader, "list_attachments", missing_second)
+    with pytest.raises(Upstream) as error:
+        await writes.create_draft(message(attachments=[str(first), str(second)]))
+    assert str(second) in str(error.value) and str(first) not in str(error.value)
+
+
 async def test_replacement_draft_contains_only_files_listed_for_that_call(
     writes: Writes, fake: FakeGraph, tmp_path: Path
 ) -> None:
@@ -279,14 +309,14 @@ async def test_a_draft_edited_after_the_send_read_it_is_not_sent(
     writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     draft = await writes.create_draft(reply())
-    read = writes.mailbox.message
+    read = writes.mailbox.reader.draft_state
 
     async def read_then_edited_in_outlook(*args: Any, **kwargs: Any) -> Any:
         message = await read(*args, **kwargs)
         fake.messages[draft.id].subject = "Edited in Outlook meanwhile"
         return message
 
-    monkeypatch.setattr(writes.mailbox, "message", read_then_edited_in_outlook)
+    monkeypatch.setattr(writes.mailbox.reader, "draft_state", read_then_edited_in_outlook)
     with pytest.raises(Upstream, match="nothing was changed or sent"):
         await writes.send_draft(draft.id)
     assert fake.sent_drafts == [] and fake.messages[draft.id].subject == "Edited in Outlook meanwhile"
@@ -406,7 +436,7 @@ async def test_failed_check_after_ambiguous_send_stays_unknown(
     writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     draft = await writes.create_draft(message())
-    original = writes.mailbox.message
+    original = writes.mailbox.reader.draft_state
     calls = 0
 
     async def unavailable_after_validation(*args: Any, **kwargs: Any) -> Any:
@@ -416,7 +446,7 @@ async def test_failed_check_after_ambiguous_send_stays_unknown(
             raise Throttled("Graph unavailable")
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(writes.mailbox, "message", unavailable_after_validation)
+    monkeypatch.setattr(writes.mailbox.reader, "draft_state", unavailable_after_validation)
     fake.ows_next = ["done-no-answer"]
     result = await writes.send_draft(draft.id)
     assert result.status == "unknown" and len(fake.ows_calls) == 2

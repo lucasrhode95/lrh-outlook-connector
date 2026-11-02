@@ -78,7 +78,7 @@ class OwsMailWriter(MailWriter):
                         "CancellationId": cancellation_id,
                     }
                     with operation(f"uploading draft attachment {attachment.name}"):
-                        (answer,) = await self._ows.call_raw("CreateAttachmentFromLocalFile", body, content)
+                        (answer,) = await self._ows.upload_file_slice(body, content)
                     uploaded = answer.get("Attachments")
                     result = uploaded[0] if isinstance(uploaded, list) and uploaded else {}
                     returned_id = result.get("AttachmentId") if isinstance(result, dict) else None

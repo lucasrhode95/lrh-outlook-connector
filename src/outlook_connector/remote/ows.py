@@ -66,12 +66,13 @@ class Ows:
         }
         return _read_items(await self._post(action, envelope, read_only=True), action)
 
-    async def call_raw(self, action: str, body: dict[str, Any], content: bytes) -> list[dict[str, Any]]:
-        """Send one OWS action with URL-encoded metadata and raw file bytes as the request body."""
+    async def upload_file_slice(self, body: dict[str, Any], content: bytes) -> list[dict[str, Any]]:
+        """Send the researched CreateAttachment envelope to the local-file upload route (§4.3)."""
+        action = "CreateAttachmentFromLocalFile"
         envelope = {
-            "__type": f"{action}JsonRequest:#Exchange",
+            "__type": "CreateAttachmentJsonRequest:#Exchange",
             "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": SERVER_VERSION},
-            "Body": {"__type": f"{action}Request:#Exchange", **body},
+            "Body": {"__type": "CreateAttachmentRequest:#Exchange", **body},
         }
         return _items(await self._post(action, envelope, content=content), action, strict=True)
 
@@ -135,7 +136,7 @@ class Ows:
             headers["X-OWA-UrlPostData"] = encoded
         return await self._transport.json(
             "POST",
-            f"{OWS_URL}?action={action}&app=Mail",
+            f"{OWS_URL}/{action}" if content is not None else f"{OWS_URL}?action={action}&app=Mail",
             profile=PROFILE,
             headers=headers,
             json_body=None if in_header or content is not None else payload,
