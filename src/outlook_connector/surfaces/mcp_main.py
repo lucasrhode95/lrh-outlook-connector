@@ -31,6 +31,7 @@ from outlook_connector.domain.models import (
     CalendarSearchResult,
     CombineMode,
     Conversation,
+    ConversationScope,
     Detail,
     DraftResult,
     ExportArtifact,
@@ -381,7 +382,7 @@ def build_server(context: AppContext) -> FastMCP:
         conversation_id: str,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "full",
-        scope: Scope = CONVERSATION_DEFAULT_SCOPE,
+        scope: ConversationScope = CONVERSATION_DEFAULT_SCOPE,
         max_chars: Annotated[
             int, Field(description="Maximum body size from 1 to 400000 characters.")
         ] = 40_000,

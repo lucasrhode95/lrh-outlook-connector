@@ -182,6 +182,12 @@ async def test_scope_is_one_tool_argument(server: FastMCP) -> None:
         assert "scope" in properties
 
 
+@pytest.mark.parametrize("scope", [{}, {"sent_items": True}, {"meeting_mail": True}])
+async def test_partial_conversation_scope_keeps_deleted_mail(server: FastMCP, scope: dict[str, bool]) -> None:
+    conversation = await call(server, "get_conversation", conversation_id="c-rel", scope=scope)
+    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3", "m4"]
+
+
 async def test_numeric_limits_are_descriptive_only(server: FastMCP) -> None:
     tools = {tool.name: tool for tool in await server.list_tools()}
     expected = {

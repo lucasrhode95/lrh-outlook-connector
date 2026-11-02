@@ -98,7 +98,15 @@ class Scope(BaseModel):
 
 
 DEFAULT_SCOPE = Scope()
-CONVERSATION_DEFAULT_SCOPE = Scope(deleted_items=True)
+
+
+class ConversationScope(Scope):
+    """The same scope keys, with conversation defaults applied to omitted input fields."""
+
+    deleted_items: bool = Field(default=True, description="Include Deleted Items and Junk Email.")
+
+
+CONVERSATION_DEFAULT_SCOPE = ConversationScope()
 
 
 MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
