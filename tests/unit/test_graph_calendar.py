@@ -9,6 +9,7 @@ import pytest
 from outlook_connector import config
 from outlook_connector.domain.errors import InvalidRequest, Upstream
 from outlook_connector.remote import ids
+from outlook_connector.remote.calendar_mapping import teams_chat_id_from_join_link
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_calendar import GraphCalendarItems, GraphCalendarView
 from outlook_connector.remote.transport import Transport
@@ -78,7 +79,9 @@ def _synthetic_event(**overrides: Any) -> dict[str, Any]:
         "responseStatus": {"response": "tentativelyAccepted"},
         "type": "occurrence",
         "seriesMasterId": "synthetic-series-id",
-        "onlineMeeting": {"joinUrl": "https://teams.microsoft.com/l/meetup-join/synthetic"},
+        "onlineMeeting": {
+            "joinUrl": "https://teams.microsoft.com/l/meetup-join/19:meeting_synthetic@thread.v2/0?context=x"
+        },
     }
     event.update(overrides)
     return event
@@ -148,7 +151,11 @@ async def test_events_map_to_the_connector_model_in_utc_with_outlook_ids_and_the
     assert event.calendar_item_type == "Occurrence"
     assert event.is_meeting is True and event.is_cancelled is False
     assert event.location == "Synthetic room"
-    assert event.teams_join_url == "https://teams.microsoft.com/l/meetup-join/synthetic"
+    assert (
+        event.teams_join_url
+        == "https://teams.microsoft.com/l/meetup-join/19:meeting_synthetic@thread.v2/0?context=x"
+    )
+    assert event.teams_chat_id_from_join_link == "19:meeting_synthetic@thread.v2"
     assert event.body_text is None
 
 
@@ -301,3 +308,14 @@ async def test_event_attachment_download_uses_the_graph_event_route(tmp_path: An
     assert size == len(b"synthetic-file")
     assert requests[0].url.path == "/v1.0/me/events/synthetic-id-x/attachments/synthetic-attachment/$value"
     assert tokens.profiles == [config.CALENDAR_PROFILE]
+
+
+def test_join_link_chat_id_parsing_is_limited_to_the_meeting_path_segment() -> None:
+    assert (
+        teams_chat_id_from_join_link(
+            "https://teams.microsoft.com/l/meetup-join/19%3Ameeting_synthetic%40thread.v2/0?context=x"
+        )
+        == "19:meeting_synthetic@thread.v2"
+    )
+    assert teams_chat_id_from_join_link("https://teams.microsoft.com/l/meetup-join/other/0") is None
+    assert teams_chat_id_from_join_link("https://teams.microsoft.com/l/meetup-join/[broken") is None

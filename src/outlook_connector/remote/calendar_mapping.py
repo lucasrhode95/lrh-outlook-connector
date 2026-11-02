@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from outlook_connector.domain.models import Recipient
 
@@ -52,3 +53,19 @@ def teams_join_url(body: str | None) -> str | None:
         return None
     match = _TEAMS_JOIN.search(body)
     return match.group(0).rstrip(".,);]") if match else None
+
+
+def teams_chat_id_from_join_link(join_url: str | None) -> str | None:
+    """Parse a meeting chat id from the join-link path; Microsoft does not document this format."""
+    if not join_url:
+        return None
+    try:
+        segments = urlsplit(join_url).path.split("/")
+    except ValueError:
+        return None
+    for index, segment in enumerate(segments[:-1]):
+        if segment == "meetup-join":
+            candidate = unquote(segments[index + 1])
+            if candidate.startswith("19:meeting_") and candidate.endswith("@thread.v2"):
+                return candidate
+    return None

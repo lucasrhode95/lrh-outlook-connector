@@ -17,7 +17,12 @@ from urllib.parse import parse_qs, quote, urlsplit
 from outlook_connector.domain.errors import InvalidRequest, Upstream
 from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, Recipient
 from outlook_connector.remote import ids
-from outlook_connector.remote.calendar_mapping import boolean, teams_join_url, text
+from outlook_connector.remote.calendar_mapping import (
+    boolean,
+    teams_chat_id_from_join_link,
+    teams_join_url,
+    text,
+)
 from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph
 from outlook_connector.remote.graph_mapping import attachment as map_attachment
 from outlook_connector.remote.ports import CalendarViewPage
@@ -170,6 +175,7 @@ def _event(data: dict[str, Any]) -> CalendarEvent:
     rows = [row for row in data.get("attendees") or [] if isinstance(row, dict)]
     event_id = text(data.get("id"))
     series = text(data.get("seriesMasterId"))
+    join_url = text(online.get("joinUrl")) or teams_join_url(description)
     return CalendarEvent(
         id=ids.to_ows(event_id) if event_id else None,
         immutable_id=event_id,
@@ -188,7 +194,8 @@ def _event(data: dict[str, Any]) -> CalendarEvent:
         calendar_item_type=ITEM_TYPE_NAMES.get(text(data.get("type")) or ""),
         series_master_id=ids.to_ows(series) if series else None,
         body_text=description,
-        teams_join_url=text(online.get("joinUrl")) or teams_join_url(description),
+        teams_join_url=join_url,
+        teams_chat_id_from_join_link=teams_chat_id_from_join_link(join_url),
     )
 
 
