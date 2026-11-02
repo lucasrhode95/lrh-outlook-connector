@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="4230" viewBox="0 0 2600 4230" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and four calendar ports. Graph adapters (GraphMailReader, GraphCalendarView) and Outlook Web adapters (OwsMailWriter, OwsRules, OwsCalendarItems, OwsCalendarWindow, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and three calendar ports. Graph adapters (GraphMailReader, GraphCalendarView) and Outlook Web adapters (OwsMailWriter, OwsRules, OwsCalendarItems, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -209,10 +209,10 @@
 <text class="group-title" x="691" y="1903">Method</text>
 <g><title>Events overlapping a window, in time order, recurring meetings expanded, times in UTC; optional contains and descriptions.</title><text class="detail" x="691" y="1933">• <tspan class="code">list_events(since, until, ...)</tspan></text></g>
 <text class="group-title" x="691" y="1972">Rules</text>
-<text class="detail" x="691" y="2002">Graph first; Outlook Web only when a</text>
-<text class="detail" x="691" y="2029">first page's Graph read fails</text>
-<text class="detail" x="691" y="2056">a cursor keeps the service that answered</text>
-<text class="muted" x="691" y="2094">uses <tspan class="code">CalendarViewReader</tspan> · <tspan class="code">CalendarWindowReader</tspan></text>
+<text class="detail" x="691" y="2002">Graph's calendar view only</text>
+<text class="detail" x="691" y="2029">a Graph failure is reported as it is</text>
+<text class="detail" x="691" y="2056">a cursor carries Graph's next link</text>
+<text class="muted" x="691" y="2094">uses <tspan class="code">CalendarViewReader</tspan></text>
 
 <rect x="1247" y="1831" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1265" y="1866"><tspan class="code">Rules</tspan><tspan class="detail" dx="12">rules.py</tspan></text>
@@ -308,8 +308,7 @@
 <g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">RuleWriter</tspan> · <tspan class="code">*_rule</tspan></text></g>
 <g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">SignatureStore</tspan> · settings, contents, writes</text></g>
 <g><title>Hydrate one event by its Outlook item id.</title><text class="detail" x="1258" y="2812"><tspan class="code">CalendarItemReader</tspan> · <tspan class="code">get_event</tspan></text></g>
-<g><title>The calendar window without descriptions, for when the Graph read fails.</title><text class="detail" x="1258" y="2839"><tspan class="code">CalendarWindowReader</tspan> · <tspan class="code">list_events</tspan></text></g>
-<g><title>One page of Exchange event hits from Search v2.</title><text class="detail" x="1258" y="2866"><tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">search_events</tspan></text></g>
+<g><title>One page of Exchange event hits from Search v2.</title><text class="detail" x="1258" y="2839"><tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">search_events</tspan></text></g>
 
 <path class="impl-flow" d="M940 2925 V2971"/>
 <text class="flow-label" x="960" y="2957" text-anchor="start">implemented by</text>
@@ -329,9 +328,8 @@
 <g><title>CreateItem (SaveOnly) for drafts and replies; UpdateItem for read, flag and send_draft (SendAndSaveCopy); MoveItem; DeleteItem with MoveToDeletedItems.</title><text class="detail small" x="1258" y="3047"><tspan class="code">OwsMailWriter</tspan>: Create/Update/Move/DeleteItem</text></g>
 <g><title>Inbox-rule actions in OWS's bare-request style.</title><text class="detail small" x="1258" y="3074"><tspan class="code">OwsRules</tspan>: inbox-rule actions</text></g>
 <g><title>GetItem with the default event shape plus body and attachment metadata.</title><text class="detail small" x="1258" y="3101"><tspan class="code">OwsCalendarItems</tspan>: GetItem</text></g>
-<g><title>GetCalendarView for the default calendar in UTC; the fallback for a failed Graph read.</title><text class="detail small" x="1258" y="3128"><tspan class="code">OwsCalendarWindow</tspan>: GetCalendarView</text></g>
-<g><title>Search v2 Event/Exchange pages; Cvid and LogicalId kept across one walk. Calls Transport directly.</title><text class="detail small" x="1258" y="3165"><tspan class="code">SubstrateEventSearch</tspan>: Search v2</text></g>
-<g><title>Implements SignatureStore over Outlook Cloud Settings. Calls Transport directly.</title><text class="detail small" x="1258" y="3192"><tspan class="code">CloudSettings</tspan>: signature settings</text></g>
+<g><title>Search v2 Event/Exchange pages; Cvid and LogicalId kept across one walk. Calls Transport directly.</title><text class="detail small" x="1258" y="3128"><tspan class="code">SubstrateEventSearch</tspan>: Search v2</text></g>
+<g><title>Implements SignatureStore over Outlook Cloud Settings. Calls Transport directly.</title><text class="detail small" x="1258" y="3155"><tspan class="code">CloudSettings</tspan>: signature settings</text></g>
 
 <path class="call-flow" d="M940 3225 V3267"/>
 <path class="call-flow" d="M1520 3225 V3267"/>
@@ -348,7 +346,7 @@
 
 <rect x="1240" y="3271" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1258" y="3306"><tspan class="code">Ows</tspan><tspan class="detail" dx="12">ows.py</tspan></text>
-<g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read and call_view: reads, retried like GETs (call_view for GetCalendarView, whose items sit directly in Body).</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan> · <tspan class="code">call_view</tspan></text></g>
+<g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read: reads, retried like GETs.</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan></text></g>
 <g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="3370">• <tspan class="code">call_request(action, ...)</tspan></text></g>
 <g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="3397">• <tspan class="code">account()</tspan></text></g>
 
@@ -381,7 +379,7 @@
 <rect x="1240" y="3835" width="560" height="290" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1258" y="3873">Profiles used here</text>
 <g><title>Graph Mail.Read for mailbox data and User.Read for the signed-in profile and photo.</title><text class="detail" x="1258" y="3903">• <tspan class="code">outlook.graph</tspan>: Outlook Mobile</text></g>
-<g><title>→ outlook.office.com. Mail changes, inbox rules, native signatures, event details and the calendar fallback.</title><text class="detail" x="1258" y="3930">• <tspan class="code">outlook.api</tspan>: One Outlook Web</text></g>
+<g><title>→ outlook.office.com. Mail changes, inbox rules, native signatures and event details.</title><text class="detail" x="1258" y="3930">• <tspan class="code">outlook.api</tspan>: One Outlook Web</text></g>
 <g><title>→ Search v2, for calendar event search.</title><text class="detail" x="1258" y="3957">• <tspan class="code">m365.search</tspan>: One Outlook Web</text></g>
 <g><title>Asks for Calendars.Read on the Teams client for the Graph calendar view; the Outlook Graph profile has no calendar scope.</title><text class="detail" x="1258" y="3984">• <tspan class="code">outlook.calendar</tspan>: Teams client</text></g>
 <text class="group-title" x="1258" y="4023">Cache</text>
@@ -404,7 +402,7 @@
 <g><title>SQLite file per account fingerprint; everything else reads mail through Mailbox.</title><text class="detail small" x="1938" y="420">• <tspan class="code">Store(account)</tspan> · <tspan class="code">Mailbox(reader, store)</tspan></text></g>
 <text class="detail small" x="1938" y="447">• <tspan class="code">Conversations</tspan> · <tspan class="code">Exports</tspan> · <tspan class="code">Files</tspan></text>
 <g><title>SubstrateEventSearch for search, OwsCalendarItems for details.</title><text class="detail small" x="1938" y="474">• <tspan class="code">Calendar(search, items)</tspan></text></g>
-<g><title>GraphCalendarView on Graph(transport, profile=CALENDAR_PROFILE), with OwsCalendarWindow as the fallback.</title><text class="detail small" x="1938" y="501">• <tspan class="code">CalendarListing(graph, outlook)</tspan></text></g>
+<g><title>GraphCalendarView on Graph(transport, profile=CALENDAR_PROFILE).</title><text class="detail small" x="1938" y="501">• <tspan class="code">CalendarListing(graph)</tspan></text></g>
 <g><title>Mail-change and inbox-rule adapters on one Ows client.</title><text class="detail small" x="1938" y="528">• <tspan class="code">OwsMailWriter</tspan> · <tspan class="code">OwsRules</tspan></text></g>
 <g><title>Native signatures over Cloud Settings.</title><text class="detail small" x="1938" y="555">• <tspan class="code">Signatures(CloudSettings, account)</tspan></text></g>
 <text class="detail small" x="1938" y="582">• <tspan class="code">Writes</tspan> · <tspan class="code">Mutations</tspan> · <tspan class="code">Rules</tspan></text>
@@ -448,7 +446,7 @@
 <g><title>Outlook Web's private JSON API under the outlook.api profile. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1938" y="2916"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text></g>
 <g><title>Drafts, sending, read state, flags.</title><text class="detail" x="1938" y="2943"><tspan class="code">CreateItem</tspan> · <tspan class="code">UpdateItem</tspan></text></g>
 <g><title>Moves and soft deletes.</title><text class="detail" x="1938" y="2970"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
-<g><title>Event details, and the calendar window when Graph fails.</title><text class="detail" x="1938" y="2997"><tspan class="code">GetItem</tspan> · <tspan class="code">GetCalendarView</tspan></text></g>
+<g><title>Event details.</title><text class="detail" x="1938" y="2997"><tspan class="code">GetItem</tspan></text></g>
 <g><title>OWS rule actions support reading and confirmed changes to supported inbox rules.</title><text class="detail" x="1938" y="3024">inbox rules: read and supported writes</text></g>
 
 <rect x="1920" y="3095" width="580" height="130" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>

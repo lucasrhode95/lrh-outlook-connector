@@ -173,7 +173,7 @@ A second user installs the connector and runs `outlook-connector auth` for the f
 grants have only been checked on one account. If the new account is refused:
 
 - `m365.search`: `search_calendar_events` fails.
-- `outlook.calendar` (the Teams client): `list_calendar_events` falls back to Outlook Web, without descriptions.
+- `outlook.calendar` (the Teams client): `list_calendar_events` fails.
 
 **Check** both grants on a new account before relying on them.
 
