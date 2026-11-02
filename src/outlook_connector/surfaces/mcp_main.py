@@ -20,6 +20,7 @@ from pydantic import Field
 
 from outlook_connector.bootstrap import AppContext, Services
 from outlook_connector.domain.models import (
+    CONVERSATION_DEFAULT_SCOPE,
     DEFAULT_SCOPE,
     EXPORT_MAX_MESSAGES,
     Attachment,
@@ -378,7 +379,7 @@ def build_server(context: AppContext) -> FastMCP:
         conversation_id: str,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "full",
-        scope: Scope = DEFAULT_SCOPE,
+        scope: Scope = CONVERSATION_DEFAULT_SCOPE,
         max_chars: Annotated[
             int, Field(description="Maximum body size from 1 to 400000 characters.")
         ] = 40_000,
@@ -387,7 +388,10 @@ def build_server(context: AppContext) -> FastMCP:
             Field(description="Continuation; it restores the original options, which are then ignored."),
         ] = None,
     ) -> Conversation:
-        """A whole conversation, oldest first; full (default) includes quoted history, unique omits it."""
+        """A whole conversation, oldest first; includes Deleted Items and Junk by default.
+
+        Set scope.deleted_items=false to leave them out. Full bodies include quoted history by default;
+        unique omits it."""
         return await (await services()).conversations.get_conversation(
             conversation_id,
             include_bodies=include_bodies,

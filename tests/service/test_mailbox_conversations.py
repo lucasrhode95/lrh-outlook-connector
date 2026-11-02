@@ -253,22 +253,24 @@ async def test_search_requires_a_query(mailbox: Mailbox) -> None:
 # ---------------------------------------------------------------- conversations
 
 
-async def test_conversation_spans_folders_sorted_and_excludes_junk_by_default(mailbox: Mailbox) -> None:
+async def test_conversation_spans_folders_sorted_and_includes_junk_by_default(mailbox: Mailbox) -> None:
     conversation = await Conversations(mailbox).get_conversation("c-rel")
-    assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3"]
+    assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3", "m4"]
     assert [t.message.folder for t in conversation.messages] == [
         "Inbox",
         "Sent Items",
         "Inbox/Projects/Project Alpha",
+        "Junk Email",
     ]
     assert [t.text for t in conversation.messages] == [
         "First report\n\nregards",
         "Thanks!\n\n> First report",
         "Follow-up with numbers [Image: image001.png]\n\n[File: numbers.xlsx]",
+        "buy now",
     ]
     assert conversation.subject == "Relatório de exemplo semanal"
-    assert any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)
-    assert conversation.coverage.excluded == {"deleted_or_junk": 1}
+    assert not any("left out: in Deleted Items or Junk Email" in n for n in conversation.coverage.notes)
+    assert conversation.coverage.excluded == {}
 
 
 @pytest.mark.parametrize("body", ["full", "unique"])
@@ -306,10 +308,15 @@ async def test_message_and_conversation_use_source_image_order_and_exact_body_ki
 
 
 async def test_conversation_scope_includes_deleted_items_and_junk(mailbox: Mailbox) -> None:
-    conversation = await Conversations(mailbox).get_conversation(
-        "c-rel", scope=Scope(deleted_items=True), include_bodies=False
-    )
+    conversation = await Conversations(mailbox).get_conversation("c-rel", include_bodies=False)
     assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3", "m4"]
+
+
+async def test_conversation_scope_can_leave_deleted_items_and_junk_out(mailbox: Mailbox) -> None:
+    conversation = await Conversations(mailbox).get_conversation(
+        "c-rel", scope=Scope(deleted_items=False), include_bodies=False
+    )
+    assert [t.message.id for t in conversation.messages] == ["m1", "m2", "m3"]
 
 
 @pytest.mark.parametrize(
@@ -342,12 +349,14 @@ async def test_conversation_bodies_are_bounded_with_cursor(mailbox: Mailbox) -> 
     second = await conversations.get_conversation("c-rel", max_chars=1000, cursor=first.cursor)
     assert [t.message.id for t in second.messages] == ["m2"] and second.cursor
     third = await conversations.get_conversation("c-rel", cursor=second.cursor)
-    assert [t.message.id for t in third.messages] == ["m3"] and third.cursor is None
+    assert [t.message.id for t in third.messages] == ["m3"] and third.cursor
+    fourth = await conversations.get_conversation("c-rel", cursor=third.cursor)
+    assert [t.message.id for t in fourth.messages] == ["m4"] and fourth.cursor is None
 
 
 async def test_conversation_cursor_keeps_deleted_items_scope(mailbox: Mailbox) -> None:
     conversations = Conversations(mailbox)
-    first = await conversations.get_conversation("c-rel", scope=Scope(deleted_items=True), max_chars=15)
+    first = await conversations.get_conversation("c-rel", max_chars=15)
     rest = []
     cursor = first.cursor
     while cursor:  # continue without repeating scope.deleted_items
@@ -367,12 +376,12 @@ async def test_conversation_cursor_belongs_to_its_conversation(mailbox: Mailbox)
 async def test_conversation_sizes_count_like_get_conversation(mailbox: Mailbox, fake: FakeGraph) -> None:
     conversations = Conversations(mailbox)
     sizes = {s.conversation_id: s.messages for s in await mailbox.conversation_sizes(["c-rel", "c-lunch"])}
-    assert sizes == {"c-rel": 3, "c-lunch": 1}  # junk m4 left out, as in get_conversation
+    assert sizes == {"c-rel": 4, "c-lunch": 1}  # junk m4 included, as in get_conversation
     with_junk = await mailbox.conversation_sizes(["c-rel"], scope=Scope(deleted_items=True))
     assert with_junk[0].messages == 4 and not with_junk[0].at_least
     del fake.messages["m2"]
-    assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 2
-    assert len((await conversations.get_conversation("c-rel")).messages) == 2
+    assert (await mailbox.conversation_sizes(["c-rel"]))[0].messages == 3
+    assert len((await conversations.get_conversation("c-rel")).messages) == 3
 
 
 async def test_single_oversized_message_is_truncated_not_skipped(mailbox: Mailbox, fake: FakeGraph) -> None:
@@ -468,7 +477,7 @@ async def test_conversation_marks_missing_bodies_with_the_export_error_block(
     assert text.startswith("[EXPORT ERROR] The body of this message could not be fetched.\n")
     assert "  Error:  HTTP 429 ApplicationThrottled" in text and "  Fix:    export it again" in text
     assert not conversation.coverage.complete  # throttling is retryable
-    assert sum(t.export_error is not None for t in conversation.messages) == 3
+    assert sum(t.export_error is not None for t in conversation.messages) == 4
     assert all(t.export_error and t.export_error.retry for t in conversation.messages)
     assert "body_errors" not in conversation.model_dump()
 

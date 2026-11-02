@@ -163,8 +163,12 @@ async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
     found = await call(server, "search_messages", query="relatório")
     conversation_id = found["conversations"][0]["conversation_id"]
     conversation = await call(server, "get_conversation", conversation_id=conversation_id)
-    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3"]
+    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3", "m4"]
     assert "> First report" in conversation["messages"][1]["text"]
+    without_deleted = await call(
+        server, "get_conversation", conversation_id=conversation_id, scope={"deleted_items": False}
+    )
+    assert [m["message"]["id"] for m in without_deleted["messages"]] == ["m1", "m2", "m3"]
     message = await call(server, "get_message", message_id="m2")
     assert message["text"] == "Thanks!\n\n> First report"
     short = await call(server, "get_message", message_id="m2", max_chars=1)

@@ -32,7 +32,7 @@ from outlook_connector.domain.errors import (
     PermissionDenied,
     Throttled,
 )
-from outlook_connector.domain.models import ExportRequest, Scope
+from outlook_connector.domain.models import CONVERSATION_DEFAULT_SCOPE, ExportRequest, Scope
 
 STATIC = resources.files("outlook_connector.surfaces.web") / "static"
 _STATUS = {
@@ -84,12 +84,12 @@ def _flag(request: Request, name: str, default: bool = False) -> bool:
     return default if value is None else value.lower() in ("1", "true", "yes")
 
 
-def _scope(request: Request) -> Scope:
+def _scope(request: Request, *, deleted_items_default: bool = False) -> Scope:
     """Validate the web query's scope once at the route entry point."""
     return Scope(
         sent_items=_flag(request, "sent_items", True),
         meeting_mail=_flag(request, "meeting_mail", True),
-        deleted_items=_flag(request, "deleted_items"),
+        deleted_items=_flag(request, "deleted_items", deleted_items_default),
     )
 
 
@@ -185,7 +185,7 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         result = await (await context.services()).conversations.get_conversation(
             request.path_params["conversation_id"],
             include_bodies=False,
-            scope=_scope(request),
+            scope=_scope(request, deleted_items_default=True),
         )
         return _json(result)
 
@@ -194,8 +194,12 @@ def create_app(context: AppContext, *, session_token: str, port: int, activity: 
         ids = payload.get("conversation_ids") if isinstance(payload, dict) else None
         if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
             raise InvalidRequest("conversation_ids must be a list of strings.")
+        default_scope = CONVERSATION_DEFAULT_SCOPE.model_dump(mode="json")
+        scope = payload.get("scope", default_scope)
+        if isinstance(scope, dict):
+            scope = {**default_scope, **scope}
         sizes = await (await context.services()).mailbox.conversation_sizes(
-            ids, scope=Scope.model_validate(payload.get("scope", {}))
+            ids, scope=Scope.model_validate(scope)
         )
         return _json(sizes)
 

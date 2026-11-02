@@ -98,6 +98,7 @@ class Scope(BaseModel):
 
 
 DEFAULT_SCOPE = Scope()
+CONVERSATION_DEFAULT_SCOPE = Scope(deleted_items=True)
 
 
 MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
@@ -340,7 +341,7 @@ class UserProfile(Compact):
 
 class ConversationSize(Compact):
     conversation_id: str
-    messages: int  # what get_conversation would list with the same scope.deleted_items
+    messages: int  # what get_conversation would list with the same scope
     at_least: bool = False  # the conversation is larger than the server listed in one request
 
 

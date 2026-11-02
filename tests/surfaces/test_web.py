@@ -104,8 +104,10 @@ def test_folders_messages_search_conversation_and_message(client: TestClient) ->
     found = client.get("/api/search", params={"q": "relatório"}).json()
     assert found["conversations"][0]["conversation_id"] == "c-rel"
     conversation = client.get("/api/conversations/c-rel").json()
-    assert [t["message"]["id"] for t in conversation["messages"]] == ["m1", "m2", "m3"]
+    assert [t["message"]["id"] for t in conversation["messages"]] == ["m1", "m2", "m3", "m4"]
     assert "text" not in conversation["messages"][0]  # the UI lists conversations without bodies
+    without_deleted = client.get("/api/conversations/c-rel", params={"deleted_items": "false"}).json()
+    assert [t["message"]["id"] for t in without_deleted["messages"]] == ["m1", "m2", "m3"]
     message = client.get("/api/messages/m2").json()
     assert "> First report" in message["text"]
     unique_message = client.get("/api/messages/m2", params={"body": "unique"}).json()
@@ -114,7 +116,7 @@ def test_folders_messages_search_conversation_and_message(client: TestClient) ->
 
 def test_conversation_sizes(client: TestClient) -> None:
     sizes = client.post("/api/conversation-sizes", json={"conversation_ids": ["c-rel", "c-lunch"]}).json()
-    assert [(s["conversation_id"], s["messages"]) for s in sizes] == [("c-rel", 3), ("c-lunch", 1)]
+    assert [(s["conversation_id"], s["messages"]) for s in sizes] == [("c-rel", 4), ("c-lunch", 1)]
     assert client.post("/api/conversation-sizes", json={"conversation_ids": "c-rel"}).status_code == 400
     with_junk = client.post(
         "/api/conversation-sizes",
