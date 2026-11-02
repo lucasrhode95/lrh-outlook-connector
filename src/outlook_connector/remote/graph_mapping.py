@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
-from outlook_connector.domain.body import BodyPart, TextPart
 from outlook_connector.domain.models import (
     Attachment,
     Folder,
@@ -15,7 +14,6 @@ from outlook_connector.domain.models import (
     MessageSummary,
     Recipient,
 )
-from outlook_connector.remote.html_body import parse_html
 
 SUMMARY_FIELDS = (
     "id,conversationId,parentFolderId,subject,from,sender,toRecipients,ccRecipients,receivedDateTime,"
@@ -129,11 +127,7 @@ def _content(value: Any) -> str | None:
 
 
 def message(data: dict[str, Any], *, html: bool) -> Message:
-    """Map one source message; ``html`` says which format the request asked for.
-
-    Source boundary: body content and its declared format are checked before extracting structure.
-    Unrecognized or missing formats leave parts unavailable; HTML-looking source text stays text.
-    """
+    """Map one source message; ``html`` says which body format the request asked for."""
     body, unique = _content(data.get("body")), _content(data.get("uniqueBody"))
     fields: dict[str, Any] = _summary_fields(data) | {
         "bcc": recipients(data.get("bccRecipients")),
@@ -144,8 +138,6 @@ def message(data: dict[str, Any], *, html: bool) -> Message:
             **fields,
             body_html=body,
             unique_body_html=unique,
-            body_parts=_body_parts(data.get("body")),
-            unique_body_parts=_body_parts(data.get("uniqueBody")),
         )
     return Message(**fields, body_text=body, unique_body_text=unique)
 
@@ -167,15 +159,3 @@ def attachment(data: dict[str, Any], message_id: str) -> Attachment:
             ),
         ),
     )
-
-
-def _body_parts(value: Any) -> list[BodyPart] | None:
-    """Parse only the source-declared format. Text containing HTML-like syntax remains plain text."""
-    if not isinstance(value, dict) or not isinstance(value.get("content"), str):
-        return None
-    kind = str(value.get("contentType", "")).casefold()
-    if kind == "html":
-        return parse_html(value["content"])
-    if kind == "text":
-        return [TextPart(value["content"])]
-    return None

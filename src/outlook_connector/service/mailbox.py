@@ -580,35 +580,15 @@ class Mailbox:
         found, _ = await self.reader.list_attachments_many(ids) if ids else ({}, {})
         return {mid: markers.named(items) for mid, items in found.items()}
 
-    async def marker_inputs(self, bodies: dict[str, Message]) -> dict[str, list[Attachment]]:
-        """List attachments and populate source body parts for messages with inline files.
+    async def marker_inputs(self, message_ids: list[str]) -> dict[str, list[Attachment]]:
+        """List attachments for messages whose body text needs trailing markers.
 
-        Assumes (not re-checked here): ``bodies`` holds messages fetched by this connector. Failed
-        listings are left out; failed HTML reads leave inline positions explicitly unavailable.
+        Assumes (not re-checked here): ``message_ids`` come from results fetched by this connector.
+        Failed listings are left out; body text never depends on an attachment listing succeeding.
         """
-        ids = list(bodies)
+        ids = list(dict.fromkeys(message_ids))
         found, _ = await self.reader.list_attachments_many(ids) if ids else ({}, {})
-        await self.inline_body_parts(bodies, found)
         return found
-
-    async def inline_body_parts(self, bodies: dict[str, Message], found: dict[str, list[Attachment]]) -> None:
-        """Populate typed source parts on existing text messages; no rendered text is interpreted.
-
-        Assumes (not re-checked here): both maps refer to the same messages. Unreadable source bodies
-        keep their text and unavailable parts; the renderer labels inline files without a body position.
-        """
-        ids = [
-            mid
-            for mid, attachments in found.items()
-            if mid in bodies and any(a.kind == "file" and (a.is_inline or a.content_id) for a in attachments)
-        ]
-        if not ids:
-            return
-        source = await self.reader.get_messages(ids, body_format="html")
-        for mid, message in source.messages.items():
-            if message is not None:
-                bodies[mid].body_parts = message.body_parts
-                bodies[mid].unique_body_parts = message.unique_body_parts
 
     async def get_message(
         self,
@@ -630,8 +610,7 @@ class Mailbox:
         attachments = markers.named(message.attachments)
         text = message.body(body)
         if body != "html":
-            await self.inline_body_parts({message_id: message}, {message_id: attachments})
-            text = markers.with_markers(text, attachments, parts=message.parts(body))
+            text = markers.with_markers(text, attachments)
         end = len(text) if max_chars is None else min(len(text), offset + max_chars)
         return MessageContent(
             message=MessageSummary.model_validate(message.model_dump()),

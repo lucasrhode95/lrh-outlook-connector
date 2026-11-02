@@ -265,7 +265,7 @@ async def test_conversation_spans_folders_sorted_and_includes_junk_by_default(ma
     assert [t.text for t in conversation.messages] == [
         "First report\n\nregards",
         "Thanks!\n\n> First report",
-        "Follow-up with numbers [Image: image001.png]\n\n[File: numbers.xlsx]",
+        "Follow-up with numbers\n\n[File: numbers.xlsx]\n[Image: image001.png]\n[Image: logo.png]",
         "buy now",
     ]
     assert conversation.subject == "Relatório de exemplo semanal"
@@ -274,7 +274,7 @@ async def test_conversation_spans_folders_sorted_and_includes_junk_by_default(ma
 
 
 @pytest.mark.parametrize("body", ["full", "unique"])
-async def test_message_and_conversation_use_source_image_order_and_exact_body_kind(
+async def test_message_and_conversation_keep_exchange_text_then_list_inline_images(
     mailbox: Mailbox, fake: FakeGraph, body: Literal["full", "unique"]
 ) -> None:
     fake.add(
@@ -284,8 +284,8 @@ async def test_message_and_conversation_use_source_image_order_and_exact_body_ki
             "f-inbox",
             "2026-10-01T08:00:00Z",
             conversation="c-source-order",
-            text="Flattened [chart] [chart] [Image: invented.png]",
-            unique_text="Flattened unique [chart]",
+            text="Exchange full [cid:second] [same] [Image: invented.png]",
+            unique_text="Exchange unique [cid:first]",
             html='<p>Full [Image: invented.png] <img alt="chart" src="cid:second"> middle '
             '<img alt="chart" src="cid:first"> end.</p><blockquote>Quoted history</blockquote>',
             unique_html='<p>Unique <img alt="chart" src="cid:first"> end.</p>',
@@ -295,11 +295,12 @@ async def test_message_and_conversation_use_source_image_order_and_exact_body_ki
             ],
         )
     )
-    expected = (
-        "Full [Image: invented.png] [Image: second.png] middle [Image: first.png] end.\n\n> Quoted history"
+    expected_body = (
+        "Exchange full [cid:second] [same] [Image: invented.png]"
         if body == "full"
-        else "Unique [Image: first.png] end."
+        else ("Exchange unique [cid:first]")
     )
+    expected = f"{expected_body}\n\n[Image: first.png]\n[Image: second.png]"
     page = await mailbox.get_message("source-order", body=body)
     conversation = await Conversations(mailbox).get_conversation("c-source-order", body=body)
     assert page.text == expected
