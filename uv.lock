@@ -439,7 +439,7 @@ wheels = [
 [[package]]
 name = "lrh-m365-auth"
 version = "0.1.0"
-source = { git = "https://github.com/lucasrhode95/lrh-m365-auth.git?branch=feat%2Foutlook-calendar-profile#410c9e5d1c718502a25a267c8cd4015ec28d222b" }
+source = { git = "https://github.com/lucasrhode95/lrh-m365-auth.git?branch=main#fca1fd60c0b6d66e7a99a104b0c99587be584fc5" }
 dependencies = [
     { name = "msal" },
     { name = "msal-extensions", extra = ["portalocker"] },
@@ -535,7 +535,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "lrh-m365-auth", git = "https://github.com/lucasrhode95/lrh-m365-auth.git?branch=feat%2Foutlook-calendar-profile" },
+    { name = "lrh-m365-auth", git = "https://github.com/lucasrhode95/lrh-m365-auth.git?branch=main" },
     { name = "mcp", specifier = ">=1.26,<2" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "starlette", specifier = ">=0.48" },

@@ -53,4 +53,4 @@ exclude = ["research"]
 
 [tool.uv.sources]
 # Follows lrh-m365-auth main; uv.lock records the exact commit. Update with `uv lock --upgrade-package lrh-m365-auth`.
-lrh-m365-auth = { git = "https://github.com/lucasrhode95/lrh-m365-auth.git", branch = "feat/outlook-calendar-profile" }  # until lrh-m365-auth#7 merges
+lrh-m365-auth = { git = "https://github.com/lucasrhode95/lrh-m365-auth.git", branch = "main" }
