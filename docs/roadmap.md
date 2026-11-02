@@ -42,6 +42,24 @@ It matched Outlook Web on attendees, join links and text bodies, and it adds you
   for an occurrence that has a file.
 - Let `download_attachment` take an event id, through `/me/events/{id}/attachments/{id}/$value`.
 
+#### Read Exchange's text and list inline images
+
+A newsletter has a table, a quoted reply and two inline charts. `get_message` reads it in one of two ways
+today. If the message has inline files, the connector renders the source HTML itself and puts
+`[Image: chart.png]` where each chart sits. If not, or if its parser gives up on a construct such as an
+Outlook-only conditional comment, it reads Exchange's own text. So two similar messages can read
+differently, and the renderer in
+[`html_body.py`](../src/outlook_connector/remote/html_body.py) keeps collecting edge cases.
+
+**Change** (decided 2026-11-02):
+
+- Every message reads Exchange's text conversion. Exchange's own image placeholders (`[cid:…]` or
+  `[alt text]`) stay where Exchange wrote them, untouched
+  ([research §3.6](api-research.md#html-to-text-body)).
+- Inline images are listed after the body as `[Image: name]`, like other attachments, with no position.
+- Remove the local renderer and its ordered body parts where nothing else needs them. Exports then
+  include every inline file the message lists, not only those the selected body references.
+
 ### Enhancements
 
 #### Attach local files to drafts
@@ -114,31 +132,7 @@ changes, even when their headers link them.
 
 ## Decisions
 
-### Reading text and inline image placement
-
-A newsletter has a table, a quoted reply and two inline charts. `get_message` shows its text in one of two
-ways today:
-
-- **Local rendering.** The message has inline files, so the connector parses the source HTML itself and
-  puts `[Image: chart.png]` where each image sits.
-- **Exchange text with a list.** If the parser gives up, for example on an Outlook-only conditional
-  comment around an image, the text is Exchange's own conversion. The charts then appear under "Inline
-  attachments without a body position".
-
-A message without inline files always reads Exchange's text. So two similar messages can read
-differently.
-
-Exchange's text cannot simply carry the image positions. Its `[cid:…]` placeholders are not reliable
-([2026-10-18 conversion results](api-research.md#html-to-text-body)):
-
-- An encoded CID can differ between the full and unique bodies.
-- Ordinary prose can contain the same literal marker.
-- A mail gateway's hidden preview can duplicate markers.
-
-**Decide** one approach:
-
-- Keep Exchange's reading text and place images in it, validated against the source HTML.
-- Render text locally from the source structure. The current local rendering is not a settled design.
+None open.
 
 ## Live verification
 
