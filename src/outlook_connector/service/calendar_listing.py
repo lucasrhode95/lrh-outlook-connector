@@ -1,9 +1,7 @@
-"""Calendar listing: the events in a window, Graph first, Outlook Web only when Graph fails (research §3.8).
+"""Calendar listing: the events in a window, read through Graph's calendar view (research §3.8).
 
-The listing reads the default calendar's occurrences for a window, in time order. ``contains`` and the
-descriptions need Graph, because the Outlook Web fallback carries no descriptions. The fallback answers
-only a first page whose Graph read failed for a service reason; a later page stays on the service that
-answered the first, since a Graph link and an Outlook Web key mean nothing to the other service.
+The listing reads the default calendar's occurrences for a window, in time order. A Graph failure is
+reported as it is; there is no other service to answer instead.
 """
 
 from __future__ import annotations
@@ -12,10 +10,10 @@ import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from outlook_connector.domain.errors import AuthenticationRequired, InvalidRequest, Throttled, Upstream
+from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarEvent, CalendarListCoverage, CalendarListResult
 from outlook_connector.domain.time import as_utc
-from outlook_connector.remote.ports import CalendarViewPage, CalendarViewReader, CalendarWindowReader
+from outlook_connector.remote.ports import CalendarViewPage, CalendarViewReader
 from outlook_connector.service import cursors
 
 MAX_WINDOW = timedelta(days=366)
@@ -26,23 +24,15 @@ GRAPH_PAGE_SIZE = 100
 MAX_GRAPH_PAGES = 10  # pages read per call; a filtered listing may need several to fill its limit
 MAX_LISTED_ATTENDEES = 15  # per list (required, optional); attendee_count gives the total
 MAX_LISTED_BODY_CHARS = 4000
-MAX_REASON_CHARS = 200
 CURSOR_KIND = "calendar_list"
 INVALID_CURSOR = "The calendar cursor is invalid."
-# Graph failed for a service reason, so Outlook Web may answer. Bad requests, missing events and account
-# mismatches are never retried on the other service.
-GRAPH_FAILURES = (AuthenticationRequired, Throttled, Upstream)
-
-
-EventKey = tuple[datetime, str]  # an Outlook Web page's order: start, then id
 
 
 class CalendarListing:
     """Lists the signed-in user's calendar events for a window (see the module docstring)."""
 
-    def __init__(self, *, graph_view: CalendarViewReader, outlook_view: CalendarWindowReader) -> None:
+    def __init__(self, *, graph_view: CalendarViewReader) -> None:
         self._graph_view = graph_view
-        self._outlook_view = outlook_view
 
     async def list_events(
         self,
@@ -66,30 +56,11 @@ class CalendarListing:
             raise InvalidRequest(f"limit must be between 1 and {MAX_LIMIT}.")
         if cursor is None:
             start, end = _window(since, until)
-            return await self._first_page(start, end, limit, _contains(contains), include_body)
+            return await self._list_graph(start, end, limit, _contains(contains), include_body, link=None)
         state = _decode(cursor)
-        if state["source"] == "graph":
-            return await self._list_graph(
-                state["since"], state["until"], limit, state["contains"], state["include_body"], state["link"]
-            )
-        return await self._list_outlook(
-            state["since"], state["until"], limit, after=state["after"], graph_error=None
+        return await self._list_graph(
+            state["since"], state["until"], limit, state["contains"], state["include_body"], state["link"]
         )
-
-    async def _first_page(
-        self, start: datetime, end: datetime, limit: int, terms: list[str] | None, include_body: bool
-    ) -> CalendarListResult:
-        """The first page: Graph, and Outlook Web only when Graph fails for a service reason."""
-        try:
-            return await self._list_graph(start, end, limit, terms, include_body, link=None)
-        except GRAPH_FAILURES as graph_error:
-            if terms or include_body:
-                raise Upstream(
-                    f"The Graph calendar read failed ({_reason(graph_error)}). The Outlook Web fallback "
-                    "has no event descriptions, so this search cannot run now; try again later, or list "
-                    "without contains and include_body."
-                ) from graph_error
-            return await self._list_outlook(start, end, limit, after=None, graph_error=graph_error)
 
     async def _list_graph(
         self,
@@ -147,68 +118,13 @@ class CalendarListing:
             if complete
             else cursors.encode(
                 CURSOR_KIND,
-                source="graph",
                 link=link,
                 since=start.isoformat(),
                 until=end.isoformat(),
                 contains=terms,
                 include_body=include_body,
             ),
-            coverage=CalendarListCoverage(complete=complete, source="graph", scanned=scanned, notes=notes),
-        )
-
-    async def _list_outlook(
-        self,
-        start: datetime,
-        end: datetime,
-        limit: int,
-        *,
-        after: EventKey | None,
-        graph_error: Exception | None,
-    ) -> CalendarListResult:
-        """Outlook Web's window, one page at a time. A page starts after the last event the previous page
-        returned, by (start, id). Events that appear or disappear between calls do not shift the pages.
-        Each call reads the window again, in one request."""
-        try:
-            events = sorted(await self._outlook_view.list_events(since=start, until=end), key=_event_key)
-        except GRAPH_FAILURES as outlook_error:
-            if isinstance(outlook_error, AuthenticationRequired):
-                raise
-            prefix = f"The Graph calendar read failed ({_reason(graph_error)}), and " if graph_error else ""
-            raise Upstream(
-                f"{prefix}the Outlook Web calendar read failed: {_reason(outlook_error)}"
-            ) from outlook_error
-        remaining = [event for event in events if after is None or _event_key(event) > after]
-        page = remaining[:limit]
-        complete = len(remaining) <= limit
-        notes = [
-            "Times are UTC. Answered from Outlook Web's calendar view, the fallback for a failed Graph "
-            "calendar read: it has no descriptions, Teams join links or contains matching."
-        ]
-        if graph_error is not None:
-            notes.append(f"Graph calendar read failed: {_reason(graph_error)}.")
-        cursor = None
-        if not complete:
-            notes.append("More events are available: follow the cursor.")
-            last_start, last_id = _event_key(page[-1])
-            cursor = cursors.encode(
-                CURSOR_KIND,
-                source="outlook",
-                after_start=last_start.isoformat(),
-                after_id=last_id,
-                since=start.isoformat(),
-                until=end.isoformat(),
-                contains=None,
-                include_body=False,
-            )
-        return CalendarListResult(
-            since=start,
-            until=end,
-            events=_listed(page, include_body=False),
-            cursor=cursor,
-            coverage=CalendarListCoverage(
-                complete=complete, source="outlook", scanned=len(events), notes=notes
-            ),
+            coverage=CalendarListCoverage(complete=complete, scanned=scanned, notes=notes),
         )
 
 
@@ -243,13 +159,10 @@ def _decode(cursor: str) -> dict[str, Any]:
     the entry point again: a malformed or tampered cursor is an InvalidRequest."""
     state = cursors.decode(cursor, CURSOR_KIND)
     since, until = _cursor_time(state.get("since")), _cursor_time(state.get("until"))
-    contains, include_body, source = state.get("contains"), state.get("include_body"), state.get("source")
+    contains, include_body = state.get("contains"), state.get("include_body")
     if since is None or until is None or not isinstance(include_body, bool):
         raise InvalidRequest(INVALID_CURSOR)
-    graph_ok = source == "graph" and isinstance(state.get("link"), str)
-    after = _decode_after(state) if source == "outlook" else None
-    outlook_ok = source == "outlook" and after is not None and contains is None and not include_body
-    if not (graph_ok and (contains is None or isinstance(contains, list)) or outlook_ok):
+    if not isinstance(state.get("link"), str) or not (contains is None or isinstance(contains, list)):
         raise InvalidRequest(INVALID_CURSOR)
     start, end = _window(since, until)
     return {
@@ -258,7 +171,6 @@ def _decode(cursor: str) -> dict[str, Any]:
         "until": end,
         "contains": _contains(contains),
         "include_body": include_body,
-        "after": after,
     }
 
 
@@ -269,15 +181,6 @@ def _cursor_time(value: object) -> datetime | None:
         return as_utc(datetime.fromisoformat(value))
     except ValueError:
         return None
-
-
-def _decode_after(state: dict[str, Any]) -> EventKey | None:
-    """The (start, id) a page continues after; None when the cursor carries no valid key."""
-    start = _cursor_time(state.get("after_start"))
-    after_id = state.get("after_id")
-    if start is None or not isinstance(after_id, str):
-        return None
-    return start, after_id
 
 
 def _fold(value: str) -> str:
@@ -316,12 +219,3 @@ def _listed(events: list[CalendarEvent], *, include_body: bool) -> list[Calendar
 
 def _start_key(event: CalendarEvent) -> datetime:
     return event.start or datetime.min.replace(tzinfo=UTC)
-
-
-def _event_key(event: CalendarEvent) -> EventKey:
-    """The order of an Outlook Web page: start, then id, so equal starts keep one order between calls."""
-    return _start_key(event), event.id or ""
-
-
-def _reason(error: Exception) -> str:
-    return str(error)[:MAX_REASON_CHARS]

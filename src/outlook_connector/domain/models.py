@@ -265,11 +265,9 @@ class CalendarSearchResult(Compact):
 
 
 class CalendarListCoverage(Compact):
-    """What a calendar listing covers. ``source`` says which Microsoft service answered: Graph, or Outlook
-    Web when the Graph read failed (research §3.8)."""
+    """What a calendar listing covers."""
 
     complete: bool
-    source: Literal["graph", "outlook"]
     scanned: int  # events read in this call
     notes: list[str] = Field(default_factory=list)
 

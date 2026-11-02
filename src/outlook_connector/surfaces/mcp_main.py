@@ -64,10 +64,8 @@ recipients, categories and Internet ids).
 - Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
 order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
 between these dates", and for text in subjects or descriptions within those dates (contains: a list \
-of literal terms, any of which matches; include_body returns the description). Graph answers first; \
-Outlook Web answers only when the Graph read fails, and then it has no descriptions, so contains and \
-include_body fail. coverage.source says which service answered. Follow the cursor while \
-coverage.complete is false.
+of literal terms, any of which matches; include_body returns the description). Graph answers; a \
+failed Graph read is reported as an error. Follow the cursor while coverage.complete is false.
 - Calendar: search_calendar_events discovers Exchange events by words across the calendar, not Teams \
 recaps or transcripts, across all dates; for a date range, use list_calendar_events instead. \
 Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
@@ -332,9 +330,8 @@ def build_server(context: AppContext) -> FastMCP:
         cursor: str | None = None,
     ) -> CalendarListResult:
         """Calendar events overlapping a window, in time order, with recurring meetings expanded per
-        occurrence. Graph answers first; Outlook Web answers only if Graph fails, and then contains and
-        include_body fail, since it has no descriptions. Times are UTC. With a cursor, the window and
-        filters come from the cursor."""
+        occurrence, read through Graph. Times are UTC. With a cursor, the window and filters come from
+        the cursor."""
         return await (await services()).calendar_listing.list_events(
             since=since,
             until=until,

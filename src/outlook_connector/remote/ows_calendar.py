@@ -1,9 +1,7 @@
-"""Outlook Web Service calendar reads: event hydration for Search v2 pointers, and the calendar window
-that answers ``list_events`` when the Graph calendar view fails (research §3.8)."""
+"""Outlook Web Service calendar reads: event hydration for Search v2 pointers (research §4.3)."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
 
 from outlook_connector.domain.errors import Upstream
@@ -17,10 +15,8 @@ from outlook_connector.remote.calendar_mapping import (
     text,
 )
 from outlook_connector.remote.ows import Ows
-from outlook_connector.remote.ports import CalendarItemReader, CalendarWindowReader
+from outlook_connector.remote.ports import CalendarItemReader
 from outlook_connector.remote.transport import operation
-
-CALENDAR_FOLDER = {"__type": "DistinguishedFolderId:#Exchange", "Id": "calendar"}  # the default calendar
 
 
 class OwsCalendarItems(CalendarItemReader):
@@ -46,31 +42,6 @@ class OwsCalendarItems(CalendarItemReader):
             raise Upstream("Outlook returned an unexpected number of event results.")
         item = _calendar_item(results[0])
         return _map_event(item, event_id)
-
-
-class OwsCalendarWindow(CalendarWindowReader):
-    """The default calendar's events overlapping a window, from Outlook Web's ``GetCalendarView``.
-
-    The fallback behind ``list_events``. The answer carries no descriptions, so none are returned.
-    """
-
-    def __init__(self, ows: Ows) -> None:
-        self._ows = ows
-
-    async def list_events(self, *, since: datetime, until: datetime) -> list[CalendarEvent]:
-        body = {
-            "CalendarId": {"__type": "TargetFolderId:#Exchange", "BaseFolderId": CALENDAR_FOLDER},
-            "RangeStart": _ows_time(since),
-            "RangeEnd": _ows_time(until),
-        }
-        with operation("listing calendar events"):
-            items = await self._ows.call_view("GetCalendarView", body, time_zone="UTC")
-        return [_map_event(item, text(_nested_id(item.get("ItemId")))) for item in items]
-
-
-def _ows_time(value: datetime) -> str:
-    """A naive time in the zone that ``TimeZoneContext`` names (UTC)."""
-    return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.000")
 
 
 def _calendar_item(result: dict[str, Any]) -> dict[str, Any]:

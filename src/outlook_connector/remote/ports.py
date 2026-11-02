@@ -3,7 +3,7 @@
 Adapters: remote/graph_mail.py implements MailReader, remote/ows_mail.py implements MailWriter,
 remote/ows_rules.py implements RuleWriter, remote/cloud_settings.py implements SignatureStore,
 remote/graph_calendar.py implements CalendarViewReader, and remote/ows_calendar.py implements
-CalendarWindowReader.
+CalendarItemReader.
 Swapping an adapter (another tenant, a policy change) must not change anything above this file.
 """
 
@@ -166,12 +166,6 @@ class CalendarViewReader(Protocol):
     ) -> CalendarViewPage:
         """``page`` continues a previous page; ``include_body`` asks for each event's description."""
         ...
-
-
-class CalendarWindowReader(Protocol):
-    """The same window through Outlook Web, the fallback: every event, without descriptions."""
-
-    async def list_events(self, *, since: datetime, until: datetime) -> list[CalendarEvent]: ...
 
 
 @dataclass(frozen=True)
