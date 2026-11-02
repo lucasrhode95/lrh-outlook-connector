@@ -79,7 +79,7 @@ A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
    Keep this one process running. Open Microsoft's printed URL and enter each device code as it
    appears, one at a time, using your own account. An agent should relay each prompt immediately.
-   Several codes can be normal: different Microsoft profiles may need separate approvals.
+   Up to three codes are normal, one per Microsoft client the connectors use.
    Do not start another `auth` command for each repository or run sign-ins in parallel.
 
    Credentials go only to Microsoft; tokens stay in the shared encrypted cache

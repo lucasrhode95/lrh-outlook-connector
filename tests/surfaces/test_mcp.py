@@ -106,7 +106,8 @@ async def test_tools_and_annotations(server: FastMCP) -> None:
     draft, send = tools["create_draft"].annotations, tools["send_draft"].annotations
     assert draft and not draft.readOnlyHint and not draft.destructiveHint and not draft.openWorldHint
     assert send and not send.readOnlyHint and send.destructiveHint and send.openWorldHint
-    assert "never attempt to sign in" in (server.instructions or "")
+    assert "Never enter codes or approve sign-ins yourself" in (server.instructions or "")
+    assert "every profile reports Ready" in (server.instructions or "")
     assert "Never confirm on the user's behalf" in (server.instructions or "")
     assert "Drafts are composed once" in (server.instructions or "")
     assert "Never delete first" in (server.instructions or "")

@@ -175,8 +175,13 @@ unknown means check Outlook before repeating. \
 Enable/disable is a separate update. Reordering is refused while any unsupported rule is present.
 - Core mail-data reads use `outlook.graph`. Mail changes, inbox-rule access and native-signature \
   access use `outlook.api`, prepared by `outlook-connector auth`.
-- If a tool says sign-in is required, ask the user to run the quoted `outlook-connector auth` command \
-in a terminal; never attempt to sign in yourself. An "access denied" error is about that item, \
+- If a tool says sign-in is required, run the quoted `outlook-connector auth` command in a terminal \
+if you can; otherwise ask the user to run it. Never enter codes or approve sign-ins yourself. \
+It can show up to three device codes, one after another: tell the user that first. Keep it running \
+and keep reading its output; relay each link and code in chat as it appears, with what to do: open \
+the link, enter the code, pick their work account, approve the sign-in. Never stop it early; it is \
+done when every profile reports Ready. \
+An "access denied" error is about that item, \
 not the sign-in: do not ask the user to sign in again for it.
 """
 

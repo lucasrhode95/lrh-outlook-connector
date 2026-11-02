@@ -73,6 +73,16 @@ Live, 2026-10-03 and 2026-10-04:
 - The Teams client's Graph token (`teams.graph`) carried `Calendars.Read`, `Calendars.Read.Shared`,
   `Calendars.ReadWrite` and `Calendars.ReadWrite.Shared` (2026-10-12); see §3.8.
 
+**Re-sign-in** (live, 2026-11-02, `outlook-connector auth` through `lrh-m365-auth`):
+
+- After the tenant's MFA sign-in frequency had passed, every silent refresh failed with `invalid_grant`
+  `AADSTS50078` ("Presented multi-factor authentication has expired"), for all three clients. An access
+  token already cached kept working until it expired. Only a new device-code sign-in fixes it.
+- One `auth` run needed two device codes: Outlook Mobile (`outlook.graph`), then One Outlook Web
+  (`m365.search`). The three Teams client profiles then came from the identity provider without a code,
+  consistent with Microsoft's shared first-party ("family") refresh tokens (an inference).
+- New access tokens expired about an hour later. Silent refresh renews them until the next MFA deadline.
+
 The account reports `HasArchive=false`.
 
 ## 3. Microsoft Graph
