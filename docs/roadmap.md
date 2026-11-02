@@ -24,18 +24,6 @@ None open.
 
 ### Improvements
 
-#### Refuse `<base>` in passive HTML
-
-An agent drafts an HTML email with `<base href="https://other.example.test/">` and a link to `invoice`.
-The passive-HTML check lets it through. Outlook stores and sends it unchanged, and the recipient's client
-opens `https://other.example.test/invoice`. Outlook.com's link protection even shows that address as
-protected ([research §4.5](api-research.md#45-what-outlook-keeps-of-saved-html)). One tag quietly moves
-every relative link in the message.
-
-**Change:** add `base` to the refused elements in
-[`passive_html.py`](../src/outlook_connector/service/passive_html.py). The check covers draft bodies and
-signatures. `lrh-teams-connector` has the same module, so change both together.
-
 #### A purpose-named calendar profile
 
 You call `list_calendar_events` with `contains=["budget"]` for next week. It works because it borrows the

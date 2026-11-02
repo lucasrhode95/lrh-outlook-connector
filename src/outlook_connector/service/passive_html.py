@@ -21,6 +21,8 @@ ACTIVE_TAGS = frozenset(
 # Elements a browser reads as text (or that never end, as plaintext does). This parser reads the markup
 # after them as tags, so a fragment that ends after one would be checked as tags but rendered as text.
 STATE_CHANGING_TAGS = frozenset({"plaintext", "title", "xmp", "noembed", "noframes", "noscript"})
+# Elements that change where every relative link and image in the message points.
+LINK_CHANGING_TAGS = frozenset({"base"})
 _WHITESPACE = re.compile(r"[\s\x00-\x1f]+")
 
 
@@ -37,7 +39,7 @@ class StartTag:
 
 def passive_start_tags(value: str) -> list[StartTag]:
     """Entry point for HTML the connector sends: refuse declarations, active content, elements that
-    change how the rest of the markup is read, and unfinished markup.
+    change how the rest of the markup is read or where its links point, and unfinished markup.
 
     Returns the start tags, so a caller with more rules need not parse the HTML again. HTMLParser
     never reports an unfinished tag, quote, comment or script; it keeps them in ``rawdata``. The
@@ -64,6 +66,8 @@ def _refuse_tag(tag: StartTag) -> None:
         raise InvalidRequest(
             f"HTML that changes how the rest of the markup is read is not allowed: {tag.name}."
         )
+    if tag.name in LINK_CHANGING_TAGS:
+        raise InvalidRequest(f"HTML that changes where the message's links point is not allowed: {tag.name}.")
     for name, value in tag.attributes:
         compact = _WHITESPACE.sub("", unescape(value or "")).lower()
         if name.startswith("on") or compact.startswith(("javascript:", "vbscript:")):
