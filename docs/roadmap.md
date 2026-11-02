@@ -53,20 +53,39 @@ today. The draft is saved without the PDF, and you attach it by hand in Outlook.
 [requirements §12.1](requirements.md#121-drafts-sending-and-signatures):
 
 - An `attachments` list of local paths on `create_draft`.
-- The files go as non-inline `FileAttachment:#Exchange` entries in the same `CreateItem` call that already
-  carries the signature's inline images
-  ([`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py); shape in
-  [research §4.2](api-research.md#42-item-writes)).
+- After `CreateItem` saves the draft, each file uploads through `CreateAttachmentFromLocalFile` in 14 MiB
+  slices, with a `CancellationId` ([research §4.6](api-research.md#46-message-size-limits); decided
+  2026-11-02). One path for every size, up to Outlook's own send ceiling.
 - Graph read-back confirms each file by name and size.
-- `CreateAttachment` on the saved draft adds files beyond what one request holds.
+- A failed upload leaves no half-built draft: the draft moves to Deleted Items and the call reports which
+  file failed.
 
-Settle while building:
+Settle while building where the send limit comes from. Research §4.6 puts the send ceiling between 34 and
+35.3 MiB: a 34 MiB file was delivered, and 35.3 MiB bounced.
 
-- Where the send limit comes from. [Research §4.6](api-research.md#46-message-size-limits) puts the send
-  ceiling between 34 and 35.3 MiB: a 34 MiB file was delivered, and 35.3 MiB bounced.
-- Whether to upload every file with `CreateAttachmentFromLocalFile` in 14 MiB slices. They worked live: a
-  34 MiB file went up in three slices and read back byte for byte. That reaches Outlook's own send ceiling,
-  while base64 in `CreateItem` stops near 21 MiB per file.
+#### Teams chat id from the join link
+
+`get_calendar_event` for "Weekly sync" returns a Teams join link but no chat id. The agent finds the meeting
+chat in the Teams connector by name and time, and can pick the wrong chat when two share a name.
+
+The join link holds a `19:meeting_…@thread.v2` thread id. It equaled the meeting chat's id in 54 of 56
+tested links ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)), but
+Microsoft does not document the format.
+
+**Change** (decided 2026-11-02):
+
+- Return that id on the event, in a field whose name says it was read from the join link.
+- Add one line to the MCP instructions: the format is undocumented, so check the chat in the Teams connector
+  when something looks odd, such as a different subject or time.
+
+#### Include deleted mail in conversations
+
+You reply to a thread and then delete the original. `get_conversation` returns only your reply; the original
+appears only with `scope={"deleted_items": true}`.
+
+**Change** (decided 2026-11-02): conversations include Deleted Items and Junk by default.
+`scope={"deleted_items": false}` still leaves them out. Listing, search, exports by folder or date and
+read-state changes keep today's default.
 
 #### Secondary calendars
 
@@ -120,28 +139,6 @@ Exchange's text cannot simply carry the image positions. Its `[cid:…]` placeho
 
 - Keep Exchange's reading text and place images in it, validated against the source HTML.
 - Render text locally from the source structure. The current local rendering is not a settled design.
-
-### Meeting chat from the join link
-
-`get_calendar_event` for "Weekly sync" returns a Teams join link but no chat id. The agent finds the meeting
-chat in the Teams connector by name and time, and can pick the wrong chat when two share a name.
-
-No supported lookup works with the connector's tokens: Graph's `onlineMeetings` answers 403. The join link
-holds a `19:meeting_…@thread.v2` thread id, and in 54 of 56 tested links it equaled the meeting chat's id
-([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)). Microsoft does not
-document that format.
-
-**Decide:** expose that thread id as the event's likely Teams chat id, labeled as read from the link, or keep
-the chat lookup to names and times.
-
-### Default conversation scope
-
-You reply to a thread and then delete the original. `get_conversation` returns only your reply. The
-original appears with `scope={"deleted_items": true}`. Conversations leave out Deleted Items and Junk Email
-by default, the same as listing and search, so a conversation can look shorter than it does in Outlook.
-
-**Decide:** keep this default, or include deleted mail in conversations by default, since a conversation
-is usually read for its whole history.
 
 ## Live verification
 
