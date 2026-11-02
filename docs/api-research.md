@@ -356,7 +356,7 @@ A message saved through OWS reads back through Graph with a trailing CRLF on its
 - `GetOwaUserConfiguration` answers with null legacy signature contents; it is not the modern signature list
   (§5.2).
 - Browser: `FindConversation` rows carry cross-folder `GlobalItemIds` and `GlobalMessageCount`.
-- **File attachments (Browser, 2026-10-07; untested from our process):** Outlook Web uploads with
+- **File attachments (Browser, 2026-10-07; live from our process 2026-11-02, see §4.6):** Outlook Web uploads with
   `POST /owa/service.svc/CreateAttachmentFromLocalFile`. The metadata travels as URL-encoded JSON in
   `X-OWA-UrlPostData` (`CreateAttachmentJsonRequest:#Exchange` → `CreateAttachmentRequest:#Exchange`:
   `ParentItemId {Id, ChangeKey}`, `Attachments: [{"__type": "FileAttachment:#Exchange", "Content": "",
@@ -477,6 +477,24 @@ owner's address.
 - **MailTips.** Graph `POST /me/getMailTips` with `MailTipsOptions: "maxMessageSize"` for the user's own
   address returned 37,748,736 bytes (36 MiB), using the Graph mail profile. That figure matches the
   stored-size limit rather than the 35 MB that the NDR states.
+
+**Raw and sliced uploads** (live 2026-11-02, synthetic self-drafts of random bytes, `outlook.api` token;
+slicing contract from Outlook Web source the same day). `CreateAttachmentFromLocalFile` (§4.3) carries the
+file as raw request bytes, not base64:
+
+- **One request.** 25 MiB and 28 MiB (29,360,128 bytes) saved. 29 MiB (30,408,704 bytes) failed with HTTP
+  500 and `Microsoft.AspNetCore.Http.BadHttpRequestException`, and saved nothing. The same cap of about
+  30,000,000 bytes per request body applies; without base64, one request holds about 28.6 MiB of file.
+  The figure equals ASP.NET Core Kestrel's default maximum request body size (an inference; Microsoft does
+  not document it for OWS).
+- **Slices** (Source): Outlook Web cuts a file into 14 MiB (`0xE00000`) slices and sends them one at a
+  time. Each request adds `SliceNumber` (from 0) and `TotalSlices`, and carries the `AttachmentId`
+  returned by the previous slice. Live: a `CancellationId` string is required; without it the first slice
+  answered HTTP 500 `ArgumentNullException`. With it, a 34 MiB file went up in three slices (14, 14 and
+  6 MiB) and read back through Graph as one attachment whose downloaded bytes had the same SHA-256.
+- **Send.** That 34 MiB single-file draft (35,651,584 bytes of file) was sent to the owner and delivered
+  without an NDR. With the 35.3 MiB bounce above, the send ceiling lies between 34 and 35.3 MiB. The
+  NDR's "35 MB" fits 35 MiB rather than 35,000,000 bytes (an inference).
 
 ## 5. Native signatures (Outlook Cloud Settings)
 
