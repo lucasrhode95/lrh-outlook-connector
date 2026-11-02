@@ -72,6 +72,19 @@ def test_elements_that_change_how_the_rest_is_read_are_refused(page: str) -> Non
 
 
 @pytest.mark.parametrize(
+    "page",
+    [
+        '<base href="https://other.example.test/"><a href="invoice">invoice</a>',
+        '<p>x</p><BASE HREF="https://other.example.test/">',
+        "<base target=_blank>",
+    ],
+)
+def test_elements_that_change_where_links_point_are_refused(page: str) -> None:
+    with pytest.raises(InvalidRequest, match="changes where the message's links point"):
+        passive_start_tags(page)
+
+
+@pytest.mark.parametrize(
     ("page", "match"),
     [
         ("<!DOCTYPE html><p>x</p>", "declarations"),
