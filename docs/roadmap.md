@@ -77,15 +77,6 @@ appears only with `scope={"deleted_items": true}`.
 `scope={"deleted_items": false}` still leaves them out. Listing, search, exports by folder or date and
 read-state changes keep today's default.
 
-#### Secondary calendars
-
-You ask: "What is on my Project Beta calendar next week?" `list_calendar_events` reads only the default
-calendar, so the answer is empty. Graph lists your other calendars and reads each one's window, with
-descriptions ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
-
-**Change:** list calendars from `GET /me/calendars`, and let `list_calendar_events` take a calendar,
-read through `/me/calendars/{id}/calendarView`.
-
 #### Reply tree for branch-aware conversations (parked)
 
 Alice sends a proposal. Bob replies to all. Carol forwards it to Dan, who replies to Carol. `get_conversation`

@@ -26,7 +26,7 @@
 
   <rect width="2600" height="1820" fill="#fff"/>
   <text class="title" x="1300" y="70" text-anchor="middle">Outlook connector architecture</text>
-  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail and calendar · OWS changes and rules · Search v2 events · Cloud Settings signatures · minimal local state</text>
+  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail and calendars · OWS changes and rules · Search v2 events · Cloud Settings signatures · minimal local state</text>
 
   <!-- MCP surface. -->
   <rect x="80" y="170" width="790" height="210" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -183,7 +183,7 @@
 
   <rect x="1425" y="1138" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="1437" y="1162" style="font-size:20px">graph_calendar.py</text>
-  <text class="detail" x="1437" y="1188" style="font-size:18px">calendar view + event details (Graph)</text>
+  <text class="detail" x="1437" y="1188" style="font-size:18px">calendar catalog + event views (Graph)</text>
 
   <rect x="660" y="1212" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="672" y="1236" style="font-size:20px">ows.py</text>
@@ -294,8 +294,8 @@
   <rect x="1938" y="1072" width="32" height="26" rx="5" fill="#2b6cb0"/>
   <text class="badge" x="1954" y="1091" text-anchor="middle">G</text>
   <text class="section-title" x="1980" y="1093">Microsoft Graph (documented)</text>
-  <text class="detail" x="1940" y="1126" style="font-size:17px"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan> · <tspan class="code">/me/calendarView</tspan></text>
-  <text class="detail" x="1940" y="1160" style="font-size:19px">$search · $batch · $count · attachments</text>
+  <text class="detail" x="1940" y="1126" style="font-size:17px"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan> · <tspan class="code">/me/calendars</tspan></text>
+  <text class="detail" x="1940" y="1160" style="font-size:19px">default/selected calendarView · $search · $batch · $count</text>
 
   <rect x="1920" y="1196" width="580" height="124" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1938" y="1208" width="32" height="26" rx="5" fill="#b7791f"/>

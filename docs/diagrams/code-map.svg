@@ -79,15 +79,16 @@
 <g><title>Offline sign-in status: the bound account and each profile's cached credential. → TokenProvider.status</title><text class="detail small" x="118" y="983">• <tspan class="code">auth_status</tspan></text></g>
 <text class="group-title" x="368" y="626">Calendar</text>
 <g><title>Exchange events by words through Search v2, one bounded page at a time. → Calendar.search_events</title><text class="detail small" x="368" y="656">• <tspan class="code">search_calendar_events</tspan></text></g>
-<g><title>Events overlapping a window, in time order, Graph first. → CalendarListing.list_events</title><text class="detail small" x="368" y="683">• <tspan class="code">list_calendar_events</tspan></text></g>
-<g><title>One event's agenda, attendees, join URL and attachment metadata. → Calendar.get_event</title><text class="detail small" x="368" y="710">• <tspan class="code">get_calendar_event</tspan></text></g>
-<text class="group-title" x="368" y="749">Drafts and changes</text>
-<g><title>Save explicit text or HTML into Drafts; require Graph read-back. → Writes.create_draft</title><text class="detail small" x="368" y="779">• <tspan class="code">create_draft</tspan></text></g>
-<g><title>Send the existing server draft unchanged, once, after human approval. → Writes.send_draft</title><text class="detail small" x="368" y="806">• <tspan class="code">send_draft</tspan></text></g>
-<g><title>Mark messages (or whole conversations) read or unread; read receipts are never sent. → Mutations.set_read</title><text class="detail small" x="368" y="833">• <tspan class="code">set_read_state</tspan></text></g>
-<g><title>Flag or unflag messages. A result per message. → Mutations.set_flag</title><text class="detail small" x="368" y="860">• <tspan class="code">set_flag</tspan></text></g>
-<g><title>Move messages to a folder (not Deleted Items). A result per message. → Mutations.move</title><text class="detail small" x="368" y="887">• <tspan class="code">move_messages</tspan></text></g>
-<g><title>Move messages to Deleted Items; never a permanent delete. → Mutations.delete</title><text class="detail small" x="368" y="914">• <tspan class="code">delete_messages</tspan></text></g>
+<g><title>Calendar ids, names and default status. → CalendarListing.list_calendars</title><text class="detail small" x="368" y="683">• <tspan class="code">list_calendars</tspan></text></g>
+<g><title>Events overlapping a window, in time order, with an optional calendar id. → CalendarListing.list_events</title><text class="detail small" x="368" y="710">• <tspan class="code">list_calendar_events</tspan></text></g>
+<g><title>One event's agenda, attendees, join URL and attachment metadata. → Calendar.get_event</title><text class="detail small" x="368" y="737">• <tspan class="code">get_calendar_event</tspan></text></g>
+<text class="group-title" x="368" y="776">Drafts and changes</text>
+<g><title>Save explicit text or HTML into Drafts; require Graph read-back. → Writes.create_draft</title><text class="detail small" x="368" y="806">• <tspan class="code">create_draft</tspan></text></g>
+<g><title>Send the existing server draft unchanged, once, after human approval. → Writes.send_draft</title><text class="detail small" x="368" y="833">• <tspan class="code">send_draft</tspan></text></g>
+<g><title>Mark messages (or whole conversations) read or unread; read receipts are never sent. → Mutations.set_read</title><text class="detail small" x="368" y="860">• <tspan class="code">set_read_state</tspan></text></g>
+<g><title>Flag or unflag messages. A result per message. → Mutations.set_flag</title><text class="detail small" x="368" y="887">• <tspan class="code">set_flag</tspan></text></g>
+<g><title>Move messages to a folder (not Deleted Items). A result per message. → Mutations.move</title><text class="detail small" x="368" y="914">• <tspan class="code">move_messages</tspan></text></g>
+<g><title>Move messages to Deleted Items; never a permanent delete. → Mutations.delete</title><text class="detail small" x="368" y="941">• <tspan class="code">delete_messages</tspan></text></g>
 <text class="group-title" x="650" y="626">Inbox rules</text>
 <g><title>Rules in priority order; unsupported rules are read-only. → Rules.list_rules</title><text class="detail small" x="650" y="656">• <tspan class="code">list_rules</tspan></text></g>
 <g><title>Without a code: a proposal. With the user's code: one write, read back. → Rules.create_rule</title><text class="detail small" x="650" y="683">• <tspan class="code">create_rule</tspan></text></g>
@@ -320,7 +321,7 @@
 <g><title>Builds Graph URLs and query options; graph_mapping.py converts every Graph shape into domain models.</title><text class="detail" x="678" y="3047">routes · JSON → models: <tspan class="code">graph_mapping.py</tspan></text></g>
 <g><title>$search returns regular ids; one translateExchangeIds call per page turns them into the immutable ids every other call uses.</title><text class="detail" x="678" y="3074"><tspan class="code">$search</tspan> ids → immutable ids</text></g>
 <text class="section-title" x="678" y="3128"><tspan class="code">GraphCalendarView</tspan><tspan class="detail" dx="12">graph_calendar.py</tspan></text>
-<g><title>/me/calendarView with UTC times and text bodies, next links followed; ids converted to the Outlook Web form.</title><text class="detail" x="678" y="3165"><tspan class="code">/me/calendarView</tspan> · UTC · next links</text></g>
+<g><title>Lists calendars and reads default or selected calendar views in UTC; next links are checked against the selected calendar.</title><text class="detail" x="678" y="3165"><tspan class="code">/me/calendars</tspan> · default/selected views</text></g>
 <g><title>Built on its own Graph client with the profile in config.CALENDAR_PROFILE, because the Outlook Graph profile has no calendar scope.</title><text class="detail" x="678" y="3192">profile <tspan class="code">outlook.calendar</tspan> (<tspan class="code">CALENDAR_PROFILE</tspan>)</text></g>
 
 <rect x="1240" y="2975" width="560" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -435,7 +436,7 @@
 <text class="section-title" x="1978" y="2628"><tspan class="code">Microsoft Graph</tspan></text>
 <g><title>Documented API.</title><text class="detail" x="1938" y="2665"><tspan class="code">graph.microsoft.com/v1.0</tspan></text></g>
 <g><title>Folders, messages, conversations (conversationId filter).</title><text class="detail" x="1938" y="2692"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan></text></g>
-<g><title>The default calendar's events in a window, under the outlook.calendar profile.</title><text class="detail" x="1938" y="2719"><tspan class="code">/me/calendarView</tspan></text></g>
+<g><title>Calendar catalog and default calendar window under the outlook.calendar profile.</title><text class="detail" x="1938" y="2719"><tspan class="code">/me/calendars</tspan> · default view</text></g>
 <g><title>Search, up to 20 requests in one, server counts.</title><text class="detail" x="1938" y="2746"><tspan class="code">$search</tspan> · <tspan class="code">$batch</tspan> · <tspan class="code">$count</tspan></text></g>
 <g><title>Attachment bytes, the original .eml, and id translation for $search hits.</title><text class="detail" x="1938" y="2773">attachments · MIME · <tspan class="code">translateExchangeIds</tspan></text></g>
 
