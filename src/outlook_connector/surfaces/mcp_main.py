@@ -84,12 +84,13 @@ belong to the Teams connector. Event-to-Teams linkage is not inferred when Searc
 identifier.
 - Scope is one object with independent keys: `scope.sent_items` (default true) includes Sent Items, \
 Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; \
-`scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is \
-always included; subfolders count with their parent. True shows more mail, false filters more. Use \
+`scope.deleted_items` includes Deleted Items and Junk Email. It defaults to false for list, search, \
+exports and read-state changes. `get_conversation` and conversation-size lookups include them by \
+default; pass `scope.deleted_items=false` to leave them out. A folder you name is always included; \
+subfolders count with their parent. True shows more mail, false filters more. Use \
 `scope.sent_items=false` for "the latest mail I received", including mail that rules filed into \
-other folders. Export scope filters folder/date windows; conversations follow scope.deleted_items but keep \
-sent and meeting mail, and explicit message ids are authoritative. \
-coverage.excluded counts what was left out.
+other folders. Export scope filters folder/date windows and applies its own deleted-items default to \
+conversation selections. Explicit message ids are authoritative. coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, grouped into conversations \
 or selected by folder/date-window/conversation export, and \
@@ -122,13 +123,14 @@ your own file tools; list_attachments adds sizes and types. Downloads are limite
 attachment, download it directly from Outlook. Cloud links are not downloaded. save_message_mime saves \
 the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
-are included and merged. Folder/date-window selections follow scope; conversations follow \
-scope.deleted_items but keep sent and meeting mail. \
-Scope alone does not select anything.
+are included and merged. Folder/date-window selections follow scope; conversation selections follow \
+the export scope, whose default still leaves Deleted Items and Junk out. Sent and meeting mail stay \
+included. Scope alone does not select anything.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
 and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
-2,000 messages (`limit` lowers that). Scope alone is not a selection; conversations follow \
-scope.deleted_items, and explicit message ids are authoritative. For a large period, prefer \
+2,000 messages (`limit` lowers that). Scope alone is not a selection; conversation selections follow \
+the export's deleted-items default (false), and explicit message ids are authoritative. For a large \
+period, prefer \
 a folder/date-window export over enumerating ids. Quoted history and attachment files are included by \
 default; pass body="unique" to omit quoted history and include_attachments=false to omit files. \
 format="jsonl" \
@@ -486,7 +488,9 @@ def build_server(context: AppContext) -> FastMCP:
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
         are exported once. Sent/meeting scope narrows only folder/date-window selections.
-        Conversations follow scope.deleted_items; explicit message ids are authoritative.
+        Conversation selections follow scope.deleted_items, which defaults to false for exports.
+        get_conversation itself includes Deleted Items and Junk by default. Explicit message ids are
+        authoritative.
         Full bodies including quoted history and attachment files are included by default. Set
         body="unique" to omit quoted history, or include_attachments=false to omit attachment files.
         Scope alone is not a selection.
