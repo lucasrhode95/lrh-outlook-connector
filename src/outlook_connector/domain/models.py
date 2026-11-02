@@ -221,6 +221,12 @@ class CalendarAttachment(Compact):
     file_name: str | None = None
 
 
+class CalendarInfo(Compact):
+    id: str
+    name: str
+    is_default: bool
+
+
 class CalendarEvent(Compact):
     """Exchange event; id is the Search v2/OWS item reference when the service supplies it."""
 

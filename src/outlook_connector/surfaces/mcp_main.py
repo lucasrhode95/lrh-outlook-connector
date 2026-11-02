@@ -25,6 +25,7 @@ from outlook_connector.domain.models import (
     Attachment,
     BodyKind,
     CalendarEvent,
+    CalendarInfo,
     CalendarListResult,
     CalendarSearchResult,
     CombineMode,
@@ -61,6 +62,10 @@ subject:/from:/to: terms) and list_messages for recent mail or a date window (fo
 omit it for the whole mailbox). Both return message ids and conversation ids; search hits also \
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
+- Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
+calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
+- Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
+calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
 - Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
 order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
 between these dates", and for text in subjects or descriptions within those dates (contains: a list \
@@ -311,6 +316,11 @@ def build_server(context: AppContext) -> FastMCP:
         return await (await services()).calendar.search_events(query, limit=limit, cursor=cursor)
 
     @mcp.tool(annotations=READ_ONLY)
+    async def list_calendars() -> list[CalendarInfo]:
+        """List calendar ids and names, and identify the default calendar."""
+        return await (await services()).calendar_listing.list_calendars()
+
+    @mcp.tool(annotations=READ_ONLY)
     async def list_calendar_events(
         since: Annotated[datetime, Field(description="Window start (ISO 8601); a naive time is UTC.")],
         until: Annotated[
@@ -332,10 +342,14 @@ def build_server(context: AppContext) -> FastMCP:
             int, Field(description="Matching events to collect before stopping: 1 to 200.")
         ] = 50,
         cursor: str | None = None,
+        calendar_id: Annotated[
+            str | None,
+            Field(description="Calendar id from list_calendars; omit to use the default calendar."),
+        ] = None,
     ) -> CalendarListResult:
         """Calendar events overlapping a window, in time order, with recurring meetings expanded per
-        occurrence, read through Graph. Times are UTC. With a cursor, the window and filters come from
-        the cursor."""
+        occurrence, read through Graph. Times are UTC. Pass calendar_id from list_calendars for another
+        calendar. With a cursor, the window, calendar and filters come from the cursor."""
         return await (await services()).calendar_listing.list_events(
             since=since,
             until=until,
@@ -343,6 +357,7 @@ def build_server(context: AppContext) -> FastMCP:
             include_body=include_body,
             limit=limit,
             cursor=cursor,
+            calendar_id=calendar_id,
         )
 
     @mcp.tool(annotations=READ_ONLY)

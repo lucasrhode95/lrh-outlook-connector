@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
 
 from outlook_connector.domain.errors import InvalidRequest, Upstream
-from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, Recipient
+from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, CalendarInfo, Recipient
 from outlook_connector.remote import ids
 from outlook_connector.remote.calendar_mapping import (
     boolean,
@@ -73,9 +73,11 @@ class GraphCalendarView:
         page_size: int,
         page: str | None,
         include_body: bool,
+        calendar_id: str | None = None,
     ) -> CalendarViewPage:
-        """Entry point: a continuation link must be this view for this window; cursors can carry any link."""
-        if page is not None and not _continues_window(page, since, until):
+        """A continuation link must match this calendar and window before Graph receives it."""
+        view_path = _view_path(calendar_id)
+        if page is not None and not _continues_window(page, since, until, view_path):
             raise InvalidRequest("This cursor does not belong to this calendar window.")
         prefer = (PREFER_UTC, PREFER_TEXT_BODY)
         with operation("listing calendar events"):
@@ -88,10 +90,28 @@ class GraphCalendarView:
                     "$select": select,
                     "$orderby": ORDER_BY,
                 }
-                items, link = await self._graph.page(VIEW_PATH, params, prefer=prefer)
+                items, link = await self._graph.page(view_path, params, prefer=prefer)
             else:
                 items, link = await self._graph.page(page, prefer=prefer)
         return CalendarViewPage(events=[_event(item) for item in items], next_link=link)
+
+    async def list_calendars(self) -> list[CalendarInfo]:
+        with operation("listing calendars"):
+            items, _ = await self._graph.collect(
+                "/me/calendars", {"$select": "id,name,isDefaultCalendar"}, max_items=None
+            )
+        calendars: list[CalendarInfo] = []
+        for item in items:
+            calendar_id, name = text(item.get("id")), text(item.get("name"))
+            if calendar_id is not None and name is not None:
+                calendars.append(
+                    CalendarInfo(
+                        id=calendar_id,
+                        name=name,
+                        is_default=boolean(item.get("isDefaultCalendar")) is True,
+                    )
+                )
+        return calendars
 
 
 class GraphCalendarItems:
@@ -138,13 +158,20 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _continues_window(link: str, since: datetime, until: datetime) -> bool:
+def _view_path(calendar_id: str | None) -> str:
+    """The default calendar has a shortcut route; other calendars use their Graph id in the path."""
+    if calendar_id is None:
+        return VIEW_PATH
+    return f"/me/calendars/{quote(calendar_id, safe='')}/calendarView"
+
+
+def _continues_window(link: str, since: datetime, until: datetime, view_path: str) -> bool:
     """Whether a next link is this view, for this window, with a page size this module would ask for.
 
     Cursors are not signed, so the link is checked against the window the caller passes in.
     """
     parts = urlsplit(link)
-    if f"{parts.scheme}://{parts.netloc}{parts.path}" != f"{GRAPH_ROOT}{VIEW_PATH}":
+    if f"{parts.scheme}://{parts.netloc}{parts.path}" != f"{GRAPH_ROOT}{view_path}":
         return False
     query = parse_qs(parts.query)
     try:

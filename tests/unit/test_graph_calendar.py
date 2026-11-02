@@ -119,6 +119,78 @@ async def test_calendar_view_request_asks_for_utc_text_and_the_listed_fields() -
     assert page.next_link is None and len(page.events) == 1
 
 
+async def test_secondary_calendar_view_uses_its_id_in_the_graph_route_and_cursor() -> None:
+    requests: list[httpx.Request] = []
+    next_link = (
+        "https://graph.microsoft.com/v1.0/me/calendars/synthetic%20calendar/calendarView?"
+        "startDateTime=2026-10-12T03%3A00%3A00Z&endDateTime=2026-10-19T03%3A00%3A00Z&$top=10"
+        "&$skiptoken=synthetic"
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return _json_page([_synthetic_event()], link=next_link)
+
+    view, _ = _view(handler)
+    first = await view.list_events(
+        since=SINCE,
+        until=UNTIL,
+        page_size=10,
+        page=None,
+        include_body=False,
+        calendar_id="synthetic calendar",
+    )
+    second = await view.list_events(
+        since=SINCE,
+        until=UNTIL,
+        page_size=10,
+        page=first.next_link,
+        include_body=False,
+        calendar_id="synthetic calendar",
+    )
+
+    assert requests[0].url.raw_path.startswith(b"/v1.0/me/calendars/synthetic%20calendar/calendarView")
+    assert requests[1].url.raw_path.split(b"?", 1)[0] == requests[0].url.raw_path.split(b"?", 1)[0]
+    assert second.next_link == next_link
+    with pytest.raises(InvalidRequest):
+        await view.list_events(
+            since=SINCE,
+            until=UNTIL,
+            page_size=10,
+            page=next_link,
+            include_body=False,
+            calendar_id="different-calendar",
+        )
+    assert len(requests) == 2
+
+
+async def test_calendar_catalog_lists_id_name_and_default_status() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "value": [
+                    {"id": "synthetic-default", "name": "Calendar", "isDefaultCalendar": True},
+                    {"id": "synthetic-secondary", "name": "Planning", "isDefaultCalendar": False},
+                ]
+            },
+        )
+
+    view, tokens = _view(handler)
+    calendars = await view.list_calendars()
+
+    assert requests[0].url.path == "/v1.0/me/calendars"
+    assert requests[0].url.params["$select"] == "id,name,isDefaultCalendar"
+    assert tokens.profiles == [config.CALENDAR_PROFILE]
+    assert [(calendar.id, calendar.name, calendar.is_default) for calendar in calendars] == [
+        ("synthetic-default", "Calendar", True),
+        ("synthetic-secondary", "Planning", False),
+    ]
+
+
 async def test_descriptions_are_selected_only_when_asked_for() -> None:
     requests: list[httpx.Request] = []
 

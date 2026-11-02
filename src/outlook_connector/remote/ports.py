@@ -17,6 +17,7 @@ from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import (
     Attachment,
     CalendarEvent,
+    CalendarInfo,
     DraftMessage,
     Folder,
     InboxRule,
@@ -160,10 +161,21 @@ class CalendarViewPage:
 
 
 class CalendarViewReader(Protocol):
-    """Events overlapping [since, until) on the default calendar, occurrences expanded, in time order."""
+    """The user's calendars and their event views, read from Graph."""
+
+    async def list_calendars(self) -> list[CalendarInfo]:
+        """List calendar ids and names, including which one is the default."""
+        ...
 
     async def list_events(
-        self, *, since: datetime, until: datetime, page_size: int, page: str | None, include_body: bool
+        self,
+        *,
+        since: datetime,
+        until: datetime,
+        page_size: int,
+        page: str | None,
+        include_body: bool,
+        calendar_id: str | None = None,
     ) -> CalendarViewPage:
         """``page`` continues a previous page; ``include_body`` asks for each event's description."""
         ...
