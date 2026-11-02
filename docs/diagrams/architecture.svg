@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1820" viewBox="0 0 2600 1820" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector architecture</title>
-  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads, verification and calendar windows and event details; OWS handles mail changes and inbox rules; Search v2 finds calendar events; Cloud Settings handles native signatures. Tokens come from Entra ID through the shared lrh-m365-auth cache, encrypted and locked across processes. The store keeps only the folder cache and account binding.</desc>
+  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads, draft verification and calendar windows and event details; OWS handles mail changes, sliced local draft file uploads and inbox rules; Search v2 finds calendar events; Cloud Settings handles native signatures. Tokens come from Entra ID through the shared lrh-m365-auth cache, encrypted and locked across processes. The store keeps only the folder cache and account binding.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -301,8 +301,8 @@
   <rect x="1938" y="1208" width="32" height="26" rx="5" fill="#b7791f"/>
   <text class="badge" x="1954" y="1227" text-anchor="middle">O</text>
   <text class="section-title" x="1980" y="1229">Outlook Web App OWS (private)</text>
-  <text class="detail" x="1940" y="1262" style="font-size:19px">CreateItem · UpdateItem · MoveItem · DeleteItem</text>
-  <text class="detail" x="1940" y="1296" style="font-size:19px">GetItem · inbox rules</text>
+  <text class="detail" x="1940" y="1262" style="font-size:19px">CreateItem · CreateAttachmentFromLocalFile</text>
+  <text class="detail" x="1940" y="1296" style="font-size:19px">UpdateItem · MoveItem · DeleteItem · inbox rules</text>
 
   <rect x="1920" y="1332" width="580" height="80" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <rect x="1938" y="1344" width="32" height="26" rx="5" fill="#b7791f"/>
