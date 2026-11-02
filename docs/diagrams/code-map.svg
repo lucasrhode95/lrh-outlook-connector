@@ -69,7 +69,7 @@
 <g><title>Messages newest first, from the server; folder optional (whole mailbox), date window, scope, cursor. → Mailbox.list_messages</title><text class="detail small" x="118" y="683">• <tspan class="code">list_messages</tspan></text></g>
 <g><title>Server-side search of mail only; hits grouped by conversation in rank order, with each conversation's message_count. → Mailbox.search</title><text class="detail small" x="118" y="710">• <tspan class="code">search_messages</tspan></text></g>
 <g><title>A whole conversation across folders, oldest first; body=unique strips quoted history. → Conversations.get_conversation</title><text class="detail small" x="118" y="737">• <tspan class="code">get_conversation</tspan></text></g>
-<g><title>One message's body (full/unique/html) with offset continuation, plus attachment metadata. → Mailbox.get_message</title><text class="detail small" x="118" y="764">• <tspan class="code">get_message</tspan></text></g>
+<g><title>One message's body with offset continuation; full/unique use Exchange text and inline images follow as markers. → Mailbox.get_message</title><text class="detail small" x="118" y="764">• <tspan class="code">get_message</tspan></text></g>
 <text class="group-title" x="118" y="803">Files</text>
 <g><title>Attachment metadata; kind=item is a forwarded email, kind=reference a cloud link. → Mailbox.attachments</title><text class="detail small" x="118" y="833">• <tspan class="code">list_attachments</tspan></text></g>
 <g><title>Save one attachment as a local file and return its path (forwarded emails as .eml). → Files.download_attachment</title><text class="detail small" x="118" y="860">• <tspan class="code">download_attachment</tspan></text></g>
@@ -146,7 +146,7 @@
 <text class="group-title" x="359" y="1251">Messages</text>
 <g><title>Newest first. Without a folder: whole mailbox, or folder by folder when left-out folders hold ≥ 66% of the mailbox. Copies merged, meeting mail optional, cursor.</title><text class="detail" x="359" y="1281">• <tspan class="code">list_messages</tspan></text></g>
 <g><title>Server-side $search, hits grouped by conversation, ids translated to immutable ids.</title><text class="detail" x="359" y="1308">• <tspan class="code">search</tspan></text></g>
-<g><title>One message's body with offset continuation, and its attachment metadata.</title><text class="detail" x="359" y="1335">• <tspan class="code">get_message</tspan></text></g>
+<g><title>One message's Exchange text with attachment markers after the body, and offset continuation.</title><text class="detail" x="359" y="1335">• <tspan class="code">get_message</tspan></text></g>
 <g><title>Attachment metadata of one message, or of many at once (batched).</title><text class="detail" x="359" y="1362">• <tspan class="code">attachments(_many)</tspan></text></g>
 <g><title>How many messages each conversation has, counted the way get_conversation lists them.</title><text class="detail" x="359" y="1389">• <tspan class="code">conversation_sizes</tspan></text></g>
 <text class="muted" x="118" y="1496">uses <tspan class="code">MailReader</tspan> · <tspan class="code">Store</tspan> · <tspan class="code">cursors</tspan> · <tspan class="code">scope</tspan></text>
@@ -167,7 +167,7 @@
 <text class="group-title" x="1265" y="1251">Method</text>
 <g><title>Export a selection (conversations, messages, a folder or date window) to one local file: TXT for people or JSONL for agents, a ZIP when there are several files or attachments.</title><text class="detail" x="1265" y="1281">• <tspan class="code">export(request)</tspan></text></g>
 <text class="group-title" x="1265" y="1320">Modules</text>
-<g><title>formatter.py renders TXT/JSONL; attachments.py is the selection policy and safe file names; packaging.py builds the one output file.</title><text class="detail" x="1265" y="1350">• <tspan class="code">formatter</tspan> · <tspan class="code">attachments</tspan> · <tspan class="code">packaging</tspan></text></g>
+<g><title>formatter.py renders TXT/JSONL; attachments.py lists known attachments and provides safe file names; packaging.py builds the one output file.</title><text class="detail" x="1265" y="1350">• <tspan class="code">formatter</tspan> · <tspan class="code">attachments</tspan> · <tspan class="code">packaging</tspan></text></g>
 <text class="muted" x="1265" y="1496">uses <tspan class="code">Conversations</tspan> · <tspan class="code">failures</tspan> · <tspan class="code">localfiles</tspan></text>
 
 <rect x="100" y="1532" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>

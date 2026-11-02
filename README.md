@@ -144,11 +144,11 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `list_calendar_events` | [`service/calendar_listing.py`](src/outlook_connector/service/calendar_listing.py) | List the events overlapping a window in time order, optionally for a selected calendar |
 | `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, response, join URL, link-derived Teams chat id and attachment metadata through Graph |
 | `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation; Deleted Items and Junk are included by default |
-| `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
+| `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read Exchange's text and list inline images after it |
 | `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List all attachment metadata: file names, sizes, types and inline image IDs |
 | `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's or event's files locally by their listed names |
 | `save_message_mime` | [`service/files.py`](src/outlook_connector/service/files.py) | Save the original message as an .eml file |
-| `export_messages` | [`service/export/`](src/outlook_connector/service/export/) | Export conversations, messages or a folder/date window |
+| `export_messages` | [`service/export/`](src/outlook_connector/service/export/) | Export conversations, messages or a folder/date window, including every listed inline file |
 | `list_rules`, `create_rule`, `update_rule`, `reorder_rules`, `delete_rule` | [`service/rules.py`](src/outlook_connector/service/rules.py) | Read rules or propose and confirm supported changes |
 | `list_signatures`, `get_signature`, `create_signature`, `update_signature`, `delete_signature`, `set_default_signature` | [`service/signatures.py`](src/outlook_connector/service/signatures.py) | Read and manage native Outlook signatures |
 | `create_draft`, `send_draft` | [`service/writes.py`](src/outlook_connector/service/writes.py) | Create drafts and send an existing draft |

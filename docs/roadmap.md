@@ -24,24 +24,6 @@ None open.
 
 ### Improvements
 
-#### Read Exchange's text and list inline images
-
-A newsletter has a table, a quoted reply and two inline charts. `get_message` reads it in one of two ways
-today. If the message has inline files, the connector renders the source HTML itself and puts
-`[Image: chart.png]` where each chart sits. If not, or if its parser gives up on a construct such as an
-Outlook-only conditional comment, it reads Exchange's own text. So two similar messages can read
-differently, and the renderer in
-[`html_body.py`](../src/outlook_connector/remote/html_body.py) keeps collecting edge cases.
-
-**Change** (decided 2026-11-02):
-
-- Every message reads Exchange's text conversion. Exchange's own image placeholders (`[cid:…]` or
-  `[alt text]`) stay where Exchange wrote them, untouched
-  ([research §3.6](api-research.md#html-to-text-body)).
-- Inline images are listed after the body as `[Image: name]`, like other attachments, with no position.
-- Remove the local renderer and its ordered body parts where nothing else needs them. Exports then
-  include every inline file the message lists, not only those the selected body references.
-
 The Teams connector keeps placing `[Image: name]` in its text, and that is no inconsistency: Teams serves
 message bodies only as HTML, with no server text, so it must read that HTML anyway, and each image is a
 typed `<img>` tag. The shared part stays the same in both: the `[Image: name]` marker, safe unique names

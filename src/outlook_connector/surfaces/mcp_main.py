@@ -105,17 +105,18 @@ through them (get_conversation still returns the whole conversation).
 names the folders of the other copies.
 - Reading: messages expose one received_at timestamp (Graph receive time, with send time as fallback); \
 get_conversation returns a whole conversation across folders, oldest first, with full bodies including \
-quoted history by default; pass body="unique" to omit quoted reply history. A body that could not be \
-fetched sets export_error on its \
-message; callers can count messages carrying export_error without inspecting their body text. \
-get_message reads one message with offset/max_chars continuation.
+quoted history by default; pass body="unique" to omit quoted reply history. Full and unique bodies use \
+Exchange's text conversion unchanged, including its [cid:…] and [alt text] placeholders. Inline images \
+follow the body as [Image: name]. A body that could not be fetched sets export_error on its message; \
+callers can count messages carrying export_error without inspecting their body text. get_message reads \
+one message with offset/max_chars continuation; body="html" returns Graph's HTML unchanged.
 - Always read `coverage` before treating results as complete; follow `cursor` for more. \
 list_messages(include_total=true) gives the server's count for the window, to plan large reads. \
 When Junk Email and Deleted Items hold most of the mailbox, a mailbox-wide list_messages reads folder \
 by folder (full pages, a bit slower) and coverage.notes says so: pass that note on to the user.
 - Mail deleted on the server is gone: nothing is kept locally.
-- Attachments: [Image: name] marks an inline image at its source position; [File: name], \
-[Message: name.eml] for a forwarded message and [Link: name] for a cloud link follow the body. \
+- Attachments: [Image: name] lists an inline image after the body; [File: name], \
+[Message: name.eml] for a forwarded message and [Link: name] for a cloud link also follow the body. \
 download_attachment saves \
 files by those names (all of them when names is omitted) and returns local paths for you to read with \
 your own file tools; list_attachments adds sizes and types. Downloads are limited to 150 MiB; for a larger \
@@ -137,9 +138,9 @@ writes one JSON record per message (ids, dates, folder, people, body): use it to
 "txt" is for people. Read messages_excluded and error_summary in the result: parts that could not \
 be exported are marked [EXPORT ERROR] in TXT and carry an export_error object in JSONL (step, \
 status, likely_cause, retry, fix).
-- Inline export images follow references in the selected source body. If source structure or a content \
-id is unavailable, the file is kept and listed without an assumed body position. Flattened text and \
-marker-like prose never establish attachment identity or position.
+- Export text keeps Exchange's placeholders and appends every listed inline-image marker after the \
+body. Exports include every listed inline file when attachments are enabled, even if its placeholder \
+does not appear in the selected body.
 - Throttling: Microsoft Graph limits each mailbox to about 4 concurrent requests and 10,000 requests \
 per 10 minutes (a $batch counts each of its up to 20 items). This connector paces and retries for you. \
 Do not call these tools in parallel, and prefer one large folder/date-window export or a bigger limit over \
@@ -392,7 +393,8 @@ def build_server(context: AppContext) -> FastMCP:
         """A whole conversation, oldest first; includes Deleted Items and Junk by default.
 
         Empty or partial scope objects retain these defaults for omitted keys.
-        Set scope.deleted_items=false to leave them out. Full bodies include quoted history by default;
+        Set scope.deleted_items=false to leave them out. Full and unique bodies use Exchange's text
+        conversion; inline images follow the body as [Image: name]. Full includes quoted history;
         unique omits it."""
         return await (await services()).conversations.get_conversation(
             conversation_id,
@@ -412,7 +414,10 @@ def build_server(context: AppContext) -> FastMCP:
             int, Field(description="Maximum body size from 1 to 200000 characters.")
         ] = 20_000,
     ) -> MessageContent:
-        """One message's body (full by default; unique or html on request) plus attachment metadata."""
+        """One message's body (full by default; unique or html on request) plus attachment metadata.
+
+        Full and unique use Exchange's text conversion unchanged; inline images follow as [Image: name].
+        body="html" returns Graph's HTML unchanged."""
         return await (await services()).mailbox.get_message(
             message_id, body=body, offset=offset, max_chars=max_chars
         )
@@ -495,9 +500,8 @@ def build_server(context: AppContext) -> FastMCP:
         body="unique" to omit quoted history, or include_attachments=false to omit attachment files.
         Scope alone is not a selection.
         The result counts exclusions and body gaps.
-        Inline images follow typed references extracted from the selected source body before rendering.
-        If source structure or content ids are unavailable, the files are retained with no assumed
-        body position.
+        Exchange's text and placeholders are kept unchanged; inline images are listed after the body.
+        Every listed inline file is included when attachments are enabled.
         """
         request = ExportRequest(
             conversation_ids=conversation_ids or [],
