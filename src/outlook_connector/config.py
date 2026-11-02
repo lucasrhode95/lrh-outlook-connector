@@ -17,7 +17,7 @@ CLI_NAME = "outlook-connector"
 # Shared-cache profile whose Graph token carries calendar read scopes (Calendars.Read). The Outlook
 # Graph profile has none. Calendar reads still belong to Outlook; this only chooses the token.
 # Verified live 2026-10-12 (docs/api-research.md §3.8).
-CALENDAR_PROFILE = "teams.graph"
+CALENDAR_PROFILE = "outlook.calendar"
 
 
 def data_dir() -> Path:
