@@ -10,7 +10,7 @@ from outlook_connector import config
 from outlook_connector.domain.errors import InvalidRequest, Upstream
 from outlook_connector.remote import ids
 from outlook_connector.remote.graph import Graph
-from outlook_connector.remote.graph_calendar import GraphCalendarView
+from outlook_connector.remote.graph_calendar import GraphCalendarItems, GraphCalendarView
 from outlook_connector.remote.transport import Transport
 from tests.fakes.graph_fake import StaticTokens
 
@@ -41,6 +41,13 @@ def _view(handler: Any) -> tuple[GraphCalendarView, RecordingTokens]:
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     transport = Transport(tokens, client=client, sleep=_no_sleep)
     return GraphCalendarView(Graph(transport, profile=config.CALENDAR_PROFILE)), tokens
+
+
+def _items(handler: Any) -> tuple[GraphCalendarItems, RecordingTokens]:
+    tokens = RecordingTokens()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    transport = Transport(tokens, client=client, sleep=_no_sleep)
+    return GraphCalendarItems(Graph(transport, profile=config.CALENDAR_PROFILE)), tokens
 
 
 def _synthetic_event(**overrides: Any) -> dict[str, Any]:
@@ -234,3 +241,63 @@ async def test_a_refused_calendar_read_is_an_upstream_error_the_listing_can_fall
 
     with pytest.raises(Upstream):
         await view.list_events(since=SINCE, until=UNTIL, page_size=5, page=None, include_body=False)
+
+
+async def test_event_hydration_uses_graph_and_lists_attachments_even_when_flag_is_false() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/attachments"):
+            return httpx.Response(
+                200,
+                json={
+                    "value": [
+                        {
+                            "id": "synthetic-attachment",
+                            "name": "agenda.txt",
+                            "contentType": "text/plain",
+                            "size": 41,
+                            "isInline": False,
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json=_synthetic_event(
+                hasAttachments=False,
+                body={"contentType": "text", "content": "Synthetic agenda"},
+                responseStatus={"response": "accepted"},
+            ),
+        )
+
+    items, tokens = _items(handler)
+    event = await items.get_event(ids.to_ows("synthetic-id_x"))
+
+    assert [request.url.path for request in requests] == [
+        "/v1.0/me/events/synthetic-id_x",
+        "/v1.0/me/events/synthetic-id_x/attachments",
+    ]
+    assert all('IdType="ImmutableId"' in request.headers["prefer"] for request in requests)
+    assert requests[0].headers["prefer"].find('outlook.body-content-type="text"') >= 0
+    assert requests[1].url.params["$select"] == "id,name,contentType,size,isInline"
+    assert tokens.profiles == [config.CALENDAR_PROFILE, config.CALENDAR_PROFILE]
+    assert event.id == ids.to_ows("synthetic-id_x")
+    assert event.my_response_type == "Accept" and event.body_text == "Synthetic agenda"
+    assert event.attachments[0].name == "agenda.txt" and event.attachments[0].size == 41
+
+
+async def test_event_attachment_download_uses_the_graph_event_route(tmp_path: Any) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, content=b"synthetic-file")
+
+    items, tokens = _items(handler)
+    size = await items.download_attachment("synthetic-id/x", "synthetic-attachment", tmp_path / "event.txt")
+
+    assert size == len(b"synthetic-file")
+    assert requests[0].url.path == "/v1.0/me/events/synthetic-id-x/attachments/synthetic-attachment/$value"
+    assert tokens.profiles == [config.CALENDAR_PROFILE]

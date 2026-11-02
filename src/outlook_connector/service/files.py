@@ -17,14 +17,38 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
-from outlook_connector.domain.models import Attachment
-from outlook_connector.service.export.attachments import safe_name
+from outlook_connector.domain.models import Attachment, CalendarAttachment
+from outlook_connector.remote.ports import CalendarItemReader
+from outlook_connector.service.export.attachments import dedupe, safe_name
 from outlook_connector.service.localfiles import claim, kept_dir
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.markers import DOWNLOADABLE_KINDS
 
 MAX_NAMES = 100
 _NOT_A_FILE = "a cloud link with no file here; open it from the message in Outlook"
+
+
+def _event_attachments(rows: list[CalendarAttachment], event_id: str) -> list[Attachment]:
+    """Use event metadata to build safe, unique download names without inferring from body text."""
+    taken: set[str] = set()
+    result: list[Attachment] = []
+    for row in rows:
+        if not row.id:
+            continue
+        name = dedupe(safe_name(row.name, fallback="attachment"), taken)
+        result.append(
+            Attachment(
+                id=row.id,
+                message_id=event_id,
+                name=row.name,
+                content_type=row.content_type,
+                size=row.size,
+                is_inline=row.is_inline,
+                kind="file",
+                file_name=name,
+            )
+        )
+    return result
 
 
 class SavedFile(BaseModel):
@@ -45,24 +69,48 @@ class SavedFiles(BaseModel):
 
 
 class Files:
-    def __init__(self, mailbox: Mailbox) -> None:
+    def __init__(self, mailbox: Mailbox, calendar_items: CalendarItemReader | None = None) -> None:
         self.mailbox = mailbox
+        self.calendar_items = calendar_items
 
-    async def download_attachment(self, message_id: str, names: list[str] | None = None) -> SavedFiles:
+    async def download_attachment(
+        self,
+        message_id: str | None = None,
+        names: list[str] | None = None,
+        *,
+        event_id: str | None = None,
+    ) -> SavedFiles:
         """Save files by their listed names; all downloadable files when ``names`` is None.
 
-        Entry point: ``names`` is checked against the message's files before anything is downloaded
+        Entry point: exactly one message or event id is required; ``names`` is checked against the
+        item's files before anything is downloaded
         (case-insensitive; an unknown name raises NotFound and lists the names there are). A cloud link, or
         a file that cannot be fetched, is listed under ``unavailable`` while the others are saved; a call
         that saves nothing raises. Each file is fetched once into the download cache, keyed on the
         immutable message and attachment ids, and reused while it is kept.
         """
-        attachments = await self.mailbox.attachments(message_id)
+        if (message_id is None) == (event_id is None):
+            raise InvalidRequest("Provide exactly one of message_id or event_id.")
+        is_event = event_id is not None
+        item_id = event_id if is_event else message_id
+        assert item_id is not None
+        if is_event:
+            if not item_id or len(item_id) > 4096:
+                raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
+            if any(ord(character) < 32 for character in item_id):
+                raise InvalidRequest("event_id contains a control character.")
+            if self.calendar_items is None:
+                raise InvalidRequest("Event attachment downloads are unavailable.")
+            event = await self.calendar_items.get_event(item_id)
+            attachments = _event_attachments(event.attachments, item_id)
+        else:
+            attachments = await self.mailbox.attachments(item_id)
         by_name = {a.file_name.casefold(): a for a in attachments if a.file_name}
         if names is None:
             chosen = [a for a in attachments if a.file_name and a.kind in DOWNLOADABLE_KINDS]
             if not chosen:
-                raise NotFound("This message has no files to download.")
+                kind = "event" if is_event else "message"
+                raise NotFound(f"This {kind} has no files to download.")
         else:
             wanted = list(dict.fromkeys(name.casefold() for name in names))
             if not wanted or len(wanted) > MAX_NAMES:
@@ -70,7 +118,8 @@ class Files:
             unknown = [name for name in names if name.casefold() not in by_name]
             if unknown:
                 known = ", ".join(a.file_name for a in attachments if a.file_name) or "none"
-                raise NotFound(f"No file named {', '.join(unknown)} on this message. Its files: {known}.")
+                kind = "event" if is_event else "message"
+                raise NotFound(f"No file named {', '.join(unknown)} on this {kind}. Its files: {known}.")
             chosen = [by_name[name] for name in wanted]
         saved: list[SavedFile] = []
         unavailable: list[UnavailableFile] = []
@@ -82,7 +131,7 @@ class Files:
                 unavailable.append(UnavailableFile(name=name, reason=_NOT_A_FILE))
                 continue
             try:
-                saved.append(await self._cached(directory, message_id, attachment, name))
+                saved.append(await self._cached(directory, item_id, attachment, name, is_event=is_event))
             except ConnectorError as exc:
                 errors.append(exc)
                 unavailable.append(UnavailableFile(name=name, reason=str(exc)))
@@ -94,7 +143,15 @@ class Files:
             )
         return SavedFiles(files=saved, unavailable=unavailable)
 
-    async def _cached(self, directory: Path, message_id: str, attachment: Attachment, name: str) -> SavedFile:
+    async def _cached(
+        self,
+        directory: Path,
+        message_id: str,
+        attachment: Attachment,
+        name: str,
+        *,
+        is_event: bool = False,
+    ) -> SavedFile:
         """The attachment in the download cache, fetched only when it is not there. A file is published
         under its name only once complete, so a file found there is whole."""
         source = hashlib.sha256(f"{message_id}\n{attachment.id}".encode()).hexdigest()[:32]
@@ -115,7 +172,11 @@ class Files:
             folder.mkdir(parents=True, exist_ok=True)
             partial = claim(folder, f".{uuid.uuid4().hex}.part")
         try:
-            size = await self.mailbox.reader.download_attachment(message_id, attachment.id, partial)
+            if is_event:
+                assert self.calendar_items is not None
+                size = await self.calendar_items.download_attachment(message_id, attachment.id, partial)
+            else:
+                size = await self.mailbox.reader.download_attachment(message_id, attachment.id, partial)
         except BaseException:
             partial.unlink(missing_ok=True)
             raise

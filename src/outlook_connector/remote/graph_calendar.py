@@ -10,11 +10,12 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from outlook_connector.domain.errors import InvalidRequest, Upstream
-from outlook_connector.domain.models import CalendarEvent, Recipient
+from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, Recipient
 from outlook_connector.remote import ids
 from outlook_connector.remote.calendar_mapping import boolean, teams_join_url, text
 from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph
@@ -23,6 +24,10 @@ from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
 
 VIEW_PATH = "/me/calendarView"
+EVENT_FIELDS = (
+    "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
+    "responseStatus,type,seriesMasterId"
+)
 MAX_PAGE_SIZE = 100  # the largest page this module asks for; a continuation link may not ask for more
 VIEW_FIELDS = (
     "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
@@ -81,6 +86,53 @@ class GraphCalendarView:
             else:
                 items, link = await self._graph.page(page, prefer=prefer)
         return CalendarViewPage(events=[_event(item) for item in items], next_link=link)
+
+
+class GraphCalendarItems:
+    """Hydrate events and download their attachments through the calendar-scoped Graph profile."""
+
+    def __init__(self, graph: Graph) -> None:
+        self._graph = graph
+
+    async def get_event(self, event_id: str) -> CalendarEvent:
+        graph_id = ids.to_graph(event_id)
+        with operation("reading a calendar event"):
+            data = await self._graph.get(
+                f"/me/events/{quote(graph_id, safe='')}",
+                {"$select": f"{EVENT_FIELDS},body,onlineMeeting"},
+                prefer=(PREFER_TEXT_BODY,),
+            )
+        event = _event(data)
+        event.id = event_id
+        event.attachments = await self._list_attachments(graph_id)
+        return event
+
+    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        graph_id = ids.to_graph(event_id)
+        with operation("downloading a calendar attachment"):
+            _, size = await self._graph.download(
+                f"/me/events/{quote(graph_id, safe='')}/attachments/{quote(attachment_id, safe='')}/$value",
+                dest,
+            )
+        return size
+
+    async def _list_attachments(self, graph_id: str) -> list[CalendarAttachment]:
+        with operation("listing calendar attachments"):
+            items, _ = await self._graph.collect(
+                f"/me/events/{quote(graph_id, safe='')}/attachments",
+                {"$select": "id,name,contentType,size,isInline"},
+                max_items=500,
+            )
+        return [
+            CalendarAttachment(
+                id=text(item.get("id")),
+                name=text(item.get("name")),
+                content_type=text(item.get("contentType")),
+                size=item.get("size") if isinstance(item.get("size"), int) else None,
+                is_inline=boolean(item.get("isInline")) is True,
+            )
+            for item in items
+        ]
 
 
 def _iso(value: datetime) -> str:

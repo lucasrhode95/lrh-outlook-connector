@@ -20,6 +20,8 @@ from outlook_connector.domain.errors import (
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
     EXPORT_MAX_MESSAGES,
+    CalendarAttachment,
+    CalendarEvent,
     ExclusionReason,
     ExportRequest,
     MessageSummary,
@@ -763,6 +765,44 @@ async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
     again = await files.download_attachment("m3", ["numbers.xlsx"])
     assert again.files[0].path == first.files[0].path
     assert not any(call.endswith("/$value") for call in fake.calls)  # served from the download cache
+
+
+async def test_event_attachment_download_uses_event_id_and_graph_attachment_metadata(
+    exports: Exports,
+) -> None:
+    class EventFiles:
+        calls: list[tuple[str, str]] = []
+
+        async def get_event(self, event_id: str) -> CalendarEvent:
+            self.calls.append(("get", event_id))
+            return CalendarEvent(
+                id=event_id,
+                attachments=[
+                    CalendarAttachment(
+                        id="synthetic-event-attachment",
+                        name="agenda.txt",
+                        content_type="text/plain",
+                        size=15,
+                    )
+                ],
+            )
+
+        async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+            self.calls.append((event_id, attachment_id))
+            dest.write_bytes(b"synthetic agenda")
+            return len(b"synthetic agenda")
+
+    calendar = EventFiles()
+    saved = await Files(exports.mailbox, calendar).download_attachment(
+        event_id="synthetic-event-id", names=["agenda.txt"]
+    )
+
+    assert saved.files[0].name == "agenda.txt"
+    assert Path(saved.files[0].path).read_bytes() == b"synthetic agenda"
+    assert calendar.calls == [
+        ("get", "synthetic-event-id"),
+        ("synthetic-event-id", "synthetic-event-attachment"),
+    ]
 
 
 async def test_omitted_names_save_every_file_and_unknown_names_are_refused(exports: Exports) -> None:

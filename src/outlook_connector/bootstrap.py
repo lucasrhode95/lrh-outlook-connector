@@ -14,10 +14,9 @@ from m365_auth import Account, AccountBoundTokenSource, AuthenticationRequired, 
 from outlook_connector import config
 from outlook_connector.remote.cloud_settings import CloudSettings
 from outlook_connector.remote.graph import Graph
-from outlook_connector.remote.graph_calendar import GraphCalendarView
+from outlook_connector.remote.graph_calendar import GraphCalendarItems, GraphCalendarView
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
-from outlook_connector.remote.ows_calendar import OwsCalendarItems
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.ows_rules import OwsRules
 from outlook_connector.remote.substrate_events import SubstrateEventSearch
@@ -97,12 +96,13 @@ class AppContext:
         mailbox = Mailbox(reader, store)
         conversations = Conversations(mailbox)
         ows = Ows(self._transport, account_tokens)
+        calendar_items = GraphCalendarItems(Graph(self._transport, profile=config.CALENDAR_PROFILE))
         calendar = Calendar(
             SubstrateEventSearch(
                 self._transport,
                 anchor_mailbox=f"Oid:{account.object_id}@{account.tenant_id}",
             ),
-            OwsCalendarItems(ows),
+            calendar_items,
         )
         calendar_listing = CalendarListing(
             graph_view=GraphCalendarView(Graph(self._transport, profile=config.CALENDAR_PROFILE)),
@@ -117,7 +117,7 @@ class AppContext:
             calendar,
             conversations,
             Exports(conversations),
-            Files(mailbox),
+            Files(mailbox, calendar_items),
             writes,
             mutations,
             Rules(mailbox, OwsRules(ows), account, writes.check_account),
