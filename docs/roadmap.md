@@ -14,7 +14,7 @@ Work is split by what it needs:
 Each item opens with a fictional example of the problem today, then says what the item changes, decides
 or checks.
 
-Snapshot **2026-11-01**.
+Snapshot **2026-11-02**.
 
 ## Implementation
 
@@ -24,30 +24,17 @@ None open.
 
 ### Improvements
 
-#### Passive HTML as an allow-list
+#### Refuse `<base>` in passive HTML
 
-An agent drafts an HTML email with malformed markup. Python's HTML parser reads one part as an attribute
-value, so the check passes. A browser can read the same bytes as a new tag with an `onerror` handler.
+An agent drafts an HTML email with `<base href="https://other.example.test/">` and a link to `invoice`.
+The passive-HTML check lets it through. Outlook stores and sends it unchanged, and the recipient's client
+opens `https://other.example.test/invoice`. Outlook.com's link protection even shows that address as
+protected ([research §4.5](api-research.md#45-what-outlook-keeps-of-saved-html)). One tag quietly moves
+every relative link in the message.
 
-Today one deny-list checker,
-[`passive_html.py`](../src/outlook_connector/service/passive_html.py), guards draft bodies and signatures.
-It refuses known active content:
-
-- Scripts.
-- Frames.
-- Form controls.
-- Event-handler attributes.
-- `javascript:` and `vbscript:` URLs.
-
-It parses like Python, not like a browser, so markup the two tokenize differently could pass. The only
-evidence of what Outlook strips is one save test on one account and one client
-([research §4.5](api-research.md#45-what-outlook-keeps-of-saved-html)).
-
-**Change** to one of these:
-
-- An allow-list of elements and attributes, for example `p`, `div`, `span`, `table`, `a href`, `img src`
-  and inline `style`.
-- Wider evidence of what Outlook strips, checked against browser parsing.
+**Change:** add `base` to the refused elements in
+[`passive_html.py`](../src/outlook_connector/service/passive_html.py). The check covers draft bodies and
+signatures. `lrh-teams-connector` has the same module, so change both together.
 
 #### A purpose-named calendar profile
 
