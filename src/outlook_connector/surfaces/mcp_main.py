@@ -413,7 +413,8 @@ def build_server(context: AppContext) -> FastMCP:
 
         Each file must be under 150 MiB; download larger files from Outlook. Forwarded emails are saved
         as .eml; cloud links are not downloaded. A file that cannot be saved is listed under unavailable
-        while the others are saved. Event files are listed by get_calendar_event and use Graph download."""
+        while the others are saved. For events, pass file_name from get_calendar_event.
+        """
         return await (await services()).files.download_attachment(message_id, names, event_id=event_id)
 
     @mcp.tool(annotations=LOCAL_FILE)

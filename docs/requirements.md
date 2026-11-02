@@ -128,6 +128,8 @@ pairs are never requested again.
 
 ## 10. Reading content (MCP)
 
+- Event attachment reads and downloads share safe, unique `file_name` values; cloud links are listed without downloading, and attached messages keep their `.eml` names.
+
 - `get_message` returns metadata plus a bounded full body with continuation, and attachment metadata, including inline-only attachments.
 - The local UI reader shows the whole chosen body without a text budget or continuation; a failure never shows part of it as complete.
 - **Attachments are returned as raw files** for the agent's client to read. No server-side text extraction. Attachment and MIME downloads have a local 150 MiB limit; larger files are downloaded from Outlook.

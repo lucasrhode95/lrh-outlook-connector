@@ -392,6 +392,9 @@ Searches Exchange calendar events online through Microsoft Search v2, for words 
 
 #### `get_calendar_event`
 
+Event attachments expose `file_name`, the safe, unique name accepted by downloads, and retain their
+`kind` (file, attached item, cloud reference or unknown). Raw `name` remains available as metadata.
+
 Hydrates one event by `event_id`: subject, start and end, organizer, required and optional attendees, location, response status, `body_text` (the agenda), `teams_join_url` and attachment metadata. Ids from either calendar tool work; Graph event ids use the §4.2 alphabet conversion. The read uses `GET /me/events/{id}` under `outlook.calendar`, with no Outlook Web fallback. Graph `responseStatus.response` maps to `my_response_type`. Attachments are always listed from `/me/events/{id}/attachments`, even when `hasAttachments` is false, and can be saved with `download_attachment(event_id=...)` ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
 
 - Graph supplies no truncation flag, so `body_truncated` remains unset.

@@ -152,6 +152,8 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 
 ## Microsoft 365 connectors
 
+Event reads publish each attachment's `file_name`; pass that name to `download_attachment(event_id=...)`.
+
 This repository is part of the `lrh-*` **Microsoft 365** connectors: local tools that give MCP agents
 access to a common corporate environment, its mail and calendar, chats and meetings, and files. Each
 repository owns one product, and all of them share one sign-in.
