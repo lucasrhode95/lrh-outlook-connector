@@ -46,7 +46,9 @@ cookies, message text, addresses or real ids are kept here.
 - The tested clients cannot write mail through Graph, and the Graph profile has no `MailboxSettings.*`; Outlook
   Web's OWS accepts the app-owned Outlook token without cookies (§2, §4).
 - The Teams client's Graph token carries `Calendars.*`, which the Outlook Graph profile lacks (§2, §3.8).
-- Graph `$search` matched Outlook's own top-bar search on recall (§3.4).
+- Graph `$search` matched Outlook's own top-bar search on recall, and matches attachment content too (§3.4).
+- Graph hydrates every event id the connector holds, with attendees, response status, join link and
+  attachments, and downloads event attachments (§3.8).
 - A full metadata mirror of the tested mailbox (25.6k items, two thirds in Junk) takes about 12 minutes (§3.2).
 - Graph immutable ids survive moves and become OWS ids by a base64 alphabet swap (§4.2); `$search` hits are the
   exception and need `translateExchangeIds` (§3.1).
@@ -143,11 +145,26 @@ Live, 2026-10-02, three pages of 25 per backend:
   conversations from Graph `$search` and Search v2; all 52 `$search` conversations for `relatório be` were in
   Search v2's top 75.
 - `/search/query`'s total comes from another engine and ignores folder rules.
-- `$search` takes KQL `attachment:<name>` for attachment file names. Attachment *content* is searched only by
-  `/search/query` with `entityTypes=["message"]`, whose hits do not say which attachment matched.
+- `$search` takes KQL `attachment:<name>` for attachment file names. Neither route says which attachment
+  matched.
 - `/search/query` with `message` found a synthetic marker in its subject and, separately, in its body (2 hits
   each, consistent with the Sent Items and Inbox copies, 2026-10-10).
 - Three one-hit `search_messages` calls took 3.4 s, 0.8 s and 0.8 s end to end (2026-10-10).
+
+**`$search` versus `/search/query` (live, 2026-11-02, `outlook.graph` token).** Five one-word queries, up to
+250 hits each, compared by `internetMessageId`:
+
+| Measure | Graph `$search` | Graph `/search/query` |
+|---|---|---|
+| Hits per query | 31, 10, 250, 47, 228 | The identical sets, in every query |
+| `total` | Not given | 50, 14, 1,176, 67, 383: more than the hits it pages through |
+| Requests for 250 hits | 5 (pages of 50) | 10 (pages of 25) |
+| Time for 250 hits | 1.2–1.3 s | 3.5–3.7 s |
+
+- **Attachment content.** A self-sent message whose unique word was only inside an attached `.txt` file was
+  found by both routes two minutes after sending, with 2 hits each (the Sent Items and Inbox copies). The
+  word was in neither subject nor body. `$search` matches attachment content as well; the earlier note that
+  only `/search/query` does was wrong.
 
 ### 3.5 Conversations
 
@@ -161,6 +178,23 @@ Live, 2026-10-02, 25 recent conversations with 192 messages; and 2026-10-13:
 - Headers: `Message-ID` on 137, `Thread-Index` 136, `In-Reply-To`/`References` 113; 55 messages (drafts and the
   user's own) have none. 6 of 25 conversations branch; 9 parents are not in the mailbox.
 - `uniqueBody` is a median 10% of `body`.
+
+**Reply headers (live, 2026-11-02, read-only, the 1,590 most recent non-draft messages):**
+
+- **Coverage.** 1,532 carry `internetMessageHeaders`. `In-Reply-To` is on 595, `References` on 596, a
+  `Thread-Index` header on 1,353. Graph's `conversationIndex` is on all 1,590, always 22 bytes plus 5 per
+  reply level.
+- **Consistency.** `In-Reply-To` equals the last `References` entry on all 595. 27 of 235 messages with a
+  reply prefix (`RE:` and similar) have no `In-Reply-To`.
+- **Parents.** 433 `In-Reply-To` values name a message in the sample. 212 parents share the child's
+  `conversationId`, and in each of those the child's `conversationIndex` extends the parent's by exactly
+  5 bytes. 16 conversations hold two answers to the same parent: branches the headers show and a flat list
+  hides.
+- **Split chains.** The other 221 children sit in a conversation of their own, with a new 22-byte
+  `conversationIndex` and a different subject. 214 carry an automated-mail header (`Auto-Submitted`,
+  `Precedence` or `List-Id`) and 213 come from the parent's sender: notification chains that thread by
+  headers while their subject changes. About 7 are human replies whose subject changed.
+- **Forwards.** Only one forward's parent was in the sample; it shared the parent's conversation.
 
 ### 3.6 Attachments and inline images
 
@@ -205,7 +239,7 @@ shared one attachment. Every D case had no attachments.
 |---|---|---|
 | A1: CID image without `alt`; mixed uppercase/lowercase CID | `[cid:<cid>]`, case preserved | A |
 | A1: CID image with `alt=""` | `[cid:<cid>]` | A |
-| A1: URI-percent-encoded CID containing `+`, `%` and `@` | F `[cid:<encoded-cid>]`; U `[cid:<cid>]` | A; HTML GET normalized the URI to the decoded CID, while attachment `contentId` stayed raw. Supplied percent escapes were `%2B`, `%25` and `%40`; other escape spellings untested. |
+| A1: URI-percent-encoded CID containing `+`, `%` and `@` | F `[cid:<encoded-cid>]`; U `[cid:<cid>]` | A; HTML GET normalized the URI to the decoded CID, while attachment `contentId` stayed raw. Supplied percent escapes were `%2B`, `%25` and `%40`; lower-case `%2b` decodes the same (2026-11-02, below). |
 | A1: attachment CID itself includes literal angle brackets | `[cid:` + stored `contentId` + `]`, including its angle brackets | A; MIME normalization on the Gmail round trip differed, below. |
 | A2: `alt="  spaced label  "` | `[spaced label]` | A; edge spaces removed |
 | A2: `alt="alpha   beta"` | `[alpha` + `SP(3)` + `beta]` | A; internal spaces retained |
@@ -217,7 +251,8 @@ shared one attachment. Every D case had no attachments.
 | A4: image in a table cell, `cell-before <img> cell-after` | `cell-before [cid:<cid>]` + `SP(2)` + `cell-after` | A |
 | A4: image in a list item, `item-before <img> item-after` | `SP(2)` + `*` + `SP(3)` + `item-before [cid:<cid>]` + `SP(2)` + `item-after` | A |
 | A4: image inside `display:none` with surrounding text | `hidden-before [cid:<cid>]` + `SP(2)` + `hidden-after` | A; hidden content revealed |
-| A4: conditional VML image plus `!vml` fallback `<img>`, same CID | `[cid:<cid>]` once | A; HTML GET retained one `<img>`; a VML-only image without fallback is untested |
+| A4: conditional VML image plus `!vml` fallback `<img>`, same CID | `[cid:<cid>]` once | A; HTML GET retained one `<img>` |
+| A4b: VML-only image (`v:fill` inside an `[if gte mso 9]` comment), no `<img>` fallback | Nothing: F and U text show no placeholder, and the HTML GET has no reference, VML or conditional comment | OWS draft, 2026-11-02; the file stayed inline with its `contentId`, so it reads as an inline image without a body position |
 | A5: same CID referenced twice, separated by ` BETWEEN ` | `[cid:<cid>] BETWEEN [cid:<cid>]` | A; two placeholders, one attachment |
 | A6: literal `[cid:<cid>]` followed by a real image of that CID | `literal [cid:<cid>] THEN [cid:<cid>]` | A; prose and generated placeholder indistinguishable |
 | A6: literal `[same label]` plus two images with that alt text | `literal [same label] THEN [same label]` + `SP(2)` + `BETWEEN [same label]` | A; three identical labels for two image nodes |
@@ -282,6 +317,31 @@ test messages were verified in Deleted Items. All three Gmail test messages were
 with no matching test messages left outside either recovery folder. No send had an uncertain outcome
 and none was resent. No Gmail draft was created.
 
+#### Inline images in replies
+
+Live, **2026-11-02**. One self-sent message, saved through OWS `CreateItem` with eight synthetic PNGs, one
+per Content-ID spelling. Replies were saved as drafts and never sent: one through the connector's
+`ReplyToItem`, one in Outlook Web's own reply. Files were matched by SHA-256.
+
+| Stored `contentId` | Reference written in the HTML | Delivered HTML reference | Connector reply | Outlook Web reply |
+|---|---|---|---|---|
+| `v1@x` | `cid:v1@x` | As written | Carried | Carried |
+| `v2@x` | `cid:v2%40x` | Decoded to the stored id | Carried | Carried |
+| `v3+p@x` | `cid:v3%2bp@x` (lower-case escape) | Decoded | Carried | Carried |
+| `v4+p@x` | `cid:v4%2Bp@x` | Decoded | Carried | Carried |
+| `v5%p@x` | `cid:v5%25p@x` | Decoded | Carried | Carried |
+| `<v6@x>` | `cid:v6@x` | `cid:<v6@x>` (HTML-escaped brackets) | Carried | Carried |
+| `<v7@x>` | `cid:<v7@x>` | `cid:<v7@x>`, the same as v6 through Graph | **Lost** | **Lost** |
+| `V8@X` | `cid:v8@x` (other case) | Rewritten to the stored case | Carried | Carried |
+
+- **Exchange rewrites references on save.** Every reference in the delivered HTML equals its file's stored
+  `contentId`, and the MIME `Content-ID` carries one pair of angle brackets for each.
+- **Only an unresolved reference loses its file.** Outlook Web showed v7 as a broken image in the original
+  itself. Both reply paths dropped exactly that file and kept the other seven. The connector behaves like the
+  native client.
+- The 2026-10-18 reply (C10 above) lost its encoded and bracketed files after a Gmail round trip. That fits
+  Gmail's MIME leaving those references unresolved, not a connector defect.
+
 ### 3.7 Delta after moves and deletes
 
 Live, 2026-10-02: a delta snapshot taken before the §4.2 changes and read after them.
@@ -311,6 +371,35 @@ only:
 - `POST /search/query` with `entityTypes=["event"]` and a word from one event's description returned 12 hits
   in one page; the hydrated hit had the word in its description, not its subject.
 - `GET /me/events/{id}?$select=subject,body` read one event's subject and description.
+
+**Live, read-only, 2026-11-02** (`outlook.calendar` profile: the Teams client asking for `Calendars.Read`):
+
+- **Hydration by id.** Every id the connector holds hydrates through `GET /me/events/{id}` with
+  `Prefer: IdType="ImmutableId"`: Search v2's `ItemId.Id` and `ImmutableId`, and the Graph listing's ids,
+  each after the §4.2 alphabet swap (12 events; the returned id swaps back to the input).
+- **Fields against OWS `GetItem`.** Attendee counts and join-link presence agreed on all 12. Graph's
+  `responseStatus.response` (`accepted`, `tentativelyAccepted`) was set on all 12; the connector's `GetItem`
+  mapping gave no response type. Text bodies (`Prefer: outlook.body-content-type="text"`) matched in length
+  and words, up to 3,921 characters.
+- **Attachments.** `GET /me/events/{id}/attachments` lists `fileAttachment` entries with `name`,
+  `contentType`, `size` and `isInline`; `/attachments/{id}/$value` downloads the bytes (200, `image/png`,
+  27,518 bytes; `size` reports more than the byte count). `hasAttachments` said `false` on a recurring
+  occurrence whose listing held one file: list attachments rather than trusting the flag.
+- **Long descriptions.** The longest description in a 90-day window, 20,758 characters of HTML, came back
+  whole.
+- **Event search** (`POST /search/query`, `entityTypes=["event"]`): `start:2026-10-01..2026-10-31`,
+  `start>=…` and `date:…` returned 0 hits without an error; `received>=…` changed the ranking but returned
+  other months. No date restriction works on the server. `subject:` matched the word in 25 of 25 subjects;
+  `body:` returned 81 hits, none with the word in the subject, consistent with the description alone. A page
+  starting at 990 was answered; one starting at 1,000 answered 400, the same limit as Search v2 (§6.1).
+- **Other calendars.** `GET /me/calendars` returned 3 calendars, all the user's own, in 3 calendar groups.
+  `GET /me/calendars/{id}/calendarView` answered 200 for each, with descriptions. The mailbox had no calendar
+  shared by or delegated from another user, so `Calendars.Read.Shared` was not exercised.
+- **Teams meeting chat.** `GET /me/onlineMeetings?$filter=JoinWebUrl eq '…'` answered 403: the Teams client
+  token has no `OnlineMeetings.*` scope. Each of 182 join links in a 90-day window holds a
+  `19:meeting_…@thread.v2` thread id after `/meetup-join/`. Of the 56 distinct ids, 54 equal the id of a
+  meeting chat in the Teams connector's catalog; 2 have no chat there. Microsoft does not document the URL
+  format.
 
 ## 4. OWS (`/owa/service.svc`)
 
@@ -359,8 +448,9 @@ A message saved through OWS reads back through Graph with a trailing CRLF on its
   tried.
 - `GetItem` hydrates calendar events: `BaseShape: "Default"`, `BodyType: "Text"` and `AdditionalProperties`
   `item:Body` and `item:Attachments` return the agenda, attachment metadata and required and optional attendees
-  (2026-10-10). The default shape caps the body at 2,048 characters and says so in `Body.IsTruncated`. The text
-  body is not HTML-entity-decoded.
+  (2026-10-10). On 2026-10-10 the default shape capped the body at 2,048 characters and said so in
+  `Body.IsTruncated`. On 2026-11-02 twelve text bodies up to 3,921 characters came back whole, with
+  `IsTruncated: false`, equal to Graph's (§3.8). The text body is not HTML-entity-decoded.
 - `GetCalendarView` with a UTC `TimeZoneContext` returns a window's events directly in `Body`, without
   descriptions, and the same events as Graph's `calendarView` (§3.8).
 - `GetOwaUserConfiguration` answers with null legacy signature contents; it is not the modern signature list
@@ -629,7 +719,8 @@ The `teams.microsoft.com` host answered 405 for this path.
   each response said `Total=1`.
 - **`HasAttachments` is unreliable:** rows said `false` for an event whose `GetItem` returned an attachment.
 - `Source.ItemId.Id` hydrates through OWS `GetItem` (§4.3), which returns the agenda, attendees, attachment
-  metadata and a Teams join URL, but no Teams chat id.
+  metadata and a Teams join URL, but no Teams chat id. It also hydrates through Graph (§3.8), and the join
+  URL's thread id matched the meeting chat id in 54 of 56 cases.
 - A minimal `AnswerEntityRequests` for events answered 500.
 
 ### 6.3 Mail conversations (parked)

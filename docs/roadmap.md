@@ -24,7 +24,22 @@ None open.
 
 ### Improvements
 
-None open.
+#### Hydrate events through Graph
+
+You ask the agent whether you accepted Thursday's review, and to read its attached `agenda.pdf`.
+`get_calendar_event` reads through Outlook Web (`GetItem`). It returns no response of yours, and the PDF is
+listed but cannot be downloaded: `download_attachment` takes only message ids.
+
+Graph does both. `GET /me/events/{id}` takes every event id the connector returns, after the usual id swap.
+It matched Outlook Web on attendees, join links and text bodies, and it adds your response
+([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
+
+**Change:**
+
+- Hydrate through Graph under `outlook.calendar`, with `GetItem` as the fallback when the Graph read fails.
+- List an event's attachments from `/me/events/{id}/attachments`; Graph's `hasAttachments` can say `false`
+  for an occurrence that has a file.
+- Let `download_attachment` take an event id, through `/me/events/{id}/attachments/{id}/$value`.
 
 ### Enhancements
 
@@ -46,10 +61,36 @@ today. The draft is saved without the PDF, and you attach it by hand in Outlook.
 
 Settle while building:
 
-- Where the send limit comes from. [Research §4.6](api-research.md#46-message-size-limits) has two
-  candidate values: 35 MB from the bounce message and 36 MiB from MailTips.
-- Whether one file over the one-request limit, about 21 MiB, is worth `CreateAttachmentFromLocalFile`
-  slices ([research §4.3](api-research.md#43-reads-and-other-actions)). They are untested.
+- Where the send limit comes from. [Research §4.6](api-research.md#46-message-size-limits) puts the send
+  ceiling between 34 and 35.3 MiB: a 34 MiB file was delivered, and 35.3 MiB bounced.
+- Whether to upload every file with `CreateAttachmentFromLocalFile` in 14 MiB slices. They worked live: a
+  34 MiB file went up in three slices and read back byte for byte. That reaches Outlook's own send ceiling,
+  while base64 in `CreateItem` stops near 21 MiB per file.
+
+#### Secondary calendars
+
+You ask: "What is on my Project Beta calendar next week?" `list_calendar_events` reads only the default
+calendar, so the answer is empty. Graph lists your other calendars and reads each one's window, with
+descriptions ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
+
+**Change:** list calendars from `GET /me/calendars`, and let `list_calendar_events` take a calendar,
+read through `/me/calendars/{id}/calendarView`.
+
+#### Reply tree for branch-aware conversations (parked)
+
+Alice sends a proposal. Bob replies to all. Carol forwards it to Dan, who replies to Carol. `get_conversation`
+returns them as one flat list, oldest first, so Dan's reply reads as if it answered Bob.
+
+The headers hold up: `In-Reply-To` always equals the last `References` entry, and in a sample of recent mail
+16 conversations had two answers to the same parent
+([research §3.5](api-research.md#35-conversations)). Exchange splits off notification chains whose subject
+changes, even when their headers link them.
+
+**Change**, when it is unparked:
+
+- Build the reply tree from `In-Reply-To`, across conversation ids where a forward or a subject change
+  left the conversation.
+- Offer a merged chronological view, with each message labeled by its branch.
 
 ## Decisions
 
@@ -78,6 +119,19 @@ Exchange's text cannot simply carry the image positions. Its `[cid:…]` placeho
 
 - Keep Exchange's reading text and place images in it, validated against the source HTML.
 - Render text locally from the source structure. The current local rendering is not a settled design.
+
+### Meeting chat from the join link
+
+`get_calendar_event` for "Weekly sync" returns a Teams join link but no chat id. The agent finds the meeting
+chat in the Teams connector by name and time, and can pick the wrong chat when two share a name.
+
+No supported lookup works with the connector's tokens: Graph's `onlineMeetings` answers 403. The join link
+holds a `19:meeting_…@thread.v2` thread id, and in 54 of 56 tested links it equaled the meeting chat's id
+([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)). Microsoft does not
+document that format.
+
+**Decide:** expose that thread id as the event's likely Teams chat id, labeled as read from the link, or keep
+the chat lookup to names and times.
 
 ### Default conversation scope
 
@@ -109,24 +163,8 @@ desktop gives it, or how Exchange's text shows it. The
 - Apple Mail.
 - Gmail's browser and mobile editors.
 
-Cover their generated CIDs, native quotation and `uniqueBody` behavior. Also check:
-
-- VML-only images without an HTML fallback.
-- Other percent-escape spellings in CIDs.
-- Whether other deployments' mail filters expose or duplicate hidden previews.
-
-### CID attachment carry-over in replies
-
-You ask for a reply draft to a message whose quoted history holds several inline images. `create_draft`
-returns `history_intact: false` and "2 inline image(s) of the original are missing or changed". The quoted
-HTML still points at both images, but the reply has no files for them. In the test, the two lost files
-were the edge cases: a URI-encoded CID and a CID with literal angle brackets
-([research §3.6](api-research.md#html-to-text-body)).
-
-**Check** where the files get lost before choosing a policy:
-
-- Isolate URI decoding and MIME `Content-ID` normalization, with valid CID variants.
-- Compare replies made in native clients.
+Cover their generated CIDs, native quotation and `uniqueBody` behavior. Also check whether other
+deployments' mail filters expose or duplicate hidden previews.
 
 ### Fresh-account consent
 
@@ -138,101 +176,14 @@ grants have only been checked on one account. If the new account is refused:
 
 **Check** both grants on a new account before relying on them.
 
-### Mail search route
+### Shared and delegated calendars
 
-`search_messages` for `forecast` misses a message that mentions the word only inside an attached PDF. The
-current route, Graph `$search`, matches attachment names, not attachment content. Graph Search API
-(`/search/query`) searches attachment content but does not say which attachment matched
-([research §3.4](api-research.md#34-mail-search)).
+You ask: "What does Alex have on Thursday?" Alex shared a calendar with you. Only your own calendars are in
+reach today. Your secondary calendars read fine through Graph
+([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)), but the tested
+mailbox had no calendar shared by or delegated from someone else.
 
-**Compare** the two routes on identical queries before considering a change:
+**Check**, on a mailbox that has one, with the `outlook.calendar` token's `Calendars.Read.Shared`:
 
-- Terms and recall.
-- Limits.
-- Hydration: `$search` hits need an extra id translation.
-- Request counts.
-- Latency.
-
-### Graph-first event hydration
-
-`get_calendar_event` reads only through Outlook Web (`GetItem`), while listing reads Graph first. An
-agenda over 2,048 characters comes back cut, with `body_truncated: true`, because that is the default
-shape's cap ([research §4.3](api-research.md#43-reads-and-other-actions)). Graph read one event's
-description in a test, but its other detail fields are unchecked.
-
-**Check** the Graph event and the id conversion
-([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)):
-
-- Attendees.
-- Response status.
-- Join link.
-- Attachment metadata.
-
-If they hold, hydrate through Graph (`GET /me/events/{id}`), with Outlook Web as the fallback.
-
-### Graph event search
-
-You look for "budget review" meetings in the week of 2 November. `search_calendar_events` uses Search v2:
-
-- It takes no date restriction, so it returns matches from every year.
-- It cannot page past offset 1,000.
-
-Today the agent must use `list_calendar_events` for that week with `contains` instead, which scans the
-window.
-
-**Check** whether Graph Search (`POST /search/query`, `entityTypes=["event"]`;
-[research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)) can:
-
-- Restrict dates on the server.
-- Target the description alone.
-
-If so, that request could be one ranked search limited to that week.
-
-### Other calendars
-
-You ask: "What is on my Project Beta calendar next week?" or "What does Alex have on Thursday?" Neither
-works today. Only the signed-in user's default calendar is listed and searched. Out of reach:
-
-- Secondary calendars the user created.
-- Calendars shared with or delegated to the user.
-
-**Check** with the `outlook.calendar` token
-([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)):
-
-- The user's own secondary calendars, with its calendar scope.
-- Shared and delegated calendars, with its `Calendars.Read.Shared`.
-
-### Reply headers for branch-aware conversations (parked)
-
-Alice sends a proposal. Bob replies to all. Carol forwards it to Dan, who replies to Carol. If Exchange
-groups all four, `get_conversation` returns them by date, and Dan's reply reads as if it answered Bob. A
-forward that Exchange gives its own conversation id is not returned at all. A conversation is exactly
-Exchange's conversation: one flat list, oldest first, with nothing saying who answered whom.
-
-**Check** the quality of these in real mail:
-
-- RFC 5322 `Message-ID`, `In-Reply-To` and `References` headers.
-- Exchange's `ConversationId` and `Thread-Index`.
-
-If they hold, building the reply tree becomes an enhancement:
-
-- Detect branches, including forwards. Look across conversation ids where a forward left the
-  conversation.
-- Offer a merged chronological view, with each message labeled by its branch.
-
-### Event attachment download
-
-A meeting carries `agenda.pdf`. `get_calendar_event` lists it, but `download_attachment` takes only
-message ids, so the agent cannot read the file
-([research §6.2](api-research.md#62-events)).
-
-**Check** for an event-scoped download route.
-
-### Event to Teams meeting chat
-
-`get_calendar_event` for "Weekly sync" returns a Teams join link but no chat id
-([research §6.2](api-research.md#62-events)). The agent then finds the meeting chat in the Teams connector
-by name and time, and can pick the wrong chat when two share a name.
-
-**Check** for a supported lookup from the event, or its join link, to the chat. Reading an id out of the
-join URL is not established.
+- A calendar another user shared, as it appears in `GET /me/calendars`.
+- A delegate's read of another user's calendar through `/users/{address}/calendar`.
