@@ -116,6 +116,8 @@ pairs are never requested again.
 
 ## 9. Listing, conversations and search
 
+An empty or partial conversation scope retains its operation's defaults for omitted keys.
+
 - **One scope object** (`sent_items`, `meeting_mail`, `deleted_items`) is shared by list, search, conversations, exports and read-state changes. Defaults show sent and meeting mail and hide Deleted Items and Junk. `get_conversation` and conversation-size lookups include Deleted Items and Junk by default; `scope.deleted_items=false` leaves them out. Listing, search, exports and read-state changes keep their existing defaults. Conversation exports also keep the export's existing default scope (built 2026-11-02). Results count what was left out. The full rule is in [architecture §8.1](architecture.md#81-shared-rules).
 - **Out of reach:** hidden folders, Sync Issues and non-mail items are never listed, searched or selected by folder, date window or conversation. **A message id named explicitly is authoritative** (decided 2026-10-13): reads, exports and the change tools act on it wherever Graph can; the change tools still refuse items outside the mail folders.
 - **Copies** of one message (same Internet message id, e.g. mail sent to yourself) are shown once, naming the other folders.

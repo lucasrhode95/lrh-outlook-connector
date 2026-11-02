@@ -66,8 +66,6 @@ carry the conversation's message_count. Results are compact by default (detail="
 recipients, categories and Internet ids).
 - Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
 calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
-- Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
-calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
 - Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
 order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
 between these dates", and for text in subjects or descriptions within those dates (contains: a list \
@@ -393,6 +391,7 @@ def build_server(context: AppContext) -> FastMCP:
     ) -> Conversation:
         """A whole conversation, oldest first; includes Deleted Items and Junk by default.
 
+        Empty or partial scope objects retain these defaults for omitted keys.
         Set scope.deleted_items=false to leave them out. Full bodies include quoted history by default;
         unique omits it."""
         return await (await services()).conversations.get_conversation(

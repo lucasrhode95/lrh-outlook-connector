@@ -240,6 +240,10 @@ The MCP server exposes 30 tools, grouped below by task. The [README](../README.m
 
 ### 8.1 Shared rules
 
+The MCP conversation input uses `ConversationScope`, with the same keys as `Scope` and a true
+`deleted_items` default. Empty and partial objects keep that default; only an explicit false excludes
+deleted mail. Internal services receive the resolved scope and do not repeat input normalization.
+
 - **Reads never change the mailbox**, not even read state. Tools that save files (`download_attachment`, `save_message_mime`, `export_messages`) write only to the local data directory (§7), and those files are kept for seven days.
 - **Writes are explicit.** Drafts, sends, mailbox changes, rule changes and signature changes are separate tools with their own rules, described below. No tool permanently deletes mail: `delete_messages` moves messages to Deleted Items.
 - **Scope.** One `scope` object holds three independent keys: `sent_items` (default true) includes Sent Items, Drafts and Outbox; `meeting_mail` (default true) includes invitations, RSVPs and cancellations; `deleted_items` (default false) includes Deleted Items and Junk Email for lists, search, exports and read-state changes. A folder you name is always included, and subfolders count with their parent. `true` shows more mail and `false` filters more. A key the operation cannot apply is refused when it differs from its default. `get_conversation` and conversation-size lookups use a conversation default with `deleted_items=true`; an explicit false leaves Deleted Items and Junk out. Exports retain their own default scope, including for conversation selections. Conversation reads keep sent and meeting mail. (Built 2026-11-02.)

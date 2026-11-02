@@ -128,6 +128,9 @@ systems. Set `OUTLOOK_CONNECTOR_HOME` to override it.
 
 ## MCP tools
 
+Conversation reads include Deleted Items and Junk even with an empty or partial scope object;
+pass `scope={"deleted_items": false}` to exclude them.
+
 The MCP server exposes the tools below. Each one's inputs, results and caveats are in [architecture §8](docs/architecture.md#8-surfaces-tools-and-endpoints).
 
 | MCP tool | Service module | Behavior |
