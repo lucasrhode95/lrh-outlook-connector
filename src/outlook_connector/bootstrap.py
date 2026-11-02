@@ -17,7 +17,7 @@ from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_calendar import GraphCalendarView
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
-from outlook_connector.remote.ows_calendar import OwsCalendarItems, OwsCalendarWindow
+from outlook_connector.remote.ows_calendar import OwsCalendarItems
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.remote.ows_rules import OwsRules
 from outlook_connector.remote.substrate_events import SubstrateEventSearch
@@ -47,7 +47,7 @@ class Services:
     mutations: Mutations  # likewise
     rules: Rules  # OWS reads/writes use the bound Outlook sign-in
     signatures: Signatures  # native Cloud Settings use the bound Outlook sign-in
-    calendar_listing: CalendarListing  # Graph first; Outlook Web only when a Graph read fails
+    calendar_listing: CalendarListing  # Graph's calendar view
 
 
 class AppContext:
@@ -106,7 +106,6 @@ class AppContext:
         )
         calendar_listing = CalendarListing(
             graph_view=GraphCalendarView(Graph(self._transport, profile=config.CALENDAR_PROFILE)),
-            outlook_view=OwsCalendarWindow(ows),
         )
         writer = OwsMailWriter(ows)
         signatures = Signatures(CloudSettings(self._transport, account_tokens), account)
