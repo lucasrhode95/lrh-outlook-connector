@@ -70,7 +70,9 @@ failed Graph read is reported as an error. Follow the cursor while coverage.comp
 recaps or transcripts, across all dates; for a date range, use list_calendar_events instead. \
 Hydrate a result with get_calendar_event for agenda text, attendees, your response and attachment \
 metadata; hydration and event attachment downloads use Graph under outlook.calendar, with no Outlook Web \
-fallback. Use download_attachment(event_id=...) to save a listed event file. Outlook \
+fallback. Its teams_chat_id_from_join_link comes from an undocumented join-link format; check the chat in \
+the Teams connector if event details look odd, such as a different subject or time. Use \
+download_attachment(event_id=...) to save a listed event file. Outlook \
 owns the event, schedule and any join link; related Teams chats, recaps, recordings and transcripts \
 belong to the Teams connector. Event-to-Teams linkage is not inferred when Search v2 omits a verified \
 identifier.

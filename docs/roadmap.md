@@ -68,21 +68,6 @@ today. The draft is saved without the PDF, and you attach it by hand in Outlook.
 Settle while building where the send limit comes from. Research §4.6 puts the send ceiling between 34 and
 35.3 MiB: a 34 MiB file was delivered, and 35.3 MiB bounced.
 
-#### Teams chat id from the join link
-
-`get_calendar_event` for "Weekly sync" returns a Teams join link but no chat id. The agent finds the meeting
-chat in the Teams connector by name and time, and can pick the wrong chat when two share a name.
-
-The join link holds a `19:meeting_…@thread.v2` thread id. It equaled the meeting chat's id in 54 of 56
-tested links ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)), but
-Microsoft does not document the format.
-
-**Change** (decided 2026-11-02):
-
-- Return that id on the event, in a field whose name says it was read from the join link.
-- Add one line to the MCP instructions: the format is undocumented, so check the chat in the Teams connector
-  when something looks odd, such as a different subject or time.
-
 #### Include deleted mail in conversations
 
 You reply to a thread and then delete the original. `get_conversation` returns only your reply; the original

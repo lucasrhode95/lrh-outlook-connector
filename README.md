@@ -138,7 +138,7 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `search_messages` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
 | `search_calendar_events` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Search Exchange events online across all dates, with bounded continuation |
 | `list_calendar_events` | [`service/calendar_listing.py`](src/outlook_connector/service/calendar_listing.py) | List the events overlapping a window in time order, Graph first; `contains` and descriptions need Graph |
-| `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, response, join URL and attachment metadata through Graph |
+| `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, response, join URL, link-derived Teams chat id and attachment metadata through Graph |
 | `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
 | `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
 | `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List all attachment metadata: file names, sizes, types and inline image IDs |
