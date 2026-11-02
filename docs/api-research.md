@@ -51,6 +51,8 @@ cookies, message text, addresses or real ids are kept here.
 - Graph immutable ids survive moves and become OWS ids by a base64 alphabet swap (§4.2); `$search` hits are the
   exception and need `translateExchangeIds` (§3.1).
 - Delta reports a soft delete as `deleted`; only a 404 on a GET by id means the item is gone (§3.7).
+- Graph's `body` HTML is a cleaned view; Exchange stores and sends active content unchanged, and only the
+  recipient's client blocks scripts (§4.5).
 
 ## 2. Sign-in and clients
 
@@ -424,11 +426,31 @@ address; read back through Graph and inspected in Outlook Web, Gmail and (by the
 - An external copy gained the organization's disclaimer, absent from the work-mailbox copies: a transport
   footer.
 - **Unfinished markup** (2026-10-13, one synthetic draft never sent): a body ending in an unfinished `img` tag
-  with an `onerror` attribute, followed by a signature block. Outlook dropped the `onerror` attribute and the
-  script text, but the unfinished tag absorbed the signature's opening `div`: its `id` and
-  `data-signature-name` moved onto the `img`, and the signature's closing tag became an empty `div`.
+  with an `onerror` attribute, followed by a signature block. Read through Graph, the `onerror` attribute and
+  the script text were gone, and the unfinished tag had absorbed the signature's opening `div`: its `id` and
+  `data-signature-name` moved onto the `img`, and the signature's closing tag became an empty `div`. Graph's
+  `body` is a cleaned view (below), so this shows that view; the stored MIME was not checked.
 - A signature image whose bytes were a valid PNG rendered and saved in Outlook ("Save as Picture",
   2026-10-10); an earlier red X came from a malformed 26-byte PNG, not from a missing image.
+
+**Active content is stored and sent unchanged** (live, 2026-11-02). One synthetic draft carried 19 cases:
+scripts, event handlers, `javascript:`, `vbscript:` and `data:` links, frames, form controls, `object` and
+`embed`, SVG and MathML (including `<style>` inside `<svg>`), `meta` refresh, `base`, stylesheet links,
+CSS `url()`, `@import` and `expression()`, `xmp` and `noscript`. Payloads were `alert()` calls and `.test`
+URLs. It was saved with OWS `CreateItem`/`SaveOnly` through the connector's own writer, without the
+passive-HTML check, then sent once with `UpdateItem`/`SendAndSaveCopy` to an external Gmail account and an
+external Outlook.com account.
+
+| Where the HTML was read | Active content |
+|---|---|
+| Graph `body` (`GET /me/messages/{id}`) of the draft and of the Sent Items copy | Cleaned: scripts, frames, `object`/`embed`, SVG and MathML removed; `style` contents emptied; event handlers, `formaction`, `http-equiv` and `rel` removed; `javascript:`, `vbscript:` and `data:` hrefs emptied; `xmp` became `pre` with escaped text. Kept: `form`, `input`, `textarea`, `select`, `button`, `base href`, CSS `url()`. |
+| Sent Items MIME (`GET /me/messages/{id}/$value`) | Every case byte for byte as written |
+| Received MIME at both external accounts | Every case unchanged. The organization's outbound gateway added only its disclaimer. Outlook.com's link protection wrapped `http(s)` links, resolving a relative link against the `<base href>`, and left `javascript:`, `vbscript:` and `data:` links and event handlers in place. Both were delivered to the inbox. |
+| Displayed by the owner in Gmail and Outlook.com, web and mobile apps | No script ran. The form accepted typing and submitted to its `action` URL in all four. The relative link pointed to the `<base href>` site. |
+
+So Graph's `body` HTML is a cleaned view of the item, not what Exchange stores or sends; the MIME is the
+original. Nothing between the sender and the recipient's client removed active content; script blocking came
+from the recipients' clients only. Other mail clients were not tested.
 
 ### 4.6 Message size limits
 
