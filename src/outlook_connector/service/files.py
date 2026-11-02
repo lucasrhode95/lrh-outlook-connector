@@ -19,10 +19,10 @@ from pydantic import BaseModel
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
 from outlook_connector.domain.models import Attachment, CalendarAttachment
 from outlook_connector.remote.ports import CalendarItemReader
-from outlook_connector.service.export.attachments import dedupe, safe_name
+from outlook_connector.service.export.attachments import safe_name
 from outlook_connector.service.localfiles import claim, kept_dir
 from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.service.markers import DOWNLOADABLE_KINDS
+from outlook_connector.service.markers import DOWNLOADABLE_KINDS, named_calendar
 
 MAX_NAMES = 100
 _NOT_A_FILE = "a cloud link with no file here; open it from the message in Outlook"
@@ -30,12 +30,10 @@ _NOT_A_FILE = "a cloud link with no file here; open it from the message in Outlo
 
 def _event_attachments(rows: list[CalendarAttachment], event_id: str) -> list[Attachment]:
     """Use event metadata to build safe, unique download names without inferring from body text."""
-    taken: set[str] = set()
     result: list[Attachment] = []
-    for row in rows:
+    for row in named_calendar(rows):
         if not row.id:
             continue
-        name = dedupe(safe_name(row.name, fallback="attachment"), taken)
         result.append(
             Attachment(
                 id=row.id,
@@ -44,8 +42,8 @@ def _event_attachments(rows: list[CalendarAttachment], event_id: str) -> list[At
                 content_type=row.content_type,
                 size=row.size,
                 is_inline=row.is_inline,
-                kind="file",
-                file_name=name,
+                kind=row.kind,
+                file_name=row.file_name,
             )
         )
     return result

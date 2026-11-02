@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarEvent, CalendarSearchCoverage, CalendarSearchResult
 from outlook_connector.remote.ports import CalendarItemReader, CalendarSearchReader
-from outlook_connector.service import cursors
+from outlook_connector.service import cursors, markers
 
 MAX_EVENT_PAGE_SIZE = 25  # the standalone-proven Exchange Search v2 page size
 EVENT_SEARCH_OFFSET_LIMIT = 1_000  # Search v2 refuses a page that starts at this offset or later (2026-10-13)
@@ -111,12 +111,14 @@ class Calendar:
         )
 
     async def get_event(self, event_id: str) -> CalendarEvent:
-        """Validate the caller-supplied event reference before OWS hydration."""
+        """Validate the public event reference and publish Graph metadata with download names."""
         if not isinstance(event_id, str) or not event_id or len(event_id) > 4096:
             raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
         if any(ord(character) < 32 for character in event_id):
             raise InvalidRequest("event_id contains a control character.")
-        return await self._items.get_event(event_id)
+        event = await self._items.get_event(event_id)
+        event.attachments = markers.named_calendar(event.attachments)
+        return event
 
 
 def _cursor_uuid(value: object, label: str) -> str:

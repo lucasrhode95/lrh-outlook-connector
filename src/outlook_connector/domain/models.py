@@ -217,6 +217,8 @@ class CalendarAttachment(Compact):
     content_type: str | None = None
     size: int | None = None
     is_inline: bool = False
+    kind: Literal["file", "item", "reference", "unknown"] = "file"
+    file_name: str | None = None
 
 
 class CalendarEvent(Compact):

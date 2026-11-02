@@ -780,7 +780,7 @@ async def test_event_attachment_download_uses_event_id_and_graph_attachment_meta
                 attachments=[
                     CalendarAttachment(
                         id="synthetic-event-attachment",
-                        name="agenda.txt",
+                        name="report:one.txt",
                         content_type="text/plain",
                         size=15,
                     )
@@ -794,10 +794,10 @@ async def test_event_attachment_download_uses_event_id_and_graph_attachment_meta
 
     calendar = EventFiles()
     saved = await Files(exports.mailbox, calendar).download_attachment(
-        event_id="synthetic-event-id", names=["agenda.txt"]
+        event_id="synthetic-event-id", names=["report_one.txt"]
     )
 
-    assert saved.files[0].name == "agenda.txt"
+    assert saved.files[0].name == "report_one.txt"
     assert Path(saved.files[0].path).read_bytes() == b"synthetic agenda"
     assert calendar.calls == [
         ("get", "synthetic-event-id"),

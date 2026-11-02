@@ -19,6 +19,7 @@ from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, R
 from outlook_connector.remote import ids
 from outlook_connector.remote.calendar_mapping import boolean, teams_join_url, text
 from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph
+from outlook_connector.remote.graph_mapping import attachment as map_attachment
 from outlook_connector.remote.ports import CalendarViewPage
 from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
@@ -124,14 +125,7 @@ class GraphCalendarItems:
                 max_items=500,
             )
         return [
-            CalendarAttachment(
-                id=text(item.get("id")),
-                name=text(item.get("name")),
-                content_type=text(item.get("contentType")),
-                size=item.get("size") if isinstance(item.get("size"), int) else None,
-                is_inline=boolean(item.get("isInline")) is True,
-            )
-            for item in items
+            CalendarAttachment.model_validate(map_attachment(item, graph_id).model_dump()) for item in items
         ]
 
 
