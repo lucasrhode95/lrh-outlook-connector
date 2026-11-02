@@ -36,7 +36,8 @@ It matched Outlook Web on attendees, join links and text bodies, and it adds you
 
 **Change:**
 
-- Hydrate through Graph under `outlook.calendar`, with `GetItem` as the fallback when the Graph read fails.
+- Hydrate through Graph under `outlook.calendar`, with no Outlook Web fallback. Remove the `GetItem` event
+  read in [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py).
 - List an event's attachments from `/me/events/{id}/attachments`; Graph's `hasAttachments` can say `false`
   for an occurrence that has a file.
 - Let `download_attachment` take an event id, through `/me/events/{id}/attachments/{id}/$value`.
