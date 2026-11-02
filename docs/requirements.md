@@ -76,7 +76,7 @@ SharePoint. Its profile catalog includes these Outlook client/resource pairs:
 |---|---|---|---|
 | Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `outlook.graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Live through shared silent auth; fresh-account consent not tested |
 | Calendar event discovery and hydration | `m365.search` · One Outlook Web; `outlook.api` · One Outlook Web | Search v2 `Event` / `Exchange`; OWS `GetItem` | Live connector check 2026-10-12 (research §6.2); fresh-account consent not tested |
-| Calendar windows | `teams.graph` (carries `Calendars.Read`) · One Teams client; `outlook.api` | Graph `/me/calendarView`; OWS `GetCalendarView` (fallback) | Live 2026-10-12 (research §3.8); fresh-account consent not tested |
+| Calendar windows | `outlook.calendar` (`Calendars.Read`) · One Teams client; `outlook.api` | Graph `/me/calendarView`; OWS `GetCalendarView` (fallback) | Live 2026-10-12 (research §3.8); fresh-account consent not tested |
 | Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook.api` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
 | Inbox rules | `outlook.api` | OWS `GetInboxRule` and rule actions | Proven (research §4.4) |
 | Native roaming signatures | `outlook.api` | Outlook Cloud Settings | Proven (research §§5.2–5.3) |
