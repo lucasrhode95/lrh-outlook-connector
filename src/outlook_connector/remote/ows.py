@@ -66,6 +66,15 @@ class Ows:
         }
         return _read_items(await self._post(action, envelope, read_only=True), action)
 
+    async def call_raw(self, action: str, body: dict[str, Any], content: bytes) -> list[dict[str, Any]]:
+        """Send one OWS action with URL-encoded metadata and raw file bytes as the request body."""
+        envelope = {
+            "__type": f"{action}JsonRequest:#Exchange",
+            "Header": {"__type": "JsonRequestHeaders:#Exchange", "RequestServerVersion": SERVER_VERSION},
+            "Body": {"__type": f"{action}Request:#Exchange", **body},
+        }
+        return _items(await self._post(action, envelope, content=content), action, strict=True)
+
     async def call_request(
         self, action: str, fields: dict[str, Any], *, time_zone: str | None = None
     ) -> dict[str, Any]:
@@ -97,7 +106,14 @@ class Ows:
             )
         return data
 
-    async def _post(self, action: str, payload: dict[str, Any], *, read_only: bool = False) -> Any:
+    async def _post(
+        self,
+        action: str,
+        payload: dict[str, Any],
+        *,
+        read_only: bool = False,
+        content: bytes | None = None,
+    ) -> Any:
         """POST one payload with Outlook Web's headers; only explicitly read-only calls are retried."""
         encoded = quote(json.dumps(payload, separators=(",", ":"), ensure_ascii=False), safe="-_.!~*'()")
         claims = self.account()
@@ -108,11 +124,13 @@ class Ows:
             "X-OWA-CorrelationId": str(uuid.uuid4()),
             "X-OWA-SessionId": str(uuid.uuid4()),
             "Prefer": 'IdType="ImmutableId"',
-            "Content-Type": "application/json; charset=utf-8",
+            "Content-Type": "application/octet-stream"
+            if content is not None
+            else "application/json; charset=utf-8",
         }
         if upn:
             headers["X-AnchorMailbox"] = f"AAD-SMTP:{upn}"
-        in_header = len(encoded) <= URL_POST_DATA_LIMIT
+        in_header = content is not None or len(encoded) <= URL_POST_DATA_LIMIT
         if in_header:
             headers["X-OWA-UrlPostData"] = encoded
         return await self._transport.json(
@@ -120,7 +138,8 @@ class Ows:
             f"{OWS_URL}?action={action}&app=Mail",
             profile=PROFILE,
             headers=headers,
-            json_body=None if in_header else payload,
+            json_body=None if in_header or content is not None else payload,
+            content=content,
             retry=read_only,
             write=not read_only,
         )

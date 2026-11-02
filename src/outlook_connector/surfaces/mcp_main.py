@@ -157,6 +157,7 @@ image with a data:image URI containing those bytes, then save the resulting HTML
 signature. create_draft freshly resolves and inserts the default for new mail or replies;
 signature selects a named signature and include_signature=false suppresses all signatures.
 - Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
+attachments is a list of local file paths. A replacement draft carries only the files listed on that call.
 Drafts are composed once, never edited. To change one, create a replacement with the full intended
 content (use the same reply_to_message_id and reply_all choice for a reply), check its server read-back,
 then delete the old draft with delete_messages and use the new id. Never delete first. The old version
@@ -164,7 +165,8 @@ remains in Deleted Items; tell the user. Outlook edits and attachments are not c
 There is no version check against the old draft; read it first if needed.
 - Sending: only after the user explicitly asks, call send_draft with the existing Microsoft draft id.
 Never confirm on the user's behalf. It sends the stored draft without changing it, once.
-On status "unknown", ask the user to check Sent Items and Outbox before any further send.
+Drafts over 34 MiB are refused before sending. On status "unknown", ask the user to check
+Sent Items and Outbox before any further send.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
 set_read_state also takes conversation ids (every message of the conversation in scope). \
@@ -605,17 +607,22 @@ def build_server(context: AppContext) -> FastMCP:
         reply_all: bool = False,
         signature: str | None = None,
         include_signature: bool = True,
+        attachments: list[str] | None = None,
     ) -> DraftResult:
         """Save a new message or reply and return server read-back.
 
         By default, freshly resolves and inserts the Outlook native default for new mail or replies.
         Set signature to select a native signature by exact name, or include_signature=False to
         suppress all signatures. A missing or unreadable selected signature raises instead of falling back.
+        ``attachments`` accepts local file paths. Files upload after the draft is saved, in 14 MiB
+        slices, and Graph confirms each file by name and size. If an upload or confirmation fails,
+        the partial draft moves to Deleted Items and the error names the file.
         Drafts are composed once. To change one, create a full replacement (using the same
         ``reply_to_message_id`` and ``reply_all`` choice for a reply), verify its read-back, then delete
         the old draft with
         ``delete_messages`` and use the new id. Never delete first. Outlook edits and attachments
-        are not carried over; the old version remains in Deleted Items. There is no version check
+        are not carried over; the replacement contains only files listed on its ``attachments`` argument.
+        The old version remains in Deleted Items. There is no version check
         against the old draft, so read it first if needed.
         """
         return await (await services()).writes.create_draft(
@@ -630,12 +637,17 @@ def build_server(context: AppContext) -> FastMCP:
                 reply_all=reply_all,
                 signature=signature,
                 include_signature=include_signature,
+                attachments=attachments or [],
             )
         )
 
     @mcp.tool(annotations=SEND)
     async def send_draft(draft_id: str) -> SendResult:
-        """Send this existing server draft unchanged, once, only on the user's explicit send request."""
+        """Send this existing server draft unchanged, once, only on the user's explicit send request.
+
+        Drafts larger than the connector's conservative 34 MiB send cutoff are refused with a readable
+        error before Outlook is asked to send them.
+        """
         return await (await services()).writes.send_draft(draft_id)
 
     @mcp.tool(annotations=CHANGE)

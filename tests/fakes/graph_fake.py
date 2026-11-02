@@ -77,12 +77,23 @@ class FakeMessage:
     unique_html: str | None = None
     is_read: bool = True
     attachments: list[FakeAttachment] = field(default_factory=list)
+    size_override: int | None = None
     internet_id: str | None = None  # copies of one message (e.g. sent to yourself) share it
     meeting: dict[str, Any] = field(default_factory=dict)  # eventMessage fields of meeting mail
 
     def change_key(self) -> str:
         """Like Exchange's change key: a new value whenever the item changes."""
-        state = (self.subject, self.folder, self.to, self.cc, self.bcc, self.text, self.html, self.is_draft)
+        state = (
+            self.subject,
+            self.folder,
+            self.to,
+            self.cc,
+            self.bcc,
+            self.text,
+            self.html,
+            self.is_draft,
+            tuple((a.id, a.name, len(a.data)) for a in self.attachments),
+        )
         return hashlib.sha256(repr(state).encode()).hexdigest()[:16]
 
     def json(self, *, text_body: bool) -> dict[str, Any]:
@@ -112,6 +123,9 @@ class FakeMessage:
             "flag": {"flagStatus": "flagged" if self.flagged else "notFlagged"},
             "bodyPreview": self.text[:50],
             "internetMessageId": self.internet_id or f"<{self.id}@example.com>",
+            "size": self.size_override
+            if self.size_override is not None
+            else len(self.text.encode("utf-8")) + sum(len(a.data) for a in self.attachments),
             "changeKey": self.change_key(),
             "body": {"contentType": kind, "content": body},
             "uniqueBody": {"contentType": kind, "content": unique},
@@ -134,6 +148,10 @@ class FakeGraph:
     batch_sizes: list[int] = field(default_factory=list)
     sent_drafts: list[str] = field(default_factory=list)  # drafts sent with UpdateItem
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
+    attachment_slices: list[tuple[dict[str, Any], bytes]] = field(default_factory=list)
+    upload_buffers: dict[str, bytearray] = field(default_factory=dict)
+    upload_attachment_ids: dict[str, str] = field(default_factory=dict)
+    file_upload_fail_at: int | None = None
     inbox_rules: list[dict[str, Any]] = field(default_factory=list)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
     # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
@@ -311,7 +329,10 @@ class FakeGraph:
             return httpx.Response(script, headers={"x-owa-error": "FakeError"}, json={})
         if isinstance(script, dict):
             return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": [script]}}})
-        items = getattr(self, f"ows_{action}")(body)
+        if action == "CreateAttachmentFromLocalFile":
+            items = self.ows_CreateAttachmentFromLocalFile(body, request.content)
+        else:
+            items = getattr(self, f"ows_{action}")(body)
         if script == "done-no-answer":
             raise httpx.ReadTimeout("no answer", request=request)
         return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": items}}})
@@ -427,6 +448,43 @@ class FakeGraph:
         )  # fmt: skip
         created = [{"ItemId": {"Id": to_ows(new_id)}}] if disposition == "SaveOnly" else []
         return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
+
+    def ows_CreateAttachmentFromLocalFile(self, body: dict[str, Any], content: bytes) -> list[dict[str, Any]]:  # noqa: N802
+        self.attachment_slices.append((body, content))
+        if self.file_upload_fail_at == len(self.attachment_slices):
+            return [{"ResponseClass": "Error", "ResponseCode": "ErrorMessageSizeExceeded"}]
+        parent = body["ParentItemId"]
+        message = self.messages.get(to_graph(parent["Id"]))
+        if message is None or not message.is_draft:
+            return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
+        assert parent["ChangeKey"] == message.change_key()
+        (item,) = body["Attachments"]
+        cancellation_id = body["CancellationId"]
+        if body["SliceNumber"] == 0:
+            attachment_id = f"upload-{len(self.attachment_slices)}"
+            self.upload_attachment_ids[cancellation_id] = attachment_id
+            self.upload_buffers[cancellation_id] = bytearray()
+        else:
+            attachment_id = self.upload_attachment_ids[cancellation_id]
+            assert item["AttachmentId"] == attachment_id
+        self.upload_buffers[cancellation_id].extend(content)
+        if body["SliceNumber"] + 1 == body["TotalSlices"]:
+            message.attachments.append(
+                FakeAttachment(
+                    attachment_id,
+                    item["Name"],
+                    bytes(self.upload_buffers.pop(cancellation_id)),
+                    item["ContentType"],
+                )
+            )
+        return [
+            {
+                "ResponseClass": "Success",
+                "ResponseCode": "NoError",
+                "Attachments": [{"AttachmentId": attachment_id}],
+                "RootItemChangeKey": message.change_key(),
+            }
+        ]
 
     def _ows_target(self, item_id: dict[str, Any]) -> FakeMessage | None:
         return self.messages.get(to_graph(item_id["Id"]))

@@ -21,6 +21,7 @@ from outlook_connector.domain.models import (
     DraftMessage,
     Folder,
     InboxRule,
+    LocalAttachment,
     Message,
     MessageSummary,
     RuleChange,
@@ -238,6 +239,10 @@ class MailWriter(Protocol):
 
     async def create_draft(self, message: DraftMessage) -> str | None:
         """Save into Drafts without sending; the draft's id when the backend reports it."""
+        ...
+
+    async def add_local_attachment(self, draft_id: str, revision: str, attachment: LocalAttachment) -> None:
+        """Upload one local file to an existing draft. The caller verifies it through MailReader."""
         ...
 
     async def send_draft(self, draft_id: str, revision: str) -> None:

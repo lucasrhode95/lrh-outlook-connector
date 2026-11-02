@@ -32,7 +32,7 @@ MEETING_KINDS: dict[str, MeetingKind] = {
     "meetingDeclined": "declined",
 }
 NEW_REQUEST = (None, "none", "newMeetingRequest")
-MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody,changeKey"
+MESSAGE_FIELDS = SUMMARY_FIELDS + ",bccRecipients,body,uniqueBody,changeKey,size"
 FOLDER_FIELDS = "id,displayName,parentFolderId,childFolderCount,totalItemCount,unreadItemCount,isHidden"
 ATTACHMENT_FIELDS = "id,name,contentType,size,isInline,microsoft.graph.fileAttachment/contentId"
 
@@ -114,6 +114,7 @@ def _summary_fields(data: dict[str, Any]) -> dict[str, Any]:
         "flagged": flag.get("flagStatus") == "flagged",
         "preview": data.get("bodyPreview"),
         "internet_message_id": data.get("internetMessageId"),
+        "size": data.get("size") if isinstance(data.get("size"), int) else None,
         "meeting": meeting(data),
     }
 
