@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="4230" viewBox="0 0 2600 4230" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and three calendar ports. Graph adapters (GraphMailReader, GraphCalendarView) and Outlook Web adapters (OwsMailWriter, OwsRules, OwsCalendarItems, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and three calendar ports. Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -199,7 +199,7 @@
 <text class="section-title" x="118" y="1866"><tspan class="code">Calendar</tspan><tspan class="detail" dx="12">calendar.py</tspan></text>
 <text class="group-title" x="118" y="1903">Methods</text>
 <g><title>Exchange events by words through Search v2, across all dates; one bounded page and a cursor.</title><text class="detail" x="118" y="1933">• <tspan class="code">search_events(query, ...)</tspan></text></g>
-<g><title>One event read through Outlook Web GetItem: agenda verbatim, attendees, join URL, attachment metadata.</title><text class="detail" x="118" y="1960">• <tspan class="code">get_event(event_id)</tspan></text></g>
+<g><title>One event read through Graph: agenda, attendees, response, join URL and attachment metadata.</title><text class="detail" x="118" y="1960">• <tspan class="code">get_event(event_id)</tspan></text></g>
 <text class="group-title" x="118" y="1999">Rules</text>
 <text class="detail" x="118" y="2029">no totals; no cursor at offset 1,000</text>
 <text class="muted" x="118" y="2094">uses <tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">CalendarItemReader</tspan></text>
@@ -324,10 +324,10 @@
 <g><title>Built on its own Graph client with the profile in config.CALENDAR_PROFILE, because the Outlook Graph profile has no calendar scope.</title><text class="detail" x="678" y="3192">profile <tspan class="code">outlook.calendar</tspan> (<tspan class="code">CALENDAR_PROFILE</tspan>)</text></g>
 
 <rect x="1240" y="2975" width="560" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="1258" y="3010">Outlook Web adapters</text>
+<text class="section-title" x="1258" y="3010">Calendar + Outlook adapters</text>
 <g><title>CreateItem (SaveOnly) for drafts and replies; UpdateItem for read, flag and send_draft (SendAndSaveCopy); MoveItem; DeleteItem with MoveToDeletedItems.</title><text class="detail small" x="1258" y="3047"><tspan class="code">OwsMailWriter</tspan>: Create/Update/Move/DeleteItem</text></g>
 <g><title>Inbox-rule actions in OWS's bare-request style.</title><text class="detail small" x="1258" y="3074"><tspan class="code">OwsRules</tspan>: inbox-rule actions</text></g>
-<g><title>GetItem with the default event shape plus body and attachment metadata.</title><text class="detail small" x="1258" y="3101"><tspan class="code">OwsCalendarItems</tspan>: GetItem</text></g>
+<g><title>Event search uses Search v2; event details and attachment reads use Graph under outlook.calendar.</title><text class="detail small" x="1258" y="3101"><tspan class="code">GraphCalendarItems</tspan>: event details + files</text></g>
 <g><title>Search v2 Event/Exchange pages; Cvid and LogicalId kept across one walk. Calls Transport directly.</title><text class="detail small" x="1258" y="3128"><tspan class="code">SubstrateEventSearch</tspan>: Search v2</text></g>
 <g><title>Implements SignatureStore over Outlook Cloud Settings. Calls Transport directly.</title><text class="detail small" x="1258" y="3155"><tspan class="code">CloudSettings</tspan>: signature settings</text></g>
 
@@ -379,7 +379,7 @@
 <rect x="1240" y="3835" width="560" height="290" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1258" y="3873">Profiles used here</text>
 <g><title>Graph Mail.Read for mailbox data and User.Read for the signed-in profile and photo.</title><text class="detail" x="1258" y="3903">• <tspan class="code">outlook.graph</tspan>: Outlook Mobile</text></g>
-<g><title>→ outlook.office.com. Mail changes, inbox rules, native signatures and event details.</title><text class="detail" x="1258" y="3930">• <tspan class="code">outlook.api</tspan>: One Outlook Web</text></g>
+<g><title>→ outlook.office.com. Mail changes, inbox rules and native signatures.</title><text class="detail" x="1258" y="3930">• <tspan class="code">outlook.api</tspan>: One Outlook Web</text></g>
 <g><title>→ Search v2, for calendar event search.</title><text class="detail" x="1258" y="3957">• <tspan class="code">m365.search</tspan>: One Outlook Web</text></g>
 <g><title>Asks for Calendars.Read on the Teams client for the Graph calendar view; the Outlook Graph profile has no calendar scope.</title><text class="detail" x="1258" y="3984">• <tspan class="code">outlook.calendar</tspan>: Teams client</text></g>
 <text class="group-title" x="1258" y="4023">Cache</text>
@@ -401,7 +401,7 @@
 <g><title>The MailReader adapter.</title><text class="detail small" x="1938" y="393">• <tspan class="code">GraphMailReader(Graph(transport))</tspan></text></g>
 <g><title>SQLite file per account fingerprint; everything else reads mail through Mailbox.</title><text class="detail small" x="1938" y="420">• <tspan class="code">Store(account)</tspan> · <tspan class="code">Mailbox(reader, store)</tspan></text></g>
 <text class="detail small" x="1938" y="447">• <tspan class="code">Conversations</tspan> · <tspan class="code">Exports</tspan> · <tspan class="code">Files</tspan></text>
-<g><title>SubstrateEventSearch for search, OwsCalendarItems for details.</title><text class="detail small" x="1938" y="474">• <tspan class="code">Calendar(search, items)</tspan></text></g>
+<g><title>SubstrateEventSearch for search, GraphCalendarItems for event details and files.</title><text class="detail small" x="1938" y="474">• <tspan class="code">Calendar(search, items)</tspan></text></g>
 <g><title>GraphCalendarView on Graph(transport, profile=CALENDAR_PROFILE).</title><text class="detail small" x="1938" y="501">• <tspan class="code">CalendarListing(graph)</tspan></text></g>
 <g><title>Mail-change and inbox-rule adapters on one Ows client.</title><text class="detail small" x="1938" y="528">• <tspan class="code">OwsMailWriter</tspan> · <tspan class="code">OwsRules</tspan></text></g>
 <g><title>Native signatures over Cloud Settings.</title><text class="detail small" x="1938" y="555">• <tspan class="code">Signatures(CloudSettings, account)</tspan></text></g>

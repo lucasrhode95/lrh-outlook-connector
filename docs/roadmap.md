@@ -24,24 +24,6 @@ None open.
 
 ### Improvements
 
-#### Hydrate events through Graph
-
-You ask the agent whether you accepted Thursday's review, and to read its attached `agenda.pdf`.
-`get_calendar_event` reads through Outlook Web (`GetItem`). It returns no response of yours, and the PDF is
-listed but cannot be downloaded: `download_attachment` takes only message ids.
-
-Graph does both. `GET /me/events/{id}` takes every event id the connector returns, after the usual id swap.
-It matched Outlook Web on attendees, join links and text bodies, and it adds your response
-([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
-
-**Change:**
-
-- Hydrate through Graph under `outlook.calendar`, with no Outlook Web fallback. Remove the `GetItem` event
-  read in [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py).
-- List an event's attachments from `/me/events/{id}/attachments`; Graph's `hasAttachments` can say `false`
-  for an occurrence that has a file.
-- Let `download_attachment` take an event id, through `/me/events/{id}/attachments/{id}/$value`.
-
 #### Read Exchange's text and list inline images
 
 A newsletter has a table, a quoted reply and two inline charts. `get_message` reads it in one of two ways
