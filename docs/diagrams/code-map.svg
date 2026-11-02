@@ -292,6 +292,7 @@
 <g><title>Attachment metadata per message.</title><text class="detail" x="906" y="2719">• <tspan class="code">list_attachments(_many)</tspan></text></g>
 <g><title>An attachment, or the message's MIME, streamed to a file.</title><text class="detail" x="906" y="2746">• <tspan class="code">download_*</tspan></text></g>
 <g><title>The signed-in user's name, address and photo.</title><text class="detail" x="906" y="2773">• <tspan class="code">profile(_photo)</tspan></text></g>
+<g><title>Draft status, version and folder, plus stored size expanded through Integer 0x0E08; no body or attachment listing.</title><text class="detail" x="906" y="2800">• <tspan class="code">draft_state</tspan></text></g>
 <rect x="676" y="2822" width="32" height="26" rx="5" fill="#2b6cb0"/>
 <text class="badge" x="692" y="2841" text-anchor="middle">G</text>
 <text class="section-title" x="718" y="2843"><tspan class="code">CalendarViewReader</tspan></text>
@@ -301,11 +302,12 @@
 <rect x="1256" y="2607" width="32" height="26" rx="5" fill="#b7791f"/>
 <text class="badge" x="1272" y="2626" text-anchor="middle">O</text>
 <text class="section-title" x="1298" y="2628"><tspan class="code">MailWriter</tspan><tspan class="detail" dx="12">ports.py</tspan></text>
-<g><title>Save into Drafts without sending, then upload a local file in raw 14 MiB slices; the caller confirms it through Graph.</title><text class="detail" x="1258" y="2665">• <tspan class="code">create_draft</tspan> · <tspan class="code">add_local_attachment</tspan></text></g>
+<g><title>Save into Drafts without sending.</title><text class="detail" x="1258" y="2665">• <tspan class="code">create_draft</tspan></text></g>
 <g><title>Send an existing draft as it is, keeping a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2692">• <tspan class="code">send_draft</tspan></text></g>
 <g><title>Identity claims (tid, oid, upn) of the Outlook credential.</title><text class="detail" x="1258" y="2719">• <tspan class="code">account</tspan></text></g>
 <g><title>Read or unread; one outcome per message.</title><text class="detail" x="1529" y="2665">• <tspan class="code">set_read</tspan> · <tspan class="code">set_flag</tspan></text></g>
 <g><title>Move to a folder, or to Deleted Items; there is no hard delete.</title><text class="detail" x="1529" y="2692">• <tspan class="code">move</tspan> · <tspan class="code">delete</tspan></text></g>
+<g><title>Upload a local file in raw 14 MiB slices; the caller confirms it through Graph.</title><text class="detail small" x="1529" y="2719">• <tspan class="code">add_local_attachment</tspan></text></g>
 <g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">RuleWriter</tspan> · <tspan class="code">*_rule</tspan></text></g>
 <g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">SignatureStore</tspan> · settings, contents, writes</text></g>
 <g><title>Hydrate one event by its Outlook item id.</title><text class="detail" x="1258" y="2812"><tspan class="code">CalendarItemReader</tspan> · <tspan class="code">get_event</tspan></text></g>
@@ -350,6 +352,7 @@
 <g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read: reads, retried like GETs.</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan></text></g>
 <g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="3370">• <tspan class="code">call_request(action, ...)</tspan></text></g>
 <g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="3397">• <tspan class="code">account()</tspan></text></g>
+<g><title>CreateAttachment envelope on /owa/service.svc/CreateAttachmentFromLocalFile with metadata in the header and raw slice bytes.</title><text class="detail small" x="1470" y="3397">• <tspan class="code">upload_file_slice</tspan></text></g>
 
 <path class="call-flow" d="M940 3438 V3480"/>
 <path class="call-flow" d="M1520 3438 V3480"/>
