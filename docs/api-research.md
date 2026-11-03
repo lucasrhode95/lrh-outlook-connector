@@ -614,7 +614,10 @@ Deleted Items; files of random bytes):
   `ParentItemId`, chained a 15 MiB file in two slices.
 - **Listed size.** Graph listed each uploaded file above its byte count: 1,000 bytes as 1,192, 14 MiB as
   14,680,256 (+192), 15 MiB as 15,728,858 (+218). Each download matched the file byte for byte. A size
-  check must allow that overhead.
+  check must allow that overhead. The connector's own `create_draft` then uploaded a 15 MiB file, listed
+  at +238, confirmed it and moved the draft to Deleted Items.
+- **Selected-calendar paging** through the connector's `list_calendar_events` followed three pages of a
+  secondary calendar (§3.8).
 
 ## 5. Native signatures (Outlook Cloud Settings)
 

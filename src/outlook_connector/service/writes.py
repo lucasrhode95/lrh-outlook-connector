@@ -44,7 +44,7 @@ ADDRESS = re.compile(ADDRESS_PATTERN)
 # Stored size (Integer 0x0E08). A draft stored at 35,655,221 bytes was delivered; one at 37,023,315 bounced
 # with "The limit is 35 MB" (research §4.6, live 2026-10-15 and 2026-11-03).
 MAX_SEND_BYTES = 35 * 1024 * 1024
-# Graph lists a file attachment's size above its byte count: 192 to 218 bytes more for uploaded files
+# Graph lists a file attachment's size above its byte count: 192 to 238 bytes more for uploaded files
 # (research §4.6, live 2026-11-03). Read-back accepts that overhead, never less than the file.
 ATTACHMENT_SIZE_OVERHEAD = 64 * 1024
 

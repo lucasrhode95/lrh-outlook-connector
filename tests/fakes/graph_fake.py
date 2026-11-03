@@ -23,7 +23,7 @@ import httpx
 from outlook_connector.remote.ids import to_graph, to_ows
 from outlook_connector.remote.urls import GRAPH_ROOT
 
-# Graph lists an attachment's size above its byte count (192 to 218 bytes live, 2026-11-03)
+# Graph lists an attachment's size above its byte count (192 to 238 bytes live, 2026-11-03)
 GRAPH_ATTACHMENT_OVERHEAD = 200
 REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
