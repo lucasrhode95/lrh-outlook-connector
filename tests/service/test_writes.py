@@ -117,7 +117,45 @@ async def test_local_files_upload_in_chained_14_mib_slices_and_graph_confirms_th
     assert first["CancellationId"] == second["CancellationId"]
     assert first["CancellationId"]
     assert "AttachmentId" not in first["Attachments"][0]
-    assert second["Attachments"][0]["AttachmentId"] == "upload-1"
+    assert second["Attachments"][0]["AttachmentId"]["Id"] == "upload-1"  # the whole returned object
+
+
+@pytest.mark.parametrize(
+    ("listed_extra", "confirmed"), [(-1, False), (0, True), (218, True), (70_000, False)]
+)
+async def test_graph_confirms_a_file_listed_at_its_size_plus_graphs_overhead(
+    writes: Writes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, listed_extra: int, confirmed: bool
+) -> None:
+    path = tmp_path / "report.txt"
+    path.write_bytes(b"synthetic report")
+    listing = writes.mailbox.reader.list_attachments
+
+    async def listed_at(message_id: str) -> list[Any]:
+        return [
+            a.model_copy(update={"size": len(b"synthetic report") + listed_extra})
+            for a in await listing(message_id)
+        ]
+
+    monkeypatch.setattr(writes.mailbox.reader, "list_attachments", listed_at)
+    if confirmed:
+        assert (await writes.create_draft(message(attachments=[str(path)]))).verified
+    else:
+        with pytest.raises(Upstream, match="report.txt.*Deleted Items"):
+            await writes.create_draft(message(attachments=[str(path)]))
+
+
+async def test_files_over_the_send_limit_are_refused_before_the_draft_is_created(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    paths = []
+    for name in ("a.bin", "b.bin"):
+        path = tmp_path / name
+        with path.open("wb") as handle:
+            handle.truncate(18 * 1024 * 1024)  # 36 MiB together, over the 35 MiB limit
+        paths.append(str(path))
+    with pytest.raises(InvalidRequest, match="35 MiB"):
+        await writes.create_draft(message(attachments=paths))
+    assert not fake.ows_calls
 
 
 async def test_unreadable_local_attachment_fails_before_draft_creation(
@@ -294,15 +332,22 @@ async def test_send_uses_only_the_stored_draft(writes: Writes, fake: FakeGraph) 
         await writes.send_draft(draft.id)
 
 
-async def test_send_refuses_a_draft_over_the_conservative_send_limit(writes: Writes, fake: FakeGraph) -> None:
+async def test_send_refuses_a_draft_over_the_send_limit(writes: Writes, fake: FakeGraph) -> None:
     draft = await writes.create_draft(message())
-    fake.messages[draft.id].size_override = 34 * 1024 * 1024 + 1
+    fake.messages[draft.id].size_override = 35 * 1024 * 1024 + 1
 
-    with pytest.raises(InvalidRequest, match="too large to send.*34 MiB"):
+    with pytest.raises(InvalidRequest, match="too large to send.*35 MiB"):
         await writes.send_draft(draft.id)
 
     assert fake.sent_drafts == []
     assert [action for action, _ in fake.ows_calls].count("UpdateItem") == 0
+
+
+async def test_send_accepts_a_draft_the_size_outlook_delivered(writes: Writes, fake: FakeGraph) -> None:
+    draft = await writes.create_draft(message())
+    fake.messages[draft.id].size_override = 35_655_221  # a 34 MiB file's draft, delivered (research §4.6)
+
+    assert (await writes.send_draft(draft.id)).status == "sent"
 
 
 async def test_a_draft_edited_after_the_send_read_it_is_not_sent(

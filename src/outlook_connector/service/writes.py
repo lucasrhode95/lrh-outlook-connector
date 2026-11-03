@@ -41,7 +41,12 @@ from outlook_connector.service.passive_html import passive_start_tags
 from outlook_connector.service.signatures import Signatures
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
-MAX_SEND_BYTES = 34 * 1024 * 1024
+# Stored size (Integer 0x0E08). A draft stored at 35,655,221 bytes was delivered; one at 37,023,315 bounced
+# with "The limit is 35 MB" (research §4.6, live 2026-10-15 and 2026-11-03).
+MAX_SEND_BYTES = 35 * 1024 * 1024
+# Graph lists a file attachment's size above its byte count: 192 to 218 bytes more for uploaded files
+# (research §4.6, live 2026-11-03). Read-back accepts that overhead, never less than the file.
+ATTACHMENT_SIZE_OVERHEAD = 64 * 1024
 
 
 class Writes:
@@ -94,11 +99,10 @@ class Writes:
         The host obtains human approval; the connector never reconstructs or retries the message.
         """
         draft = await self._draft(draft_id)
-        if draft.size is None:
-            raise Upstream("Outlook did not report this draft's size, so it was not sent.")
-        if draft.size > MAX_SEND_BYTES:
+        # An unknown size is sent: Outlook's own limit still answers an oversized send with a bounce.
+        if draft.size is not None and draft.size > MAX_SEND_BYTES:
             raise InvalidRequest(
-                f"This draft is too large to send safely ({draft.size:,} bytes; connector limit is 34 MiB)."
+                f"This draft is too large to send ({draft.size:,} bytes stored; Outlook's limit is 35 MiB)."
             )
         if not draft.revision:
             raise Upstream("Outlook did not report the draft's version, so it was not sent.")
@@ -224,19 +228,17 @@ class Writes:
                                 ):
                                     findings.append("A signature image changed in the server draft.")
                     if expected_local:
-                        found = Counter(
-                            (attachment.name, attachment.size)
-                            for attachment in attachments
-                            if not attachment.is_inline
-                        )
+                        unmatched = [attachment for attachment in attachments if not attachment.is_inline]
                         for local in expected_local:
-                            key = (local.name, local.size)
-                            if found[key]:
-                                found[key] -= 1
+                            match = next(
+                                (attachment for attachment in unmatched if _confirms(attachment, local)), None
+                            )
+                            if match is not None:
+                                unmatched.remove(match)
                             else:
                                 failed_local.append(local)
                                 findings.append(
-                                    f"Attachment '{local.name}' is missing or has a different size."
+                                    f"Attachment '{local.name}' is missing or smaller than the file."
                                 )
                 result = DraftResult(
                     id=draft_id,
@@ -324,8 +326,19 @@ class Writes:
             )
 
 
+def _confirms(attachment: Attachment, local: LocalAttachment) -> bool:
+    """Graph's listed size is the file plus a small overhead (``ATTACHMENT_SIZE_OVERHEAD``)."""
+    size = attachment.size
+    return (
+        attachment.name == local.name
+        and size is not None
+        and local.size <= size <= local.size + ATTACHMENT_SIZE_OVERHEAD
+    )
+
+
 def _local_attachments(paths: list[str]) -> list[LocalAttachment]:
-    """Validate every path before CreateItem so a missing local file never leaves a draft behind."""
+    """Validate every path before CreateItem so a missing local file never leaves a draft behind, and
+    refuse files that together exceed the send limit before any of them is uploaded."""
     out: list[LocalAttachment] = []
     for value in paths:
         path = Path(value)
@@ -340,6 +353,11 @@ def _local_attachments(paths: list[str]) -> list[LocalAttachment]:
         except OSError as exc:
             raise InvalidRequest(f"Cannot read local attachment '{path}': {exc}") from None
         out.append(LocalAttachment(path=str(path), name=path.name, size=size))
+    total = sum(local.size for local in out)
+    if total > MAX_SEND_BYTES:
+        raise InvalidRequest(
+            f"The attachments total {total:,} bytes; a draft over 35 MiB cannot be sent, so none was created."
+        )
     return out
 
 

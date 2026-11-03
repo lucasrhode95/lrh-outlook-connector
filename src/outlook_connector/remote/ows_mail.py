@@ -88,9 +88,11 @@ class OwsMailWriter(MailWriter):
                             "the upload may have completed."
                         )
                     previous_attachment_id = returned_id
-                    returned_change_key = answer.get("RootItemChangeKey")
-                    if not isinstance(returned_change_key, str) and isinstance(returned_id, dict):
-                        returned_change_key = returned_id.get("RootItemChangeKey")
+                    # Outlook returns {Id, RootItemId, RootItemChangeKey} (live 2026-11-03); the next
+                    # slice carries the whole object back and is bound to the new change key.
+                    returned_change_key = (
+                        returned_id.get("RootItemChangeKey") if isinstance(returned_id, dict) else None
+                    )
                     if isinstance(returned_change_key, str) and returned_change_key:
                         change_key = returned_change_key
                     offset += len(content)

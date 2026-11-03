@@ -23,6 +23,8 @@ import httpx
 from outlook_connector.remote.ids import to_graph, to_ows
 from outlook_connector.remote.urls import GRAPH_ROOT
 
+# Graph lists an attachment's size above its byte count (192 to 218 bytes live, 2026-11-03)
+GRAPH_ATTACHMENT_OVERHEAD = 200
 REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
 
@@ -468,7 +470,7 @@ class FakeGraph:
             self.upload_buffers[cancellation_id] = bytearray()
         else:
             attachment_id = self.upload_attachment_ids[cancellation_id]
-            assert item["AttachmentId"] == attachment_id
+            assert item["AttachmentId"]["Id"] == attachment_id  # the previous slice's whole object
         self.upload_buffers[cancellation_id].extend(content)
         if body["SliceNumber"] + 1 == body["TotalSlices"]:
             message.attachments.append(
@@ -483,8 +485,17 @@ class FakeGraph:
             {
                 "ResponseClass": "Success",
                 "ResponseCode": "NoError",
-                "Attachments": [{"AttachmentId": attachment_id}],
-                "RootItemChangeKey": message.change_key(),
+                # Outlook's shape (live 2026-11-03): the change key is inside AttachmentId
+                "Attachments": [
+                    {
+                        "__type": "FileAttachment:#Exchange",
+                        "AttachmentId": {
+                            "Id": attachment_id,
+                            "RootItemId": parent["Id"],
+                            "RootItemChangeKey": message.change_key(),
+                        },
+                    }
+                ],
             }
         ]
 
@@ -649,7 +660,7 @@ class FakeGraph:
             "id": a.id,
             "name": a.name,
             "contentType": a.content_type,
-            "size": len(a.data),
+            "size": len(a.data) + GRAPH_ATTACHMENT_OVERHEAD,
             "isInline": a.inline,
         }
         if a.kind == "fileAttachment":

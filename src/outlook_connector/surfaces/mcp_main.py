@@ -166,7 +166,7 @@ remains in Deleted Items; tell the user. Outlook edits and attachments are not c
 There is no version check against the old draft; read it first if needed.
 - Sending: only after the user explicitly asks, call send_draft with the existing Microsoft draft id.
 Never confirm on the user's behalf. It sends the stored draft without changing it, once.
-Drafts with a stored size over 34 MiB are refused before sending. On status "unknown", ask the user
+Drafts with a stored size over 35 MiB are refused before sending. On status "unknown", ask the user
 to check Sent Items and Outbox before any further send.
 - Changing messages: set_read_state, set_flag, move_messages and delete_messages take \
 explicit message ids (from list, search or get_conversation), at most 100 per call, never a query; \
@@ -616,7 +616,9 @@ def build_server(context: AppContext) -> FastMCP:
         Set signature to select a native signature by exact name, or include_signature=False to
         suppress all signatures. A missing or unreadable selected signature raises instead of falling back.
         ``attachments`` accepts local file paths. Files upload after the draft is saved, in 14 MiB
-        slices, and Graph confirms each file by name and size. If an upload or confirmation fails,
+        slices, and Graph confirms each file by name and size (Graph lists a little more than the
+        file's bytes). Files totaling over 35 MiB are refused before any draft is saved. If an upload or
+        confirmation fails,
         the partial draft moves to Deleted Items and the error names the file.
         Drafts are composed once. To change one, create a full replacement (using the same
         ``reply_to_message_id`` and ``reply_all`` choice for a reply), verify its read-back, then delete
@@ -646,7 +648,7 @@ def build_server(context: AppContext) -> FastMCP:
     async def send_draft(draft_id: str) -> SendResult:
         """Send this existing server draft unchanged, once, only on the user's explicit send request.
 
-        Drafts whose stored size exceeds the conservative 34 MiB send cutoff are refused with a readable
+        Drafts whose stored size exceeds 35 MiB, Outlook's send limit, are refused with a readable
         error before Outlook is asked to send them.
         """
         return await (await services()).writes.send_draft(draft_id)

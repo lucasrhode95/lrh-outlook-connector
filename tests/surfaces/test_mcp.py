@@ -112,7 +112,7 @@ async def test_tools_and_annotations(server: FastMCP) -> None:
     assert "Never confirm on the user's behalf" in (server.instructions or "")
     assert "Drafts are composed once" in (server.instructions or "")
     assert "local file paths" in (server.instructions or "")
-    assert "34 MiB" in (server.instructions or "")
+    assert "35 MiB" in (server.instructions or "")
     assert "Never delete first" in (server.instructions or "")
     assert "list_calendars" in (server.instructions or "")
 

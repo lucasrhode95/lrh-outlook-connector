@@ -183,7 +183,7 @@
 <text class="section-title" x="691" y="1567"><tspan class="code">Writes</tspan><tspan class="detail" dx="12">writes.py</tspan></text>
 <text class="group-title" x="691" y="1604">Methods</text>
 <g><title>Save explicit text or HTML into Drafts with the native signature; upload only the listed local files and verify their names and sizes through Graph. Failed uploads move the partial draft to Deleted Items. Replies are checked for intact quoted history.</title><text class="detail" x="691" y="1634">• <tspan class="code">create_draft(message)</tspan></text></g>
-<g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. Refuses drafts over 34 MiB; an unclear answer is checked against Sent Items and never resent.</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
+<g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. Refuses drafts stored over 35 MiB; an unclear answer is checked against Sent Items and never resent.</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
 <g><title>Refuses to write unless the Outlook sign-in is the bound Microsoft account.</title><text class="detail" x="691" y="1688">• <tspan class="code">check_account()</tspan></text></g>
 <text class="muted" x="691" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">MailWriter</tspan> · <tspan class="code">Signatures</tspan></text>
 

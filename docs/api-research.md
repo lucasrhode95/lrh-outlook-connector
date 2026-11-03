@@ -598,6 +598,23 @@ file as raw request bytes, not base64:
 - **Send.** That 34 MiB single-file draft (35,651,584 bytes of file) was sent to the owner and delivered
   without an NDR. With the 35.3 MiB bounce above, the send ceiling lies between 34 and 35.3 MiB. The
   NDR's "35 MB" fits 35 MiB rather than 35,000,000 bytes (an inference).
+- **Stored sizes** (live 2026-11-03, read-only, `Integer 0x0E08`): that delivered draft was stored at
+  35,655,221 bytes (the sent copy 35,660,243), above 34 MiB because of its body and headers. The bounced
+  2026-10-15 message was stored at 37,023,315 bytes. A stored-size cutoff at 34 MiB would have refused a
+  draft Outlook delivered.
+
+**Upload replies and listed sizes** (live 2026-11-03, one synthetic self-draft, never sent, then moved to
+Deleted Items; files of random bytes):
+
+- **Route.** `POST /owa/service.svc/CreateAttachmentFromLocalFile` (the path form Outlook Web uses) and
+  `service.svc?action=CreateAttachmentFromLocalFile&app=Mail` both answered 200 with `Success`.
+- **Reply.** Each slice returns `Attachments[0].AttachmentId` as an object `{Id, RootItemId,
+  RootItemChangeKey}`; there is no top-level `RootItemChangeKey`. The last slice also returns `ContentId` and
+  `LastModifiedTime`. Passing the whole object back on the next slice, with that change key on
+  `ParentItemId`, chained a 15 MiB file in two slices.
+- **Listed size.** Graph listed each uploaded file above its byte count: 1,000 bytes as 1,192, 14 MiB as
+  14,680,256 (+192), 15 MiB as 15,728,858 (+218). Each download matched the file byte for byte. A size
+  check must allow that overhead.
 
 ## 5. Native signatures (Outlook Cloud Settings)
 
