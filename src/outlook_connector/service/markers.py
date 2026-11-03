@@ -9,27 +9,29 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from outlook_connector.domain.body import BodyPart, ImagePart, TextPart
-from outlook_connector.domain.models import Attachment
+from outlook_connector.domain.models import Attachment, CalendarAttachment
 from outlook_connector.service.export.attachments import dedupe, safe_name, wanted
 
 NAMED_KINDS = ("file", "item", "reference")
 DOWNLOADABLE_KINDS = ("file", "item")
 
 
-def file_names(attachments: Sequence[Attachment]) -> dict[str, str]:
+def file_names(attachments: Sequence[Attachment | CalendarAttachment]) -> dict[str, str]:
     """Attachment id -> the name its marker shows, unique within the message, in listing order."""
     taken: set[str] = set()
     return {
         a.id: dedupe(safe_name(a.name, fallback="attachment", eml=a.kind == "item"), taken)
         for a in attachments
-        if a.kind in NAMED_KINDS
+        if a.id is not None and a.kind in NAMED_KINDS
     }
 
 
-def named(attachments: Sequence[Attachment]) -> list[Attachment]:
-    """The attachments with ``file_name`` set to their marker name."""
+def named[Named: (Attachment, CalendarAttachment)](attachments: Sequence[Named]) -> list[Named]:
+    """The attachments with ``file_name`` set to their marker name, the name downloads accept."""
     names = file_names(attachments)
-    return [a.model_copy(update={"file_name": names.get(a.id)}) for a in attachments]
+    return [
+        a.model_copy(update={"file_name": names.get(a.id) if a.id is not None else None}) for a in attachments
+    ]
 
 
 def with_markers(

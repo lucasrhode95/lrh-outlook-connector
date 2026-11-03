@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 
 from outlook_connector.domain.errors import InvalidRequest
-from outlook_connector.domain.models import CalendarEvent
+from outlook_connector.domain.models import CalendarAttachment, CalendarEvent
 from outlook_connector.remote.ports import CalendarSearchPage
 from outlook_connector.service import cursors
 from outlook_connector.service.calendar import EVENT_SEARCH_OFFSET_LIMIT, Calendar
@@ -24,10 +24,26 @@ class SearchStub:
 class ItemsStub:
     def __init__(self) -> None:
         self.event_ids: list[str] = []
+        self.event = CalendarEvent(subject="Synthetic event")
 
     async def get_event(self, event_id: str) -> CalendarEvent:
         self.event_ids.append(event_id)
-        return CalendarEvent(id=event_id, subject="Synthetic event")
+        return self.event.model_copy(update={"id": event_id})
+
+
+async def test_event_publishes_safe_unique_download_names() -> None:
+    items = ItemsStub()
+    items.event.attachments = [
+        CalendarAttachment(id="synthetic-a", name="report:one.txt"),
+        CalendarAttachment(id="synthetic-b", name="report:one.txt"),
+        CalendarAttachment(id="synthetic-c", name="Forwarded", kind="item"),
+    ]
+    event = await Calendar(SearchStub([]), items).get_event("synthetic-event")
+    assert [a.file_name for a in event.attachments] == [
+        "report_one.txt",
+        "report_one (2).txt",
+        "Forwarded.eml",
+    ]
 
 
 def _event(event_id: str, start: str | None) -> CalendarEvent:

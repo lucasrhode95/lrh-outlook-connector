@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="1820" viewBox="0 0 2600 1820" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector architecture</title>
-  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads, verification and calendar windows; OWS handles mail changes, inbox rules and event details; Search v2 finds calendar events; Cloud Settings handles native signatures. Tokens come from Entra ID through the shared lrh-m365-auth cache, encrypted and locked across processes. The store keeps only the folder cache and account binding.</desc>
+  <desc id="description">Three short-lived entry points: the MCP server (one stdio process per agent session), the local UI (started on demand), and the sign-in command. MCP and UI are thin surfaces over one service layer, which holds every domain decision and uses Pydantic domain models. The service calls the remote layer and local SQLite store. Graph handles mail-data reads, attachment downloads, verification and calendar windows and event details; OWS handles mail changes and inbox rules; Search v2 finds calendar events; Cloud Settings handles native signatures. Tokens come from Entra ID through the shared lrh-m365-auth cache, encrypted and locked across processes. The store keeps only the folder cache and account binding.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -26,7 +26,7 @@
 
   <rect width="2600" height="1820" fill="#fff"/>
   <text class="title" x="1300" y="70" text-anchor="middle">Outlook connector architecture</text>
-  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail and calendar · OWS changes, rules and events · Search v2 events · Cloud Settings signatures · minimal local state</text>
+  <text class="subtitle" x="1300" y="110" text-anchor="middle">Graph mail and calendar · OWS changes and rules · Search v2 events · Cloud Settings signatures · minimal local state</text>
 
   <!-- MCP surface. -->
   <rect x="80" y="170" width="790" height="210" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -183,7 +183,7 @@
 
   <rect x="1425" y="1138" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="1437" y="1162" style="font-size:20px">graph_calendar.py</text>
-  <text class="detail" x="1437" y="1188" style="font-size:18px">calendar view (Graph)</text>
+  <text class="detail" x="1437" y="1188" style="font-size:18px">calendar view + event details (Graph)</text>
 
   <rect x="660" y="1212" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="672" y="1236" style="font-size:20px">ows.py</text>
@@ -202,8 +202,8 @@
   <text class="detail" x="1437" y="1262" style="font-size:18px">read · write rules</text>
 
   <rect x="660" y="1286" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-  <text class="section-title code" x="672" y="1310" style="font-size:20px">ows_calendar.py</text>
-  <text class="detail" x="672" y="1336" style="font-size:18px">event details · fallback</text>
+  <text class="section-title code" x="672" y="1310" style="font-size:20px">(no event OWS read)</text>
+  <text class="detail" x="672" y="1336" style="font-size:18px">Graph is the only event reader</text>
 
   <rect x="915" y="1286" width="245" height="64" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
   <text class="section-title code" x="927" y="1310" style="font-size:20px">substrate_events.py</text>

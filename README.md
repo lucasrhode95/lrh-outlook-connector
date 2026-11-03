@@ -138,11 +138,11 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `search_messages` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Search messages with folder, date-window and scope filters |
 | `search_calendar_events` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Search Exchange events online across all dates, with bounded continuation |
 | `list_calendar_events` | [`service/calendar_listing.py`](src/outlook_connector/service/calendar_listing.py) | List the events overlapping a window in time order, Graph first; `contains` and descriptions need Graph |
-| `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, join URL and attachment metadata |
+| `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, response, join URL and attachment metadata through Graph |
 | `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
 | `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
 | `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List all attachment metadata: file names, sizes, types and inline image IDs |
-| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's files locally by their listed names, also used in text markers |
+| `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's or event's files locally by their listed names |
 | `save_message_mime` | [`service/files.py`](src/outlook_connector/service/files.py) | Save the original message as an .eml file |
 | `export_messages` | [`service/export/`](src/outlook_connector/service/export/) | Export conversations, messages or a folder/date window |
 | `list_rules`, `create_rule`, `update_rule`, `reorder_rules`, `delete_rule` | [`service/rules.py`](src/outlook_connector/service/rules.py) | Read rules or propose and confirm supported changes |
@@ -151,6 +151,8 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `set_read_state`, `set_flag`, `move_messages`, `delete_messages` | [`service/mutations.py`](src/outlook_connector/service/mutations.py) | Change read state, flags and message locations |
 
 ## Microsoft 365 connectors
+
+Event reads publish each attachment's `file_name`; pass that name to `download_attachment(event_id=...)`.
 
 This repository is part of the `lrh-*` **Microsoft 365** connectors: local tools that give MCP agents
 access to a common corporate environment, its mail and calendar, chats and meetings, and files. Each

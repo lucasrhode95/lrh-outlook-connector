@@ -75,7 +75,7 @@ Only rules that the code layout does not make obvious are listed here. The per-t
 
 The only id converter: a Graph immutable id becomes an OWS ItemId by swapping the base64 alphabet (`-`→`/`, `_`→`+`); conversation ids likewise (research §4.2). The synthetic mailbox uses the same helpers.
 
-### 5.4 Graph: [`graph.py`](../src/outlook_connector/remote/graph.py), [`graph_mail.py`](../src/outlook_connector/remote/graph_mail.py), [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py)
+### 5.4 Graph: [`graph.py`](../src/outlook_connector/remote/graph.py), [`graph_mail.py`](../src/outlook_connector/remote/graph_mail.py), [`graph_calendar.py`](../src/outlook_connector/remote/graph_calendar.py), [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py)
 
 - Every call sends `Prefer: IdType="ImmutableId"`. Paging follows nextLink on the Graph host and stops at a repeated link.
 - **`$batch`**, up to 20 sub-requests: request ids are numbers mapped back (Graph compares ids case-insensitively, and immutable ids can differ only by case); at most 2 batches in flight per process; throttled or temporarily failing items (429/502/503/504) are re-sent in new batches after Retry-After, for up to 4 rounds; results stay per item, so callers report failures per message.
@@ -85,15 +85,16 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - `count_messages` returns per-folder counts in one `$batch` (`$count`, `ConsistencyLevel: eventual`); a failed folder is left out instead of hiding the others.
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
 - Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
+- `GraphCalendarView` reads calendar windows; `GraphCalendarItems` hydrates `/me/events/{id}` and always reads its `/attachments` collection, with event downloads on `/me/events/{id}/attachments/{attachment-id}/$value` under `outlook.calendar` (research §3.8).
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
 - [`html_body.py`](../src/outlook_connector/remote/html_body.py) maps HTML bodies to ordered text and image parts ([`domain/body.py`](../src/outlook_connector/domain/body.py)); attachment rendering is described in §8.6.
 
-### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py), calendar adapters
+### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py)
 
 - Bearer-only envelope (research §4.1–4.2): payloads up to 2,048 characters go in the `X-OWA-UrlPostData` header; the anchor mailbox is the Outlook token's upn.
 - Two request styles. `Ows.call` sends one item action in the JsonRequest envelope; an item whose ResponseClass is not Success/Warning raises with its ResponseCode. `Ows.call_request` sends inbox-rule actions as the bare request object (research §4.4); `WasSuccessful`/`ErrorCode` decide success, and an answer without them is an unknown outcome. `call_read` is the retryable read path.
 - Writes: drafts are `CreateItem` (SaveOnly), and replies use `ReplyToItem`/`ReplyAllToItem` with explicit recipients and an HTML body so the quoted original keeps its formatting; signature images go in as CID-linked inline attachments. `send_draft` is `UpdateItem` with SendAndSaveCopy and no field changes, bound to the change key the draft was read at (NeverOverwrite); `SendItem` is not supported over OWS. Read state and flags are one `SetItemField` per message with read receipts suppressed; `MoveItem` by distinguished or folder id; `DeleteItem` with MoveToDeletedItems only. Conversation read state is done per message, not with ApplyConversationAction. Writes return an outcome per message; a write is resent only when Microsoft refused it as throttled or unavailable (429, 503) or the connection never opened.
-- **Calendar search and details.** [`substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) calls Outlook-hosted Search v2 (`m365.search`, Event/Exchange) and keeps `Cvid` and `LogicalId` across the pages of one walk. [`ows_calendar.py`](../src/outlook_connector/remote/ows_calendar.py) hydrates a result with `GetItem` (default shape plus body and attachment metadata, no attachment bytes). [`service/calendar.py`](../src/outlook_connector/service/calendar.py) keeps agenda text verbatim with its truncation flag, omits Search v2 totals (recurring totals were inconsistent), and issues no cursor at offset 1,000, which Search v2 refuses (research §6.1). Events are never mapped to Teams resources automatically.
+- **Calendar search.** [`substrate_events.py`](../src/outlook_connector/remote/substrate_events.py) calls Outlook-hosted Search v2 (`m365.search`, Event/Exchange) and keeps `Cvid` and `LogicalId` across the pages of one walk. [`service/calendar.py`](../src/outlook_connector/service/calendar.py) omits Search v2 totals (recurring totals were inconsistent), and issues no cursor at offset 1,000, which Search v2 refuses (research §6.1). Events are never mapped to Teams resources automatically.
 - **Calendar windows through Graph.** [`graph_calendar.py`](../src/outlook_connector/remote/graph_calendar.py) reads `/me/calendarView` under `config.CALENDAR_PROFILE` (`outlook.calendar`, on the Teams client; the Outlook Graph profile has no calendar scope), asks for UTC times and text bodies, refuses non-UTC times, and converts ids to the Outlook Web form for `get_calendar_event`. [`service/calendar_listing.py`](../src/outlook_connector/service/calendar_listing.py) pages Graph's view and reports a Graph failure as it is; there is no Outlook Web fallback. A cursor carries Graph's next link (research §3.8).
 
 ### 5.6 [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py)
@@ -188,13 +189,13 @@ vocabulary.
 
 ## 6. Capability routing and portability
 
-Graph handles mail-data reads and read-after-write checks; OWS handles mail changes, inbox rules and event details; Cloud Settings handles signatures; Search v2 finds events. The Outlook profile is therefore needed by some read-only tools too. This routing reflects the tenant's grants (research §2), not a fixed split between reads and writes.
+Graph handles mail-data reads and read-after-write checks; OWS handles mail changes and inbox rules; Cloud Settings handles signatures; Search v2 finds events; Graph under `outlook.calendar` hydrates events. The Outlook profile is therefore needed by some read-only tools too. This routing reflects the tenant's grants (research §2), not a fixed split between reads and writes.
 
 | Capability | Port | Adapter | Token profile |
 |---|---|---|---|
 | Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | MailReader | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
 | Exchange event search | CalendarSearchReader | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
-| Selected event hydration and attachment metadata | CalendarItemReader | [OwsCalendarItems](../src/outlook_connector/remote/ows_calendar.py) | `outlook.api` |
+| Selected event hydration, attachment metadata and bytes | CalendarItemReader | [GraphCalendarItems](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` (`config.CALENDAR_PROFILE`) |
 | Calendar events in a window (`/me/calendarView`) | CalendarViewReader | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` (`config.CALENDAR_PROFILE`) |
 | Draft creation and send; read-state, flag, move and soft-delete changes | MailWriter | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
 | List and manage inbox rules | RuleWriter | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
@@ -320,7 +321,7 @@ Lists a message's attachments: `id`, `name`, `file_name` (the name the text and 
 
 #### `download_attachment`
 
-Saves a message's files by the names its text shows, given in `names` (case-insensitive), or all of its files when `names` is omitted, and returns `files` (local path, name, content type and size of each) and `unavailable` (name and reason of each file it could not save). Read the files with your own file tools.
+Saves a message's or event's files by the names listed, given in `names` (case-insensitive), or all downloadable files when `names` is omitted. Provide exactly one of `message_id` and `event_id`. Event files are listed and downloaded through Graph under `outlook.calendar`; the event itself is not read. The tool returns `files` (local path, name, content type and size of each) and `unavailable` (name and reason of each file it could not save). Read the files with your own file tools.
 
 - An unknown name is refused before anything is downloaded, and the error lists the names there are.
 - Each file is fetched once into the download cache, one folder per message attachment, and published under its name only when complete; a later call reuses it and keeps it another week.
@@ -391,10 +392,13 @@ Searches Exchange calendar events online through Microsoft Search v2, for words 
 
 #### `get_calendar_event`
 
-Hydrates one event by `event_id`: subject, start and end, organizer, required and optional attendees, location, response status, `body_text` (the agenda, verbatim), `teams_join_url` and attachment metadata. Ids from either calendar tool work; ids from `list_calendar_events` were checked live on 2026-10-12 ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)). The event is read through Outlook Web (`GetItem`, `outlook.api`).
+Event attachments expose `file_name`, the safe, unique name accepted by downloads, and retain their
+`kind` (file, attached item, cloud reference or unknown). Raw `name` remains available as metadata.
 
-- `body_truncated` is set when Outlook reports that the agenda was cut.
-- Event attachments are listed but cannot be downloaded through this connector.
+Hydrates one event by `event_id`: subject, start and end, organizer, required and optional attendees, location, response status, `body_text` (the agenda), `teams_join_url` and attachment metadata. Ids from either calendar tool work; Graph event ids use the §4.2 alphabet conversion. The read uses `GET /me/events/{id}` under `outlook.calendar`, with no Outlook Web fallback. Graph `responseStatus.response` maps to `my_response_type`, `responseRequested` to `is_response_requested`, `sensitivity` to `sensitivity` (Exchange's capitalized names) and `iCalUId` to `uid`. Times are requested in UTC, as in the listing. Attachments are always listed from `/me/events/{id}/attachments`, even when `hasAttachments` is false, and can be saved with `download_attachment(event_id=...)` ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
+
+- Graph supplies no truncation flag, so `body_truncated` remains unset. Graph has no `display_to`; it is set only on search hits.
+- An event with more than 500 attachments, or an attachment Graph lists without an id, is an error rather than a partial list.
 
 ### 8.10 Drafts and sending
 

@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from outlook_connector.domain.errors import InvalidRequest
-from outlook_connector.domain.models import CalendarEvent, CalendarSearchCoverage, CalendarSearchResult
+from outlook_connector.domain.models import (
+    CalendarAttachment,
+    CalendarEvent,
+    CalendarSearchCoverage,
+    CalendarSearchResult,
+)
 from outlook_connector.remote.ports import CalendarItemReader, CalendarSearchReader
-from outlook_connector.service import cursors
+from outlook_connector.service import cursors, markers
 
 MAX_EVENT_PAGE_SIZE = 25  # the standalone-proven Exchange Search v2 page size
 EVENT_SEARCH_OFFSET_LIMIT = 1_000  # Search v2 refuses a page that starts at this offset or later (2026-10-13)
@@ -111,12 +117,27 @@ class Calendar:
         )
 
     async def get_event(self, event_id: str) -> CalendarEvent:
-        """Validate the caller-supplied event reference before OWS hydration."""
-        if not isinstance(event_id, str) or not event_id or len(event_id) > 4096:
-            raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
-        if any(ord(character) < 32 for character in event_id):
-            raise InvalidRequest("event_id contains a control character.")
-        return await self._items.get_event(event_id)
+        """Entry point: validate the event reference; publish Graph metadata with download names."""
+        _check_event_id(event_id)
+        event = await self._items.get_event(event_id)
+        event.attachments = markers.named(event.attachments)
+        return event
+
+    async def event_attachments(self, event_id: str) -> list[CalendarAttachment]:
+        """Entry point: validate the event reference; list only its files, with download names."""
+        _check_event_id(event_id)
+        return markers.named(await self._items.list_attachments(event_id))
+
+    async def download_event_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        """Assumes (not re-checked here): both ids come from ``event_attachments`` in this call."""
+        return await self._items.download_attachment(event_id, attachment_id, dest)
+
+
+def _check_event_id(event_id: object) -> None:
+    if not isinstance(event_id, str) or not event_id or len(event_id) > 4096:
+        raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
+    if any(ord(character) < 32 for character in event_id):
+        raise InvalidRequest("event_id contains a control character.")
 
 
 def _cursor_uuid(value: object, label: str) -> str:

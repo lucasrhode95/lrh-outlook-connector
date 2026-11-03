@@ -75,7 +75,8 @@ SharePoint. Its profile catalog includes these Outlook client/resource pairs:
 | Capability | Client / profile | Backend | Status |
 |---|---|---|---|
 | Core mail-data reads: folders, messages, conversations, search, attachment/MIME downloads; profile and photo | `outlook.graph` · Outlook Mobile `27922004-5251-4030-b22d-91ecd9a37ea4` | Microsoft Graph (`Mail.Read`; `User.Read` for profile/photo) | Live through shared silent auth; fresh-account consent not tested |
-| Calendar event discovery and hydration | `m365.search` · One Outlook Web; `outlook.api` · One Outlook Web | Search v2 `Event` / `Exchange`; OWS `GetItem` | Live connector check 2026-10-12 (research §6.2); fresh-account consent not tested |
+| Calendar event discovery | `m365.search` · One Outlook Web | Search v2 `Event` / `Exchange` | Live connector check 2026-10-12 (research §6.2); fresh-account consent not tested |
+| Calendar event hydration and attachment downloads | `outlook.calendar` (`Calendars.Read`) · One Teams client | Graph `/me/events/{id}` and event attachments | Live read-only check 2026-11-02 (research §3.8); fresh-account consent not tested |
 | Calendar windows | `outlook.calendar` (`Calendars.Read`) · One Teams client | Graph `/me/calendarView` | Live 2026-10-12 (research §3.8); fresh-account consent not tested |
 | Mail changes: create/send drafts, read state, flags, move and soft delete | `outlook.api` · One Outlook Web `9199bf20-a13f-4107-85dc-02114787ef48` | Outlook Web Service (OWS) at `/owa/service.svc` | Send and every mutation proven (research §4.2) |
 | Inbox rules | `outlook.api` | OWS `GetInboxRule` and rule actions | Proven (research §4.4) |
@@ -122,10 +123,12 @@ pairs are never requested again.
 - **List:** folder-scoped or mailbox-wide, newest first, with an inclusive window, always from the server.
 - **Conversation:** every message with one `conversationId` across all folders, copies once, oldest first, bounded with continuation. Messages you forgot to file still belong to the conversation. Graph rejects `$orderby` with the `conversationId` filter, so the connector sorts (research §3.5). A conversation is exactly Exchange's conversation.
 - **Search is online only.** Graph `$search` has the same recall as Outlook's top-bar search, folds accents and supports field scoping (`subject:`, `from:`, `to:`) (research §3.4). Hits are grouped into conversations locally. No total is reported: Microsoft Search counts with a different engine and without the connector's folder rules. The UI adds an instant in-memory filter over what is loaded.
-- **Calendar is a separate domain.** Window listing (`list_calendar_events`) reads Graph only, with no Outlook Web fallback (decided 2026-11-02); topic search across the calendar (`search_calendar_events`) uses Search v2; `get_calendar_event` hydrates one event. Neither searches Teams chats, recaps, recordings or transcripts. `get_calendar_event` returns the Teams chat id read from the join link, labeled as read from an undocumented link format; the MCP instructions tell agents to check it against the Teams connector when something looks odd (decided 2026-11-02; not yet built).
+- **Calendar is a separate domain.** Window listing (`list_calendar_events`) reads Graph only, with no Outlook Web fallback (decided 2026-11-02); topic search across the calendar (`search_calendar_events`) uses Search v2; `get_calendar_event` hydrates one event through Graph under `outlook.calendar`, with no Outlook Web fallback (built 2026-11-02). Event attachment metadata is listed from Graph regardless of `hasAttachments`, and `download_attachment` accepts an `event_id` to fetch an event file (built 2026-11-02). Neither searches Teams chats, recaps, recordings or transcripts. `get_calendar_event` returns the Teams chat id read from the join link, labeled as read from an undocumented link format; the MCP instructions tell agents to check it against the Teams connector when something looks odd (decided 2026-11-02; not yet built).
 - Every result reports coverage: whether more follow (a cursor), what the folder rules left out, and partial flags.
 
 ## 10. Reading content (MCP)
+
+- Event attachment reads and downloads share safe, unique `file_name` values; cloud links are listed without downloading, and attached messages keep their `.eml` names.
 
 - `get_message` returns metadata plus a bounded full body with continuation, and attachment metadata, including inline-only attachments.
 - The local UI reader shows the whole chosen body without a text budget or continuation; a failure never shows part of it as complete.

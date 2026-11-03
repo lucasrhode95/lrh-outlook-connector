@@ -2,8 +2,7 @@
 
 Adapters: remote/graph_mail.py implements MailReader, remote/ows_mail.py implements MailWriter,
 remote/ows_rules.py implements RuleWriter, remote/cloud_settings.py implements SignatureStore,
-remote/graph_calendar.py implements CalendarViewReader, and remote/ows_calendar.py implements
-CalendarItemReader.
+remote/graph_calendar.py implements CalendarViewReader and CalendarItemReader.
 Swapping an adapter (another tenant, a policy change) must not change anything above this file.
 """
 
@@ -17,6 +16,7 @@ from typing import Any, Literal, Protocol
 from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import (
     Attachment,
+    CalendarAttachment,
     CalendarEvent,
     DraftMessage,
     Folder,
@@ -146,8 +146,12 @@ class CalendarSearchReader(Protocol):
 
 class CalendarItemReader(Protocol):
     async def get_event(self, event_id: str) -> CalendarEvent:
-        """Hydrate one event from Outlook Web Service using a Search v2 item reference."""
+        """Hydrate one event through Graph using a Search v2 item reference."""
         ...
+
+    async def list_attachments(self, event_id: str) -> list[CalendarAttachment]: ...
+
+    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int: ...
 
 
 @dataclass

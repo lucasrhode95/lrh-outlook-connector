@@ -68,7 +68,9 @@ of literal terms, any of which matches; include_body returns the description). G
 failed Graph read is reported as an error. Follow the cursor while coverage.complete is false.
 - Calendar: search_calendar_events discovers Exchange events by words across the calendar, not Teams \
 recaps or transcripts, across all dates; for a date range, use list_calendar_events instead. \
-Hydrate a result with get_calendar_event for agenda text, attendees and attachment metadata. Outlook \
+Hydrate a result with get_calendar_event for agenda text, attendees, your response and attachment \
+metadata; hydration and event attachment downloads use Graph under outlook.calendar, with no Outlook Web \
+fallback. Use download_attachment(event_id=...) to save a listed event file. Outlook \
 owns the event, schedule and any join link; related Teams chats, recaps, recordings and transcripts \
 belong to the Teams connector. Event-to-Teams linkage is not inferred when Search v2 omits a verified \
 identifier.
@@ -400,18 +402,20 @@ def build_server(context: AppContext) -> FastMCP:
 
     @mcp.tool(annotations=LOCAL_FILE)
     async def download_attachment(
-        message_id: str,
+        message_id: str | None = None,
         names: Annotated[
             list[str] | None,
-            Field(description="File names as the message text shows them; omit for all of its files."),
+            Field(description="File names as listed; omit for all downloadable files."),
         ] = None,
+        event_id: str | None = None,
     ) -> SavedFiles:
-        """Save a message's files by the names its text shows ([File: …], [Image: …], [Message: …]).
+        """Save listed files from exactly one message_id or event_id, by file name.
 
         Each file must be under 150 MiB; download larger files from Outlook. Forwarded emails are saved
         as .eml; cloud links are not downloaded. A file that cannot be saved is listed under unavailable
-        while the others are saved."""
-        return await (await services()).files.download_attachment(message_id, names)
+        while the others are saved. For events, pass file_name from get_calendar_event.
+        """
+        return await (await services()).files.download_attachment(message_id, names, event_id=event_id)
 
     @mcp.tool(annotations=LOCAL_FILE)
     async def save_message_mime(message_id: str) -> SavedFile:
