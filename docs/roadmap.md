@@ -24,10 +24,7 @@ None open.
 
 ### Improvements
 
-The Teams connector keeps placing `[Image: name]` in its text, and that is no inconsistency: Teams serves
-message bodies only as HTML, with no server text, so it must read that HTML anyway, and each image is a
-typed `<img>` tag. The shared part stays the same in both: the `[Image: name]` marker, safe unique names
-and `download_attachment` by name.
+None open.
 
 ### Enhancements
 
