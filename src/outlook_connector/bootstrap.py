@@ -117,7 +117,7 @@ class AppContext:
             calendar,
             conversations,
             Exports(conversations),
-            Files(mailbox, calendar_items),
+            Files(mailbox, calendar),
             writes,
             mutations,
             Rules(mailbox, OwsRules(ows), account, writes.check_account),

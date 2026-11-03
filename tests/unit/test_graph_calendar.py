@@ -8,7 +8,7 @@ import pytest
 
 from outlook_connector import config
 from outlook_connector.domain.errors import InvalidRequest, Upstream
-from outlook_connector.remote import ids
+from outlook_connector.remote import graph_calendar, ids
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_calendar import GraphCalendarItems, GraphCalendarView
 from outlook_connector.remote.transport import Transport
@@ -269,6 +269,9 @@ async def test_event_hydration_uses_graph_and_lists_attachments_even_when_flag_i
                 hasAttachments=False,
                 body={"contentType": "text", "content": "Synthetic agenda"},
                 responseStatus={"response": "accepted"},
+                responseRequested=True,
+                sensitivity="private",
+                iCalUId="synthetic-uid",
             ),
         )
 
@@ -281,11 +284,41 @@ async def test_event_hydration_uses_graph_and_lists_attachments_even_when_flag_i
     ]
     assert all('IdType="ImmutableId"' in request.headers["prefer"] for request in requests)
     assert requests[0].headers["prefer"].find('outlook.body-content-type="text"') >= 0
+    assert 'outlook.timezone="UTC"' in requests[0].headers["prefer"]
+    fields = requests[0].url.params["$select"].split(",")
+    assert {"body", "onlineMeeting", "responseRequested", "sensitivity", "iCalUId"} <= set(fields)
     assert requests[1].url.params["$select"] == "id,name,contentType,size,isInline"
     assert tokens.profiles == [config.CALENDAR_PROFILE, config.CALENDAR_PROFILE]
     assert event.id == ids.to_ows("synthetic-id_x")
     assert event.my_response_type == "Accept" and event.body_text == "Synthetic agenda"
     assert event.attachments[0].name == "agenda.txt" and event.attachments[0].size == 41
+    assert event.is_response_requested is True and event.sensitivity == "Private"
+    assert event.uid == "synthetic-uid"
+
+
+async def test_event_attachments_are_listed_alone_and_a_cut_or_malformed_listing_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers = iter(
+        [
+            {"value": [{"name": "a.txt"}, {"id": "synthetic-b", "name": "b.txt"}]},
+            {"value": [{"id": "synthetic-a"}], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next"},
+        ]
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=next(answers))
+
+    items, _ = _items(handler)
+    with pytest.raises(Upstream, match="without an id"):
+        await items.list_attachments(ids.to_ows("synthetic-id_x"))
+    assert [request.url.path for request in requests] == ["/v1.0/me/events/synthetic-id_x/attachments"]
+
+    monkeypatch.setattr(graph_calendar, "MAX_EVENT_ATTACHMENTS", 1)
+    with pytest.raises(Upstream, match="more than 1 attachments"):
+        await items.list_attachments(ids.to_ows("synthetic-id_x"))
 
 
 async def test_event_attachment_download_uses_the_graph_event_route(tmp_path: Any) -> None:

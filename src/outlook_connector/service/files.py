@@ -18,20 +18,20 @@ from pydantic import BaseModel
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
 from outlook_connector.domain.models import Attachment, CalendarAttachment
-from outlook_connector.remote.ports import CalendarItemReader
+from outlook_connector.service.calendar import Calendar
 from outlook_connector.service.export.attachments import safe_name
 from outlook_connector.service.localfiles import claim, kept_dir
 from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.service.markers import DOWNLOADABLE_KINDS, named_calendar
+from outlook_connector.service.markers import DOWNLOADABLE_KINDS
 
 MAX_NAMES = 100
 _NOT_A_FILE = "a cloud link with no file here; open it from the message in Outlook"
 
 
 def _event_attachments(rows: list[CalendarAttachment], event_id: str) -> list[Attachment]:
-    """Use event metadata to build safe, unique download names without inferring from body text."""
+    """Event files, already named by ``Calendar.event_attachments``, as downloadable attachments."""
     result: list[Attachment] = []
-    for row in named_calendar(rows):
+    for row in rows:
         if not row.id:
             continue
         result.append(
@@ -67,9 +67,9 @@ class SavedFiles(BaseModel):
 
 
 class Files:
-    def __init__(self, mailbox: Mailbox, calendar_items: CalendarItemReader | None = None) -> None:
+    def __init__(self, mailbox: Mailbox, calendar: Calendar) -> None:
         self.mailbox = mailbox
-        self.calendar_items = calendar_items
+        self.calendar = calendar
 
     async def download_attachment(
         self,
@@ -80,7 +80,8 @@ class Files:
     ) -> SavedFiles:
         """Save files by their listed names; all downloadable files when ``names`` is None.
 
-        Entry point: exactly one message or event id is required; ``names`` is checked against the
+        Entry point: exactly one message or event id is required (``Calendar`` validates an event id);
+        ``names`` is checked against the
         item's files before anything is downloaded
         (case-insensitive; an unknown name raises NotFound and lists the names there are). A cloud link, or
         a file that cannot be fetched, is listed under ``unavailable`` while the others are saved; a call
@@ -93,14 +94,7 @@ class Files:
         item_id = event_id if is_event else message_id
         assert item_id is not None
         if is_event:
-            if not item_id or len(item_id) > 4096:
-                raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
-            if any(ord(character) < 32 for character in item_id):
-                raise InvalidRequest("event_id contains a control character.")
-            if self.calendar_items is None:
-                raise InvalidRequest("Event attachment downloads are unavailable.")
-            event = await self.calendar_items.get_event(item_id)
-            attachments = _event_attachments(event.attachments, item_id)
+            attachments = _event_attachments(await self.calendar.event_attachments(item_id), item_id)
         else:
             attachments = await self.mailbox.attachments(item_id)
         by_name = {a.file_name.casefold(): a for a in attachments if a.file_name}
@@ -171,8 +165,7 @@ class Files:
             partial = claim(folder, f".{uuid.uuid4().hex}.part")
         try:
             if is_event:
-                assert self.calendar_items is not None
-                size = await self.calendar_items.download_attachment(message_id, attachment.id, partial)
+                size = await self.calendar.download_event_attachment(message_id, attachment.id, partial)
             else:
                 size = await self.mailbox.reader.download_attachment(message_id, attachment.id, partial)
         except BaseException:

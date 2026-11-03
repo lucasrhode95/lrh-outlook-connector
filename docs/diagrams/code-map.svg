@@ -176,7 +176,7 @@
 <g><title>Save the original message (MIME) as a local .eml named after its subject.</title><text class="detail" x="118" y="1661">• <tspan class="code">save_mime(message_id)</tspan></text></g>
 <text class="group-title" x="118" y="1700">Rules</text>
 <text class="detail" x="118" y="1730">files kept a week under the data folder</text>
-<text class="muted" x="118" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">localfiles</tspan></text>
+<text class="muted" x="118" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">Calendar</tspan> · <tspan class="code">localfiles</tspan></text>
 
 <rect x="673" y="1532" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="691" y="1567"><tspan class="code">Writes</tspan><tspan class="detail" dx="12">writes.py</tspan></text>
@@ -307,7 +307,7 @@
 <g><title>Move to a folder, or to Deleted Items; there is no hard delete.</title><text class="detail" x="1529" y="2692">• <tspan class="code">move</tspan> · <tspan class="code">delete</tspan></text></g>
 <g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">RuleWriter</tspan> · <tspan class="code">*_rule</tspan></text></g>
 <g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">SignatureStore</tspan> · settings, contents, writes</text></g>
-<g><title>Hydrate one event by its Outlook item id.</title><text class="detail" x="1258" y="2812"><tspan class="code">CalendarItemReader</tspan> · <tspan class="code">get_event</tspan></text></g>
+<g><title>Hydrate one event by its Outlook item id; list or download its attachments.</title><text class="detail" x="1258" y="2812"><tspan class="code">CalendarItemReader</tspan> · <tspan class="code">get_event</tspan> · files</text></g>
 <g><title>One page of Exchange event hits from Search v2.</title><text class="detail" x="1258" y="2839"><tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">search_events</tspan></text></g>
 
 <path class="impl-flow" d="M940 2925 V2971"/>

@@ -30,8 +30,14 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.graph import MAX_DOWNLOAD_BYTES, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, BodyFormat, FetchedMessages
+from outlook_connector.remote.ports import (
+    MAX_CONCURRENT_REQUESTS,
+    BodyFormat,
+    CalendarSearchPage,
+    FetchedMessages,
+)
 from outlook_connector.remote.transport import Transport
+from outlook_connector.service.calendar import Calendar
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.attachments import dedupe, safe_name
 from outlook_connector.service.export.formatter import people
@@ -41,6 +47,36 @@ from outlook_connector.service.localfiles import kept_dir
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
+
+
+class NoSearch:
+    async def search_events(self, query: str, **kwargs: object) -> CalendarSearchPage:
+        raise AssertionError("downloads never search")
+
+
+class EventFiles:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_event(self, event_id: str) -> CalendarEvent:
+        raise AssertionError("downloads list attachments without reading the event")
+
+    async def list_attachments(self, event_id: str) -> list[CalendarAttachment]:
+        self.calls.append(("list", event_id))
+        return [
+            CalendarAttachment(
+                id="synthetic-event-attachment", name="report:one.txt", content_type="text/plain", size=15
+            )
+        ]
+
+    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        self.calls.append((event_id, attachment_id))
+        dest.write_bytes(b"synthetic agenda")
+        return len(b"synthetic agenda")
+
+
+def files_for(mailbox: Mailbox, items: EventFiles | None = None) -> Files:
+    return Files(mailbox, Calendar(NoSearch(), items or EventFiles()))
 
 
 async def _no_sleep(_s: float) -> None:
@@ -755,7 +791,7 @@ async def test_jsonl_export_with_attachment_files_is_a_zip(exports: Exports) -> 
 async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
     exports: Exports, fake: FakeGraph
 ) -> None:
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     first, second = await asyncio.gather(
         files.download_attachment("m3", ["numbers.xlsx"]), files.download_attachment("m3", ["NUMBERS.xlsx"])
     )
@@ -770,43 +806,21 @@ async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
 async def test_event_attachment_download_uses_event_id_and_graph_attachment_metadata(
     exports: Exports,
 ) -> None:
-    class EventFiles:
-        calls: list[tuple[str, str]] = []
-
-        async def get_event(self, event_id: str) -> CalendarEvent:
-            self.calls.append(("get", event_id))
-            return CalendarEvent(
-                id=event_id,
-                attachments=[
-                    CalendarAttachment(
-                        id="synthetic-event-attachment",
-                        name="report:one.txt",
-                        content_type="text/plain",
-                        size=15,
-                    )
-                ],
-            )
-
-        async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
-            self.calls.append((event_id, attachment_id))
-            dest.write_bytes(b"synthetic agenda")
-            return len(b"synthetic agenda")
-
     calendar = EventFiles()
-    saved = await Files(exports.mailbox, calendar).download_attachment(
+    saved = await files_for(exports.mailbox, calendar).download_attachment(
         event_id="synthetic-event-id", names=["report_one.txt"]
     )
 
     assert saved.files[0].name == "report_one.txt"
     assert Path(saved.files[0].path).read_bytes() == b"synthetic agenda"
-    assert calendar.calls == [
-        ("get", "synthetic-event-id"),
+    assert calendar.calls == [  # the file listing alone: no event or body read
+        ("list", "synthetic-event-id"),
         ("synthetic-event-id", "synthetic-event-attachment"),
     ]
 
 
 async def test_omitted_names_save_every_file_and_unknown_names_are_refused(exports: Exports) -> None:
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     saved = await files.download_attachment("m3")
     assert sorted(f.name for f in saved.files) == ["image001.png", "logo.png", "numbers.xlsx"]
     with pytest.raises(NotFound, match="Its files: numbers.xlsx, image001.png, logo.png"):
@@ -825,7 +839,7 @@ async def test_a_cloud_link_is_reported_unavailable_while_the_files_are_saved(
             ],
         )
     )  # fmt: skip
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     saved = await files.download_attachment("m-link")
     assert [f.name for f in saved.files] == ["notes.txt"] and saved.unavailable == []
     mixed = await files.download_attachment("m-link", ["plan.docx", "notes.txt"])
@@ -840,7 +854,7 @@ async def test_a_cloud_link_is_reported_unavailable_while_the_files_are_saved(
 
 
 async def test_save_mime_names_the_file_from_its_subject_header(exports: Exports, fake: FakeGraph) -> None:
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     fake.calls.clear()
     saved = await files.save_mime("m3")
     assert saved.name == "RE_ Relatório de exemplo semanal.eml"
@@ -988,7 +1002,7 @@ async def test_missing_mime_has_neutral_not_found_text(
 
     monkeypatch.setattr(exports.mailbox.reader, "download_mime", missing)
     with pytest.raises(NotFound, match="MIME source was not found;.*id may be wrong"):
-        await Files(exports.mailbox).save_mime("m1")
+        await files_for(exports.mailbox).save_mime("m1")
     assert exported_files() == []
 
 
@@ -1102,5 +1116,5 @@ async def test_a_cache_folder_removed_before_the_claim_is_recreated(
         return real_claim(directory, filename)
 
     monkeypatch.setattr(files_module, "claim", claim_after_cleanup)
-    saved = await Files(exports.mailbox).download_attachment("m3", ["numbers.xlsx"])
+    saved = await files_for(exports.mailbox).download_attachment("m3", ["numbers.xlsx"])
     assert Path(saved.files[0].path).read_bytes() == b"xlsx-bytes"

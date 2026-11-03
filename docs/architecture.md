@@ -321,7 +321,7 @@ Lists a message's attachments: `id`, `name`, `file_name` (the name the text and 
 
 #### `download_attachment`
 
-Saves a message's or event's files by the names listed, given in `names` (case-insensitive), or all downloadable files when `names` is omitted. Provide exactly one of `message_id` and `event_id`. Event files are read and downloaded through Graph under `outlook.calendar`. The tool returns `files` (local path, name, content type and size of each) and `unavailable` (name and reason of each file it could not save). Read the files with your own file tools.
+Saves a message's or event's files by the names listed, given in `names` (case-insensitive), or all downloadable files when `names` is omitted. Provide exactly one of `message_id` and `event_id`. Event files are listed and downloaded through Graph under `outlook.calendar`; the event itself is not read. The tool returns `files` (local path, name, content type and size of each) and `unavailable` (name and reason of each file it could not save). Read the files with your own file tools.
 
 - An unknown name is refused before anything is downloaded, and the error lists the names there are.
 - Each file is fetched once into the download cache, one folder per message attachment, and published under its name only when complete; a later call reuses it and keeps it another week.
@@ -395,9 +395,10 @@ Searches Exchange calendar events online through Microsoft Search v2, for words 
 Event attachments expose `file_name`, the safe, unique name accepted by downloads, and retain their
 `kind` (file, attached item, cloud reference or unknown). Raw `name` remains available as metadata.
 
-Hydrates one event by `event_id`: subject, start and end, organizer, required and optional attendees, location, response status, `body_text` (the agenda), `teams_join_url` and attachment metadata. Ids from either calendar tool work; Graph event ids use the §4.2 alphabet conversion. The read uses `GET /me/events/{id}` under `outlook.calendar`, with no Outlook Web fallback. Graph `responseStatus.response` maps to `my_response_type`. Attachments are always listed from `/me/events/{id}/attachments`, even when `hasAttachments` is false, and can be saved with `download_attachment(event_id=...)` ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
+Hydrates one event by `event_id`: subject, start and end, organizer, required and optional attendees, location, response status, `body_text` (the agenda), `teams_join_url` and attachment metadata. Ids from either calendar tool work; Graph event ids use the §4.2 alphabet conversion. The read uses `GET /me/events/{id}` under `outlook.calendar`, with no Outlook Web fallback. Graph `responseStatus.response` maps to `my_response_type`, `responseRequested` to `is_response_requested`, `sensitivity` to `sensitivity` (Exchange's capitalized names) and `iCalUId` to `uid`. Times are requested in UTC, as in the listing. Attachments are always listed from `/me/events/{id}/attachments`, even when `hasAttachments` is false, and can be saved with `download_attachment(event_id=...)` ([research §3.8](api-research.md#38-calendar-through-the-teams-client-graph-profile)).
 
-- Graph supplies no truncation flag, so `body_truncated` remains unset.
+- Graph supplies no truncation flag, so `body_truncated` remains unset. Graph has no `display_to`; it is set only on search hits.
+- An event with more than 500 attachments, or an attachment Graph lists without an id, is an error rather than a partial list.
 
 ### 8.10 Drafts and sending
 
