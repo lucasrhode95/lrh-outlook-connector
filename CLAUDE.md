@@ -132,3 +132,4 @@ research offline checks when changing probe behavior.
 - Never send mail or change the real mailbox without the user's explicit request. Live tests use self-sends and messages the user names.
 - Never log or commit mail content, addresses, tokens, or real identifiers. Tokens stay in the encrypted cache.
 - When behavior changes, update the affected README, architecture, requirements, and roadmap docs. Record live findings in the roadmap and research docs with their date.
+- State each fact once, in the document whose scope it is, and link to it from the others. Requirements hold what and the dated decision; architecture holds how; research holds the evidence; tool schemas and descriptions hold parameters. The MCP instructions and tool descriptions are the one deliberate repeat, because agents read nothing else.
