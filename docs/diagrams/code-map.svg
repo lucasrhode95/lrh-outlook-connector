@@ -199,7 +199,7 @@
 <text class="section-title" x="118" y="1866"><tspan class="code">Calendar</tspan><tspan class="detail" dx="12">calendar.py</tspan></text>
 <text class="group-title" x="118" y="1903">Methods</text>
 <g><title>Exchange events by words through Search v2, across all dates; one bounded page and a cursor.</title><text class="detail" x="118" y="1933">• <tspan class="code">search_events(query, ...)</tspan></text></g>
-<g><title>One event read through Graph: agenda, attendees, response, join URL and attachment metadata.</title><text class="detail" x="118" y="1960">• <tspan class="code">get_event(event_id)</tspan></text></g>
+<g><title>One event read through Graph: agenda, attendees, response, join URL, link-derived Teams chat id and attachment metadata.</title><text class="detail" x="118" y="1960">• <tspan class="code">get_event(event_id)</tspan></text></g>
 <text class="group-title" x="118" y="1999">Rules</text>
 <text class="detail" x="118" y="2029">no totals; no cursor at offset 1,000</text>
 <text class="muted" x="118" y="2094">uses <tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">CalendarItemReader</tspan></text>

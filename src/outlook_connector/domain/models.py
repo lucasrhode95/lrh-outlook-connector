@@ -248,6 +248,7 @@ class CalendarEvent(Compact):
     body_text: str | None = None
     body_truncated: bool | None = None
     teams_join_url: str | None = None
+    teams_chat_id_from_join_link: str | None = None
     attachments: list[CalendarAttachment] = Field(default_factory=list)
 
 
