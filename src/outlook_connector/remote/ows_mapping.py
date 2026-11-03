@@ -12,7 +12,7 @@ from outlook_connector.domain.errors import WriteOutcomeUnknown
 from outlook_connector.domain.models import DraftMessage, InlineImage
 from outlook_connector.remote import ids
 from outlook_connector.remote.ows import outcome
-from outlook_connector.remote.ports import FolderTarget
+from outlook_connector.remote.results import FolderTarget
 
 
 def address(address: str) -> dict[str, str]:

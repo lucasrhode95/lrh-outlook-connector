@@ -6,7 +6,7 @@ import pytest
 
 from outlook_connector.domain.errors import InvalidRequest
 from outlook_connector.domain.models import CalendarAttachment, CalendarEvent
-from outlook_connector.remote.ports import CalendarSearchPage
+from outlook_connector.remote.results import CalendarSearchPage
 from outlook_connector.service import cursors
 from outlook_connector.service.calendar import EVENT_SEARCH_OFFSET_LIMIT, Calendar
 

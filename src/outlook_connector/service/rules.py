@@ -10,14 +10,14 @@ from m365_auth import Account
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, WriteOutcomeUnknown
 from outlook_connector.domain.models import Folder, InboxRule, RuleChange, RuleWriteResult
-from outlook_connector.remote.ports import RuleWriter
+from outlook_connector.remote.ows_rules import OwsRules
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.writes import _addresses
 
 
 class Rules:
     def __init__(
-        self, mailbox: Mailbox, writer: RuleWriter, account: Account, check_account: Callable[[], None]
+        self, mailbox: Mailbox, writer: OwsRules, account: Account, check_account: Callable[[], None]
     ) -> None:
         self.mailbox, self.writer, self.account, self.check_account = mailbox, writer, account, check_account
 

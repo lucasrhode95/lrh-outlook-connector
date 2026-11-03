@@ -26,7 +26,7 @@ def data_dir() -> Path:
     On Windows it is ``%USERPROFILE%\\.lrh-outlook-connector``, outside AppData: Windows redirects
     files that packaged apps (such as the Claude desktop app, and the MCP servers it starts) create
     under AppData into a private per-app copy, which a terminal and Explorer never see. That split
-    the token cache, the store and the exports in two.
+    the token cache, the downloads and the exports in two.
     """
     override = os.environ.get("OUTLOOK_CONNECTOR_HOME")
     if override:

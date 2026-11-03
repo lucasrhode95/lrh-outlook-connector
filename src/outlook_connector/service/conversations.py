@@ -25,7 +25,7 @@ from outlook_connector.domain.models import (
     MessageSummary,
     Scope,
 )
-from outlook_connector.remote.ports import FetchedMessages
+from outlook_connector.remote.results import FetchedMessages
 from outlook_connector.service import cursors, markers
 from outlook_connector.service.failures import error_block, export_error, gone
 from outlook_connector.service.mailbox import Mailbox

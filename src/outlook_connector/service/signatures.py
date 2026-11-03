@@ -23,7 +23,8 @@ from outlook_connector.domain.models import (
     SignatureList,
     SignatureWriteResult,
 )
-from outlook_connector.remote.ports import SignatureContents, SignatureSettings, SignatureStore
+from outlook_connector.remote.cloud_settings import CloudSettings
+from outlook_connector.remote.results import SignatureContents, SignatureSettings
 from outlook_connector.service.passive_html import StartTag, passive_start_tags
 
 _DATA_IMAGE = re.compile(
@@ -52,7 +53,7 @@ class ResolvedSignature:
 class Signatures:
     """Account-bound signature management; settings and contents are never cached."""
 
-    def __init__(self, store: SignatureStore, account: Account) -> None:
+    def __init__(self, store: CloudSettings, account: Account) -> None:
         self._store = store
         self._account = account
 

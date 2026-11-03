@@ -14,7 +14,7 @@ anything else is marked where it is used.
   is posted as is, and the answer reports ``WasSuccessful`` / ``ErrorCode``.
 
 This module is the client (envelope, headers, results); ``ows_mapping`` builds request bodies and
-``ows_mail`` implements ``MailWriter`` with them.
+``ows_mail`` writes mail with them.
 """
 
 from __future__ import annotations

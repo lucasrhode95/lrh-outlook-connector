@@ -18,7 +18,8 @@ from outlook_connector.domain.models import (
     CalendarListResult,
 )
 from outlook_connector.domain.time import as_utc
-from outlook_connector.remote.ports import CalendarViewPage, CalendarViewReader
+from outlook_connector.remote.graph_calendar import GraphCalendarView
+from outlook_connector.remote.results import CalendarViewPage
 from outlook_connector.service import cursors
 
 MAX_WINDOW = timedelta(days=366)
@@ -36,7 +37,7 @@ INVALID_CURSOR = "The calendar cursor is invalid."
 class CalendarListing:
     """Lists the signed-in user's calendar events for a window (see the module docstring)."""
 
-    def __init__(self, *, graph_view: CalendarViewReader) -> None:
+    def __init__(self, *, graph_view: GraphCalendarView) -> None:
         self._graph_view = graph_view
 
     async def list_calendars(self) -> list[CalendarInfo]:

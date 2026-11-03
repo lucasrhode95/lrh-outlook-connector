@@ -34,7 +34,7 @@ from outlook_connector.domain.models import (
     Recipient,
     SendResult,
 )
-from outlook_connector.remote.ports import MailWriter
+from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.service.conversations import base_subject
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.passive_html import passive_start_tags
@@ -51,7 +51,7 @@ ATTACHMENT_SIZE_OVERHEAD = 64 * 1024
 
 class Writes:
     def __init__(
-        self, mailbox: Mailbox, writer: MailWriter, account: Account, signatures: Signatures
+        self, mailbox: Mailbox, writer: OwsMailWriter, account: Account, signatures: Signatures
     ) -> None:
         self.mailbox = mailbox
         self.writer = writer

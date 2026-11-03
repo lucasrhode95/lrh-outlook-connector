@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
-import time
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -15,13 +13,12 @@ from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import Scope
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ports import FolderCount
+from outlook_connector.remote.results import FolderCount
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service import cursors
 from outlook_connector.service import mailbox as mailbox_service
 from outlook_connector.service.conversations import Conversations, base_subject
-from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.store.db import Store
+from outlook_connector.service.mailbox import FOLDER_TTL_SECONDS, Mailbox
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 
@@ -33,7 +30,7 @@ def fake() -> FakeGraph:
 @pytest.fixture
 def mailbox(fake: FakeGraph, tmp_path: Path) -> Mailbox:
     transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
-    return Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
+    return Mailbox(GraphMailReader(Graph(transport)))
 
 
 # ---------------------------------------------------------------- folders
@@ -402,39 +399,34 @@ def test_base_subject_strips_reply_and_forward_prefixes() -> None:
     assert base_subject("RE: FW: Enc: Relatório") == "Relatório"
 
 
-def _new_process_after_days(fake: FakeGraph, tmp_path: Path) -> Mailbox:
-    """A new connector process on the same local store, whose folder cache is three days old."""
-    with sqlite3.connect(tmp_path / "m.sqlite3") as db:
-        db.execute("UPDATE meta SET value = ? WHERE key = 'folders_at'", (str(time.time() - 3 * 86400),))
-    transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
-    return Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
+def _age_folder_cache(mailbox: Mailbox) -> Mailbox:
+    """Make the in-memory folder list older than its freshness window."""
+    mailbox._folders_at -= FOLDER_TTL_SECONDS + 1
+    return mailbox
 
 
 async def test_a_fresh_folder_cache_is_used_without_asking_the_server(
-    mailbox: Mailbox, fake: FakeGraph, tmp_path: Path
+    mailbox: Mailbox, fake: FakeGraph
 ) -> None:
     await mailbox.folders()  # fills the cache
-    transport = Transport(StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()))
-    other = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))  # a new process
     fake.calls.clear()
-    assert {f.id for f in await other.folders()} >= {"f-inbox", "f-project"} and fake.calls == []
+    assert {f.id for f in await mailbox.folders()} >= {"f-inbox", "f-project"} and fake.calls == []
 
 
-async def test_a_stale_folder_cache_is_never_used(mailbox: Mailbox, fake: FakeGraph, tmp_path: Path) -> None:
+async def test_a_stale_folder_cache_is_never_used(mailbox: Mailbox, fake: FakeGraph) -> None:
     await mailbox.folders()  # fills the cache
     fake.add_folder("f-new", "New folder")
-    later = _new_process_after_days(fake, tmp_path)
-    assert "f-new" in {f.id for f in await later.folders()}  # waited for the server
+    assert "f-new" in {f.id for f in await _age_folder_cache(mailbox).folders()}  # waited for the server
 
 
 async def test_mail_in_a_folder_created_while_the_cache_was_stale_is_listed_folder_by_folder(
     mailbox: Mailbox, fake: FakeGraph, tmp_path: Path
 ) -> None:
     _junk_heavy(fake)
-    await mailbox.folders()  # cached days ago, before the folder below existed
+    await mailbox.folders()  # cached before the folder below existed
     fake.add_folder("f-invoices", "Invoices", parent="f-inbox")  # e.g. a new rule files mail there
     fake.add(FakeMessage("inv1", "Invoice 42", "f-invoices", "2026-10-09T09:00:00Z", conversation="c-inv"))
-    page = await _new_process_after_days(fake, tmp_path).list_messages(limit=5)
+    page = await _age_folder_cache(mailbox).list_messages(limit=5)
     assert any(n.startswith("Listed folder by folder") for n in page.coverage.notes)
     assert page.items[0].id == "inv1" and page.items[0].folder == "Inbox/Invoices"
 

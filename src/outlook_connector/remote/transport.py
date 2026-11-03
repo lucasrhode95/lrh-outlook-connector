@@ -42,7 +42,7 @@ from outlook_connector.domain.errors import (
     Upstream,
     WriteOutcomeUnknown,
 )
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.remote.results import MAX_CONCURRENT_REQUESTS
 from outlook_connector.remote.urls import validate_url
 
 log = logging.getLogger(__name__)

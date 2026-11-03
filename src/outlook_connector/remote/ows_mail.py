@@ -1,4 +1,4 @@
-"""``MailWriter`` over Outlook Web (OWS): drafts, send and mailbox changes (architecture §5.5)."""
+"""``OwsMailWriter`` over Outlook Web (OWS): drafts, send and mailbox changes (architecture §5.5)."""
 
 from __future__ import annotations
 
@@ -11,14 +11,14 @@ from outlook_connector.domain.errors import InvalidRequest, WriteOutcomeUnknown
 from outlook_connector.domain.models import DraftMessage, LocalAttachment
 from outlook_connector.remote import ows_mapping as mapping
 from outlook_connector.remote.ows import Ows
-from outlook_connector.remote.ports import FolderTarget, MailWriter
+from outlook_connector.remote.results import FolderTarget
 from outlook_connector.remote.transport import operation
 
 FILE_SLICE_BYTES = 14 * 1024 * 1024
 
 
-class OwsMailWriter(MailWriter):
-    """Implements ``MailWriter`` over OWS.
+class OwsMailWriter:
+    """Mail writes over OWS, as the signed-in account; each call is sent once and never retried.
 
     Assumes (not re-checked here): draft messages come from ``Writes._resolve`` (addresses, subject and body
     validated), message ids are Graph immutable ids from this connector, folder targets were resolved by
@@ -30,6 +30,7 @@ class OwsMailWriter(MailWriter):
         self._ows = ows
 
     def account(self) -> dict[str, Any]:
+        """Identity claims (tid, oid, upn) of the credential the writes use."""
         return self._ows.account()
 
     async def create_draft(self, message: DraftMessage) -> str | None:

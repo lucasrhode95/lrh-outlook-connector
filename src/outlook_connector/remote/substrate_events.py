@@ -6,7 +6,7 @@ from typing import Any
 
 from outlook_connector.domain.models import CalendarEvent, Recipient
 from outlook_connector.remote.calendar_mapping import boolean, datetime_value, location, recipient, text
-from outlook_connector.remote.ports import CalendarSearchPage
+from outlook_connector.remote.results import CalendarSearchPage
 from outlook_connector.remote.transport import Transport, operation
 
 SEARCH_URL = "https://outlook.office.com/searchservice/api/v2/query"
@@ -27,6 +27,7 @@ class SubstrateEventSearch:
         cvid: str,
         logical_id: str,
     ) -> CalendarSearchPage:
+        """Search Exchange events through the standalone-proven Search v2 route."""
         body = {
             "Cvid": cvid,
             "LogicalId": logical_id,

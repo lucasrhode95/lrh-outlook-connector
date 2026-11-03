@@ -24,7 +24,6 @@ from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.signatures import Signatures
 from outlook_connector.service.writes import Writes
-from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, StaticTokens, sample_mailbox
 
 ME = Account(tenant_id="tenant-x", object_id="user-x", username="me@example.com")
@@ -42,7 +41,7 @@ def fake() -> FakeGraph:
 def make_writes(fake: FakeGraph, tmp_path: Path, tokens: Any = None, account: Account = ME) -> Writes:
     tokens = tokens or StaticTokens()
     transport = Transport(tokens, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
-    mailbox = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
+    mailbox = Mailbox(GraphMailReader(Graph(transport)))
     signatures = Signatures(CloudSettings(transport, tokens), account)
     return Writes(mailbox, OwsMailWriter(Ows(transport, tokens)), account, signatures)
 

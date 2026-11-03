@@ -12,7 +12,8 @@ from outlook_connector.domain.models import (
     CalendarSearchCoverage,
     CalendarSearchResult,
 )
-from outlook_connector.remote.ports import CalendarItemReader, CalendarSearchReader
+from outlook_connector.remote.graph_calendar import GraphCalendarItems
+from outlook_connector.remote.substrate_events import SubstrateEventSearch
 from outlook_connector.service import cursors, markers
 
 MAX_EVENT_PAGE_SIZE = 25  # the standalone-proven Exchange Search v2 page size
@@ -21,7 +22,7 @@ MAX_EVENT_QUERY_CHARS = 512
 
 
 class Calendar:
-    def __init__(self, search: CalendarSearchReader, items: CalendarItemReader) -> None:
+    def __init__(self, search: SubstrateEventSearch, items: GraphCalendarItems) -> None:
         self._search = search
         self._items = items
 
