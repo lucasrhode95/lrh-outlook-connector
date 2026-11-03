@@ -8,7 +8,7 @@ import pytest
 
 from outlook_connector import config
 from outlook_connector.domain.errors import InvalidRequest, Upstream
-from outlook_connector.remote import ids
+from outlook_connector.remote import graph_calendar, ids
 from outlook_connector.remote.calendar_mapping import teams_chat_id_from_join_link
 from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_calendar import GraphCalendarItems, GraphCalendarView
@@ -160,7 +160,8 @@ async def test_events_map_to_the_connector_model_in_utc_with_outlook_ids_and_the
 
 
 async def test_the_teams_link_is_read_from_the_description_when_the_meeting_block_is_absent() -> None:
-    description = "Agenda.\nJoin: https://teams.microsoft.com/l/meetup-join/synthetic-thread.v2/0?context=x."
+    link = "https://teams.microsoft.com/l/meetup-join/19%3ameeting_synthetic%40thread.v2/0?context=x"
+    description = f"Agenda.\nJoin: {link}."
     event = _synthetic_event(onlineMeeting=None, body={"contentType": "text", "content": description})
     view, _ = _view(lambda request: _json_page([event]))
 
@@ -168,10 +169,8 @@ async def test_the_teams_link_is_read_from_the_description_when_the_meeting_bloc
         await view.list_events(since=SINCE, until=UNTIL, page_size=5, page=None, include_body=True)
     ).events
 
-    assert (
-        listed.teams_join_url == "https://teams.microsoft.com/l/meetup-join/synthetic-thread.v2/0?context=x"
-    )
-    assert listed.body_text == description
+    assert listed.teams_join_url == link and listed.body_text == description
+    assert listed.teams_chat_id_from_join_link is None  # only Graph's meeting link names the chat
 
 
 async def test_continuation_links_are_followed_with_the_same_preferences() -> None:
@@ -276,6 +275,9 @@ async def test_event_hydration_uses_graph_and_lists_attachments_even_when_flag_i
                 hasAttachments=False,
                 body={"contentType": "text", "content": "Synthetic agenda"},
                 responseStatus={"response": "accepted"},
+                responseRequested=True,
+                sensitivity="private",
+                iCalUId="synthetic-uid",
             ),
         )
 
@@ -288,11 +290,41 @@ async def test_event_hydration_uses_graph_and_lists_attachments_even_when_flag_i
     ]
     assert all('IdType="ImmutableId"' in request.headers["prefer"] for request in requests)
     assert requests[0].headers["prefer"].find('outlook.body-content-type="text"') >= 0
+    assert 'outlook.timezone="UTC"' in requests[0].headers["prefer"]
+    fields = requests[0].url.params["$select"].split(",")
+    assert {"body", "onlineMeeting", "responseRequested", "sensitivity", "iCalUId"} <= set(fields)
     assert requests[1].url.params["$select"] == "id,name,contentType,size,isInline"
     assert tokens.profiles == [config.CALENDAR_PROFILE, config.CALENDAR_PROFILE]
     assert event.id == ids.to_ows("synthetic-id_x")
     assert event.my_response_type == "Accept" and event.body_text == "Synthetic agenda"
     assert event.attachments[0].name == "agenda.txt" and event.attachments[0].size == 41
+    assert event.is_response_requested is True and event.sensitivity == "Private"
+    assert event.uid == "synthetic-uid"
+
+
+async def test_event_attachments_are_listed_alone_and_a_cut_or_malformed_listing_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers = iter(
+        [
+            {"value": [{"name": "a.txt"}, {"id": "synthetic-b", "name": "b.txt"}]},
+            {"value": [{"id": "synthetic-a"}], "@odata.nextLink": "https://graph.microsoft.com/v1.0/next"},
+        ]
+    )
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=next(answers))
+
+    items, _ = _items(handler)
+    with pytest.raises(Upstream, match="without an id"):
+        await items.list_attachments(ids.to_ows("synthetic-id_x"))
+    assert [request.url.path for request in requests] == ["/v1.0/me/events/synthetic-id_x/attachments"]
+
+    monkeypatch.setattr(graph_calendar, "MAX_EVENT_ATTACHMENTS", 1)
+    with pytest.raises(Upstream, match="more than 1 attachments"):
+        await items.list_attachments(ids.to_ows("synthetic-id_x"))
 
 
 async def test_event_attachment_download_uses_the_graph_event_route(tmp_path: Any) -> None:

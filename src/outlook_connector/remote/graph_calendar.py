@@ -30,15 +30,13 @@ from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
 
 VIEW_PATH = "/me/calendarView"
-EVENT_FIELDS = (
-    "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
-    "responseStatus,type,seriesMasterId"
-)
 MAX_PAGE_SIZE = 100  # the largest page this module asks for; a continuation link may not ask for more
+MAX_EVENT_ATTACHMENTS = 500
 VIEW_FIELDS = (
     "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
     "responseStatus,type,seriesMasterId,onlineMeeting"
 )
+EVENT_FIELDS = f"{VIEW_FIELDS},responseRequested,sensitivity,iCalUId,body"
 PREFER_UTC = 'outlook.timezone="UTC"'
 # Graph does not return the view in start order on its own, and its pages follow that order. Ordering on
 # the server keeps every next link in time order (live check 2026-10-12, research §3.8).
@@ -50,6 +48,12 @@ RESPONSE_NAMES = {  # Graph's responseStatus.response -> the MyResponseType that
     "organizer": "Organizer",
     "notResponded": "NoResponseReceived",
     "none": "NoResponseReceived",
+}
+SENSITIVITY_NAMES = {  # Graph's sensitivity -> the Sensitivity that Exchange reports
+    "normal": "Normal",
+    "personal": "Personal",
+    "private": "Private",
+    "confidential": "Confidential",
 }
 ITEM_TYPE_NAMES = {  # Graph's event type -> the CalendarItemType that Exchange reports
     "singleInstance": "Single",
@@ -101,37 +105,44 @@ class GraphCalendarItems:
         self._graph = graph
 
     async def get_event(self, event_id: str) -> CalendarEvent:
-        graph_id = ids.to_graph(event_id)
+        """Assumes (not re-checked here): ``event_id`` was validated by ``Calendar``."""
         with operation("reading a calendar event"):
             data = await self._graph.get(
-                f"/me/events/{quote(graph_id, safe='')}",
-                {"$select": f"{EVENT_FIELDS},body,onlineMeeting"},
-                prefer=(PREFER_TEXT_BODY,),
+                _event_path(event_id),
+                {"$select": EVENT_FIELDS},
+                prefer=(PREFER_UTC, PREFER_TEXT_BODY),
             )
         event = _event(data)
         event.id = event_id
-        event.attachments = await self._list_attachments(graph_id)
+        event.attachments = await self.list_attachments(event_id)
         return event
 
-    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
-        graph_id = ids.to_graph(event_id)
-        with operation("downloading a calendar attachment"):
-            _, size = await self._graph.download(
-                f"/me/events/{quote(graph_id, safe='')}/attachments/{quote(attachment_id, safe='')}/$value",
-                dest,
-            )
-        return size
-
-    async def _list_attachments(self, graph_id: str) -> list[CalendarAttachment]:
+    async def list_attachments(self, event_id: str) -> list[CalendarAttachment]:
+        """Every attachment Graph lists; ``hasAttachments`` is not trusted (false on some occurrences)."""
         with operation("listing calendar attachments"):
-            items, _ = await self._graph.collect(
-                f"/me/events/{quote(graph_id, safe='')}/attachments",
+            items, truncated = await self._graph.collect(
+                f"{_event_path(event_id)}/attachments",
                 {"$select": "id,name,contentType,size,isInline"},
-                max_items=500,
+                max_items=MAX_EVENT_ATTACHMENTS,
             )
+        if truncated:
+            raise Upstream(f"Graph listed more than {MAX_EVENT_ATTACHMENTS} attachments on this event.")
+        graph_id = ids.to_graph(event_id)
         return [
             CalendarAttachment.model_validate(map_attachment(item, graph_id).model_dump()) for item in items
         ]
+
+    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        """Assumes (not re-checked here): both ids come from this event's attachment listing."""
+        with operation("downloading a calendar attachment"):
+            _, size = await self._graph.download(
+                f"{_event_path(event_id)}/attachments/{quote(attachment_id, safe='')}/$value", dest
+            )
+        return size
+
+
+def _event_path(event_id: str) -> str:
+    return f"/me/events/{quote(ids.to_graph(event_id), safe='')}"
 
 
 def _iso(value: datetime) -> str:
@@ -175,7 +186,7 @@ def _event(data: dict[str, Any]) -> CalendarEvent:
     rows = [row for row in data.get("attendees") or [] if isinstance(row, dict)]
     event_id = text(data.get("id"))
     series = text(data.get("seriesMasterId"))
-    join_url = text(online.get("joinUrl")) or teams_join_url(description)
+    meeting_url = text(online.get("joinUrl"))
     return CalendarEvent(
         id=ids.to_ows(event_id) if event_id else None,
         immutable_id=event_id,
@@ -190,12 +201,16 @@ def _event(data: dict[str, Any]) -> CalendarEvent:
         is_cancelled=boolean(data.get("isCancelled")),
         is_all_day=boolean(data.get("isAllDay")),
         is_organizer=boolean(data.get("isOrganizer")),
+        is_response_requested=boolean(data.get("responseRequested")),
+        sensitivity=SENSITIVITY_NAMES.get(text(data.get("sensitivity")) or ""),
+        uid=text(data.get("iCalUId")),
         my_response_type=RESPONSE_NAMES.get(text(status.get("response")) or ""),
         calendar_item_type=ITEM_TYPE_NAMES.get(text(data.get("type")) or ""),
         series_master_id=ids.to_ows(series) if series else None,
         body_text=description,
-        teams_join_url=join_url,
-        teams_chat_id_from_join_link=teams_chat_id_from_join_link(join_url),
+        teams_join_url=meeting_url or teams_join_url(description),
+        # Only Graph's meeting link: the 54-of-56 evidence is from it, not from links in a description.
+        teams_chat_id_from_join_link=teams_chat_id_from_join_link(meeting_url),
     )
 
 
