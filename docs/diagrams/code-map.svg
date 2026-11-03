@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="4230" viewBox="0 0 2600 4230" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and three calendar ports. Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. MailWriter uploads local draft files through OwsMailWriter, then Writes checks file names and sizes through Graph. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. Services call one adapter per backend: Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings); every remote request shares one Transport and the shared TokenProvider. OwsMailWriter uploads local draft files, then Writes checks file names and sizes through Graph. There is no local database: Mailbox keeps the folder list in memory, and the data directory holds downloads, exports and logs. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -139,7 +139,7 @@
 <rect x="100" y="1179" width="553" height="333" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="1214"><tspan class="code">Mailbox</tspan><tspan class="detail" dx="12">mailbox.py</tspan></text>
 <text class="group-title" x="118" y="1251">Folders</text>
-<g><title>The visible folders. Cached in the Store and used only while younger than 10 minutes; otherwise the call waits for a refresh.</title><text class="detail" x="118" y="1281">• <tspan class="code">folders()</tspan></text></g>
+<g><title>The visible folders. Kept in memory per process and used only while younger than 10 minutes; otherwise the call waits for a refresh.</title><text class="detail" x="118" y="1281">• <tspan class="code">folders()</tspan></text></g>
 <g><title>A folder id, a well-known alias (inbox, archive, ...), a path (Inbox/Projects) or a name. Hidden folders are refused.</title><text class="detail" x="118" y="1308">• <tspan class="code">resolve_folder</tspan></text></g>
 <g><title>Folder id → reason for every folder the scope leaves out (Deleted Items/Junk, Sent/Drafts/Outbox).</title><text class="detail" x="118" y="1335">• <tspan class="code">exclusions</tspan></text></g>
 <g><title>The folder map and the ids of hidden folders (out of reach for lists and search).</title><text class="detail" x="118" y="1362">• <tspan class="code">reach</tspan></text></g>
@@ -149,7 +149,7 @@
 <g><title>One message's Exchange text with attachment markers after the body, and offset continuation.</title><text class="detail" x="359" y="1335">• <tspan class="code">get_message</tspan></text></g>
 <g><title>Attachment metadata of one message, or of many at once (batched).</title><text class="detail" x="359" y="1362">• <tspan class="code">attachments(_many)</tspan></text></g>
 <g><title>How many messages each conversation has, counted the way get_conversation lists them.</title><text class="detail" x="359" y="1389">• <tspan class="code">conversation_sizes</tspan></text></g>
-<text class="muted" x="118" y="1496">uses <tspan class="code">MailReader</tspan> · <tspan class="code">Store</tspan> · <tspan class="code">cursors</tspan> · <tspan class="code">scope</tspan></text>
+<text class="muted" x="118" y="1496">uses <tspan class="code">GraphMailReader</tspan> · <tspan class="code">cursors</tspan> · <tspan class="code">scope</tspan></text>
 
 <rect x="673" y="1179" width="553" height="333" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="691" y="1214"><tspan class="code">Conversations</tspan><tspan class="detail" dx="12">conversations.py</tspan></text>
@@ -185,7 +185,7 @@
 <g><title>Save explicit text or HTML into Drafts with the native signature; upload only the listed local files and verify their names and sizes through Graph. Failed uploads move the partial draft to Deleted Items. Replies are checked for intact quoted history.</title><text class="detail" x="691" y="1634">• <tspan class="code">create_draft(message)</tspan></text></g>
 <g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. Refuses drafts stored over 35 MiB; an unclear answer is checked against Sent Items and never resent.</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
 <g><title>Refuses to write unless the Outlook sign-in is the bound Microsoft account.</title><text class="detail" x="691" y="1688">• <tspan class="code">check_account()</tspan></text></g>
-<text class="muted" x="691" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">MailWriter</tspan> · <tspan class="code">Signatures</tspan></text>
+<text class="muted" x="691" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsMailWriter</tspan> · <tspan class="code">Signatures</tspan></text>
 
 <rect x="1247" y="1532" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1265" y="1567"><tspan class="code">Mutations</tspan><tspan class="detail" dx="12">mutations.py</tspan></text>
@@ -194,7 +194,7 @@
 <g><title>Flag or unflag messages.</title><text class="detail" x="1265" y="1661">• <tspan class="code">set_flag(ids, flagged)</tspan></text></g>
 <g><title>Move to a folder (not Deleted Items, not a hidden folder).</title><text class="detail" x="1265" y="1688">• <tspan class="code">move(ids, folder)</tspan></text></g>
 <g><title>Move to Deleted Items; messages already there are left alone. Never a hard delete.</title><text class="detail" x="1265" y="1715">• <tspan class="code">delete(ids)</tspan></text></g>
-<text class="muted" x="1265" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">MailWriter</tspan> · <tspan class="code">Writes.check_account</tspan></text>
+<text class="muted" x="1265" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsMailWriter</tspan> · <tspan class="code">Writes.check_account</tspan></text>
 
 <rect x="100" y="1831" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="1866"><tspan class="code">Calendar</tspan><tspan class="detail" dx="12">calendar.py</tspan></text>
@@ -203,7 +203,7 @@
 <g><title>One event read through Graph: agenda, attendees, response, join URL, link-derived Teams chat id and attachment metadata.</title><text class="detail" x="118" y="1960">• <tspan class="code">get_event(event_id)</tspan></text></g>
 <text class="group-title" x="118" y="1999">Rules</text>
 <text class="detail" x="118" y="2029">no totals; no cursor at offset 1,000</text>
-<text class="muted" x="118" y="2094">uses <tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">CalendarItemReader</tspan></text>
+<text class="muted" x="118" y="2094">uses <tspan class="code">SubstrateEventSearch</tspan> · <tspan class="code">GraphCalendarItems</tspan></text>
 
 <rect x="673" y="1831" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="691" y="1866"><tspan class="code">CalendarListing</tspan><tspan class="detail" dx="12">calendar_listing.py</tspan></text>
@@ -213,7 +213,7 @@
 <text class="detail" x="691" y="2002">Graph's calendar view only</text>
 <text class="detail" x="691" y="2029">a Graph failure is reported as it is</text>
 <text class="detail" x="691" y="2056">a cursor carries Graph's next link</text>
-<text class="muted" x="691" y="2094">uses <tspan class="code">CalendarViewReader</tspan></text>
+<text class="muted" x="691" y="2094">uses <tspan class="code">GraphCalendarView</tspan></text>
 
 <rect x="1247" y="1831" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1265" y="1866"><tspan class="code">Rules</tspan><tspan class="detail" dx="12">rules.py</tspan></text>
@@ -223,7 +223,7 @@
 <g><title>With the user's code: one OWS write, resent only when Outlook refused it as throttled or unavailable (429, 503), then a fresh read-back.</title><text class="detail" x="1265" y="1987">• <tspan class="code">reorder_rules</tspan> · <tspan class="code">delete_rule</tspan></text></g>
 <text class="group-title" x="1265" y="2026">Rules</text>
 <text class="detail" x="1265" y="2056">propose → confirm → one write → read back</text>
-<text class="muted" x="1265" y="2094">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">RuleWriter</tspan> · <tspan class="code">Writes.check_account</tspan></text>
+<text class="muted" x="1265" y="2094">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsRules</tspan> · <tspan class="code">Writes.check_account</tspan></text>
 
 <rect x="100" y="2130" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="2165"><tspan class="code">Signatures</tspan><tspan class="detail" dx="12">signatures.py</tspan></text>
@@ -232,7 +232,7 @@
 <g><title>Passive HTML (checked by passive_html) plus quoted data-URI images; each write is resent only when Outlook refused it as throttled or unavailable (429, 503).</title><text class="detail" x="118" y="2259">• <tspan class="code">create</tspan>, <tspan class="code">update</tspan>, <tspan class="code">delete_signature</tspan></text></g>
 <g><title>New-mail and reply defaults, set or cleared independently.</title><text class="detail" x="118" y="2286">• <tspan class="code">set_default_signature</tspan></text></g>
 <g><title>The signature block create_draft appends: the default for new mail or replies, or a named one; images become inline attachments.</title><text class="detail" x="118" y="2313">• <tspan class="code">resolve_for_draft</tspan></text></g>
-<text class="muted" x="118" y="2393">uses <tspan class="code">SignatureStore</tspan> · <tspan class="code">passive_html</tspan></text>
+<text class="muted" x="118" y="2393">uses <tspan class="code">CloudSettings</tspan> · <tspan class="code">passive_html</tspan></text>
 
 <rect x="673" y="2130" width="1127" height="279" fill="#eff8f6" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="691" y="2168">Helpers</text>
@@ -251,37 +251,37 @@
 <text class="detail" x="1100" y="2348">(CLAUDE.md, &quot;Input boundaries&quot;)</text>
 
 <path class="local-flow" d="M340 2433 V2495"/>
-<text class="flow-label" x="360" y="2471" text-anchor="start">folders · account</text>
+<text class="flow-label" x="360" y="2471" text-anchor="start">downloads · exports</text>
 <path class="call-flow" d="M940 2429 V2495"/>
-<text class="flow-label" x="960" y="2471" text-anchor="start">mail and calendar reads → ports</text>
+<text class="flow-label" x="960" y="2471" text-anchor="start">mail and calendar reads → adapters</text>
 <path class="call-flow" d="M1520 2429 V2495"/>
-<text class="flow-label" x="1540" y="2471" text-anchor="start">changes → ports</text>
+<text class="flow-label" x="1540" y="2471" text-anchor="start">changes → adapters</text>
 
-<!-- Local store. -->
+<!-- Local files. -->
 <rect x="80" y="2499" width="520" height="415" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M80 2573 V2513 Q80 2499 94 2499 H586 Q600 2499 600 2513 V2573 Z" fill="#183153"/>
-<text class="card-title" x="100" y="2532">LOCAL STORE</text>
-<text class="card-subtitle" x="100" y="2556"><tspan class="code">store/db.py</tspan> · <tspan class="code">Store</tspan> · SQLite per account (WAL)</text>
+<text class="card-title" x="100" y="2532">LOCAL FILES</text>
+<text class="card-subtitle" x="100" y="2556">data directory · no database</text>
 <rect x="100" y="2593" width="480" height="301" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="group-title" x="118" y="2631">Methods</text>
-<g><title>The cached folders and their age in seconds (None when never cached). Mailbox uses them only while younger than 10 minutes.</title><text class="detail" x="118" y="2661">• <tspan class="code">folders()</tspan></text></g>
-<g><title>Replace the cached folder list (one short transaction).</title><text class="detail" x="118" y="2688">• <tspan class="code">save_folders(folders)</tspan></text></g>
-<text class="group-title" x="118" y="2727">Tables</text>
-<g><title>The folder list with paths, counts and hidden flags.</title><text class="detail" x="118" y="2757">• <tspan class="code">folders</tspan></text></g>
-<g><title>Which account owns this store; another account's store is left untouched and a separate one is used.</title><text class="detail" x="118" y="2784">• <tspan class="code">meta</tspan></text></g>
-<text class="group-title" x="118" y="2823">Not stored</text>
-<text class="detail" x="118" y="2853">messages, bodies, attachments, events</text>
+<text class="group-title" x="118" y="2631">Kept a week</text>
+<g><title>Attachments and saved .eml files, one folder per message attachment; reused while kept. service/files.py and localfiles.py.</title><text class="detail" x="118" y="2661">• <tspan class="code">downloads/</tspan></text></g>
+<g><title>One file per export, created exclusively. service/export/packaging.py.</title><text class="detail" x="118" y="2688">• <tspan class="code">exports/</tspan></text></g>
+<g><title>One file per mcp or ui process, rotated at midnight. logs.py.</title><text class="detail" x="118" y="2715">• <tspan class="code">logs/</tspan></text></g>
+<text class="group-title" x="118" y="2757">In memory, per process</text>
+<g><title>Mailbox reloads it once it is 10 minutes old.</title><text class="detail" x="118" y="2787">• folder list (10 minutes)</text></g>
+<text class="group-title" x="118" y="2827">Not kept</text>
+<text class="detail" x="118" y="2857">messages, bodies, events</text>
 
 <!-- Remote. -->
 <rect x="640" y="2499" width="1180" height="1172" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M640 2573 V2513 Q640 2499 654 2499 H1806 Q1820 2499 1820 2513 V2573 Z" fill="#183153"/>
 <text class="card-title" x="660" y="2532">REMOTE</text>
-<text class="card-subtitle" x="660" y="2556"><tspan class="code">remote/</tspan> · ports in <tspan class="code">ports.py</tspan>, one adapter per port; the only code that knows wire formats and ids</text>
+<text class="card-subtitle" x="660" y="2556"><tspan class="code">remote/</tspan> · one adapter per backend, values in <tspan class="code">results.py</tspan>; the only code that knows wire formats and ids</text>
 
 <rect x="660" y="2593" width="560" height="332" fill="#f2f7fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="676" y="2607" width="32" height="26" rx="5" fill="#2b6cb0"/>
 <text class="badge" x="692" y="2626" text-anchor="middle">G</text>
-<text class="section-title" x="718" y="2628"><tspan class="code">MailReader</tspan><tspan class="detail" dx="12">ports.py</tspan></text>
+<text class="section-title" x="718" y="2628"><tspan class="code">GraphMailReader</tspan><tspan class="detail" dx="12">graph_mail.py</tspan></text>
 <g><title>Every folder, hidden ones included (the service decides what is out of reach).</title><text class="detail" x="678" y="2665">• <tspan class="code">list_folders</tspan></text></g>
 <g><title>One page of messages, newest first; a continuation, or skip N.</title><text class="detail" x="678" y="2692">• <tspan class="code">list_messages</tspan></text></g>
 <g><title>One page of $search hits.</title><text class="detail" x="678" y="2719">• <tspan class="code">search</tspan></text></g>
@@ -295,28 +295,28 @@
 <g><title>Draft status, version and folder, plus stored size expanded through Integer 0x0E08; no body or attachment listing.</title><text class="detail" x="906" y="2800">• <tspan class="code">draft_state</tspan></text></g>
 <rect x="676" y="2822" width="32" height="26" rx="5" fill="#2b6cb0"/>
 <text class="badge" x="692" y="2841" text-anchor="middle">G</text>
-<text class="section-title" x="718" y="2843"><tspan class="code">CalendarViewReader</tspan></text>
+<text class="section-title" x="718" y="2843"><tspan class="code">GraphCalendarView</tspan><tspan class="detail" dx="12">graph_calendar.py</tspan></text>
 <g><title>One page of the default calendar's events in a window, occurrences expanded, times in UTC.</title><text class="detail" x="678" y="2880">• <tspan class="code">list_events</tspan> (Graph calendar view)</text></g>
 
 <rect x="1240" y="2593" width="560" height="332" fill="#fdf8ef" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="1256" y="2607" width="32" height="26" rx="5" fill="#b7791f"/>
 <text class="badge" x="1272" y="2626" text-anchor="middle">O</text>
-<text class="section-title" x="1298" y="2628"><tspan class="code">MailWriter</tspan><tspan class="detail" dx="12">ports.py</tspan></text>
+<text class="section-title" x="1298" y="2628"><tspan class="code">OwsMailWriter</tspan><tspan class="detail" dx="12">ows_mail.py</tspan></text>
 <g><title>Save into Drafts without sending.</title><text class="detail" x="1258" y="2665">• <tspan class="code">create_draft</tspan></text></g>
 <g><title>Send an existing draft as it is, keeping a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2692">• <tspan class="code">send_draft</tspan></text></g>
 <g><title>Identity claims (tid, oid, upn) of the Outlook credential.</title><text class="detail" x="1258" y="2719">• <tspan class="code">account</tspan></text></g>
 <g><title>Read or unread; one outcome per message.</title><text class="detail" x="1529" y="2665">• <tspan class="code">set_read</tspan> · <tspan class="code">set_flag</tspan></text></g>
 <g><title>Move to a folder, or to Deleted Items; there is no hard delete.</title><text class="detail" x="1529" y="2692">• <tspan class="code">move</tspan> · <tspan class="code">delete</tspan></text></g>
 <g><title>Upload a local file in raw 14 MiB slices; the caller confirms it through Graph.</title><text class="detail small" x="1529" y="2719">• <tspan class="code">add_local_attachment</tspan></text></g>
-<g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">RuleWriter</tspan> · <tspan class="code">*_rule</tspan></text></g>
-<g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">SignatureStore</tspan> · settings, contents, writes</text></g>
-<g><title>Hydrate one event by its Outlook item id; list or download its attachments.</title><text class="detail" x="1258" y="2812"><tspan class="code">CalendarItemReader</tspan> · <tspan class="code">get_event</tspan> · files</text></g>
-<g><title>One page of Exchange event hits from Search v2.</title><text class="detail" x="1258" y="2839"><tspan class="code">CalendarSearchReader</tspan> · <tspan class="code">search_events</tspan></text></g>
+<g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">OwsRules</tspan> · <tspan class="code">*_rule</tspan></text></g>
+<g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">CloudSettings</tspan> · settings, contents, writes</text></g>
+<g><title>Hydrate one event by its Outlook item id; list or download its attachments.</title><text class="detail" x="1258" y="2812"><tspan class="code">GraphCalendarItems</tspan> · <tspan class="code">get_event</tspan> · files</text></g>
+<g><title>One page of Exchange event hits from Search v2.</title><text class="detail" x="1258" y="2839"><tspan class="code">SubstrateEventSearch</tspan> · <tspan class="code">search_events</tspan></text></g>
 
 <path class="impl-flow" d="M940 2925 V2971"/>
-<text class="flow-label" x="960" y="2957" text-anchor="start">implemented by</text>
+<text class="flow-label" x="960" y="2957" text-anchor="start">built with</text>
 <path class="impl-flow" d="M1520 2925 V2971"/>
-<text class="flow-label" x="1540" y="2957" text-anchor="start">implemented by</text>
+<text class="flow-label" x="1540" y="2957" text-anchor="start">built with</text>
 
 <rect x="660" y="2975" width="560" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="678" y="3010"><tspan class="code">GraphMailReader</tspan><tspan class="detail" dx="12">graph_mail.py</tspan></text>
@@ -332,7 +332,7 @@
 <g><title>Inbox-rule actions in OWS's bare-request style.</title><text class="detail small" x="1258" y="3074"><tspan class="code">OwsRules</tspan>: inbox-rule actions</text></g>
 <g><title>Event search uses Search v2; event details and attachment reads use Graph under outlook.calendar.</title><text class="detail small" x="1258" y="3101"><tspan class="code">GraphCalendarItems</tspan>: event details + files</text></g>
 <g><title>Search v2 Event/Exchange pages; Cvid and LogicalId kept across one walk. Calls Transport directly.</title><text class="detail small" x="1258" y="3128"><tspan class="code">SubstrateEventSearch</tspan>: Search v2</text></g>
-<g><title>Implements SignatureStore over Outlook Cloud Settings. Calls Transport directly.</title><text class="detail small" x="1258" y="3155"><tspan class="code">CloudSettings</tspan>: signature settings</text></g>
+<g><title>Native signatures over Outlook Cloud Settings. Calls Transport directly.</title><text class="detail small" x="1258" y="3155"><tspan class="code">CloudSettings</tspan>: signature settings</text></g>
 
 <path class="call-flow" d="M940 3225 V3267"/>
 <path class="call-flow" d="M1520 3225 V3267"/>
@@ -400,10 +400,10 @@
 <rect x="1920" y="244" width="580" height="386" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1938" y="282">Built once per process, on first use</text>
 <g><title>Encrypted cache unless --unsecure (a separate plaintext development cache).</title><text class="detail small" x="1938" y="312">• <tspan class="code">TokenProvider(unsecure)</tspan></text></g>
-<g><title>Every token request is checked against the account the store is bound to.</title><text class="detail small" x="1938" y="339">• <tspan class="code">AccountBoundTokenSource(...)</tspan></text></g>
+<g><title>Every token request is checked against the signed-in account.</title><text class="detail small" x="1938" y="339">• <tspan class="code">AccountBoundTokenSource(...)</tspan></text></g>
 <g><title>One HTTPS client for every Microsoft service.</title><text class="detail small" x="1938" y="366">• <tspan class="code">Transport(account_tokens)</tspan></text></g>
-<g><title>The MailReader adapter.</title><text class="detail small" x="1938" y="393">• <tspan class="code">GraphMailReader(Graph(transport))</tspan></text></g>
-<g><title>SQLite file per account fingerprint; everything else reads mail through Mailbox.</title><text class="detail small" x="1938" y="420">• <tspan class="code">Store(account)</tspan> · <tspan class="code">Mailbox(reader, store)</tspan></text></g>
+<g><title>Graph mail reads.</title><text class="detail small" x="1938" y="393">• <tspan class="code">GraphMailReader(Graph(transport))</tspan></text></g>
+<g><title>Keeps the folder list in memory; everything else reads mail through Mailbox.</title><text class="detail small" x="1938" y="420">• <tspan class="code">Mailbox(reader)</tspan></text></g>
 <text class="detail small" x="1938" y="447">• <tspan class="code">Conversations</tspan> · <tspan class="code">Exports</tspan> · <tspan class="code">Files</tspan></text>
 <g><title>SubstrateEventSearch for search, GraphCalendarItems for event details and files.</title><text class="detail small" x="1938" y="474">• <tspan class="code">Calendar(search, items)</tspan></text></g>
 <g><title>GraphCalendarView on Graph(transport, profile=CALENDAR_PROFILE).</title><text class="detail small" x="1938" y="501">• <tspan class="code">CalendarListing(graph)</tspan></text></g>
@@ -414,8 +414,8 @@
 <rect x="1900" y="690" width="620" height="560" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
 <text class="note-title" x="1924" y="730">How to read it</text>
 <text class="detail" x="1924" y="770">Each layer calls only the one below it.</text>
-<text class="detail" x="1924" y="806">The service sees only its ports, so</text>
-<text class="detail" x="1924" y="842">Graph and Outlook Web stay swappable.</text>
+<text class="detail" x="1924" y="806">Services call one adapter per backend;</text>
+<text class="detail" x="1924" y="842">only remote/ knows wire formats.</text>
 <text class="detail" x="1924" y="878">Graph (blue) profiles: mail data,</text>
 <text class="detail" x="1924" y="914">verification and calendar windows.</text>
 <text class="detail" x="1924" y="950">Outlook Web (amber) profiles: changes,</text>

@@ -27,17 +27,17 @@ The [code map](diagrams/code-map.svg) shows every class and who calls whom. This
 | `outlook-connector status [--check]` | Offline profile and cache status, shaped like `auth_status`; `--check` acquires tokens but does not prove API authorization | shared auth |
 
 - **No in-memory state outlives a call.** Cursors are self-contained (remote link, offsets and the original options) and survive a client restart.
-- **Caches are used only while fresh.** The folder cache is used while younger than 10 minutes; an older one waits for a refresh. Messages are always listed from the server.
+- **Caches are used only while fresh.** Each process keeps the folder list in memory while it is younger than 10 minutes; an older one waits for a refresh. Messages are always listed from the server.
 - **No background work.** The UI's idle timer only stops the process. Exports run inside the request or tool call that asked, with no job queue.
-- **Concurrency is cross-process.** Outlook, Teams and SharePoint processes may run at once: the shared MSAL cache locks across processes and invalidates by account generation; SQLite uses WAL, a busy timeout and one connection per operation; output files use exclusive creation.
+- **Concurrency is cross-process.** Outlook, Teams and SharePoint processes may run at once: the shared MSAL cache locks across processes and invalidates by account generation, and output files use exclusive creation. Nothing else is shared between processes.
 - **Startup is cheap.** Nothing runs before the first call; only `ui` imports the web stack; only `auth` signs in interactively.
 
 ## 3. Layers
 
-Surfaces → service → remote and store, as in the diagram:
+Surfaces → service → remote, as in the diagram:
 
 - [`surfaces/`](../src/outlook_connector/surfaces/) import [`service`](../src/outlook_connector/service/) and [`domain`](../src/outlook_connector/domain/) only.
-- [`service`](../src/outlook_connector/service/) imports the ports in [`remote/ports.py`](../src/outlook_connector/remote/ports.py) (never an adapter), [`store`](../src/outlook_connector/store/) and [`domain`](../src/outlook_connector/domain/). [`bootstrap.py`](../src/outlook_connector/bootstrap.py) wires the adapters.
+- [`service`](../src/outlook_connector/service/) imports the adapters, the values they return ([`remote/results.py`](../src/outlook_connector/remote/results.py)) and [`domain`](../src/outlook_connector/domain/); it never sees Graph or OWS JSON. [`bootstrap.py`](../src/outlook_connector/bootstrap.py) builds the adapters and passes them in.
 - [`remote`](../src/outlook_connector/remote/) returns domain models; each `*_mapping.py` module is the only place that knows its wire fields. Unknown fields are ignored; missing optional fields become None.
 - [`domain`](../src/outlook_connector/domain/) imports nothing from the app.
 
@@ -53,7 +53,7 @@ Only rules the code layout does not make obvious. Per-tool behavior is §8; wire
 
 - One encrypted, cross-process-safe MSAL cache and the named profiles (§7 has the paths). `--unsecure` selects a separate plaintext development cache with a warning.
 - Only `auth` signs in, asking only for profiles that need approval; other calls report the `outlook-connector auth` command.
-- An account-generation marker makes running processes drop memoized tokens after sign-out or an account switch. The composition root derives the account from `outlook.graph` and rebuilds services and store when it changes, after checking the store's owner fingerprint (§7).
+- An account-generation marker makes running processes drop memoized tokens after sign-out or an account switch. The composition root derives the account from `outlook.graph` and rebuilds the services when it changes (§7).
 - A cached profile does not prove an operation is authorized. Refused client/scope pairs stay out of the profile catalog.
 
 ### 5.2 [`remote/transport.py`](../src/outlook_connector/remote/transport.py)
@@ -87,7 +87,7 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 
 ### 5.6 [`remote/cloud_settings.py`](../src/outlook_connector/remote/cloud_settings.py)
 
-- SignatureStore over Outlook Cloud Settings, with no local copy. Reads fetch the name list and both defaults fresh; each content read checks its scope against the list. Missing records mean no names or defaults; malformed or duplicate records and mismatched scopes fail.
+- Native signatures over Outlook Cloud Settings, with no local copy. Reads fetch the name list and both defaults fresh; each content read checks its scope against the list. Missing records mean no names or defaults; malformed or duplicate records and mismatched scopes fail.
 - The opaque account scope is carried from present settings into writes, so with none, configure a signature in Outlook first. Names are URL-encoded for content reads, and commas are refused because the list is comma-joined.
 
 ### 5.7 [`domain/`](../src/outlook_connector/domain/)
@@ -97,9 +97,9 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - `Failure` (status, code, shortened message, request id) is the per-item failure value; `ExportError` adds the likely cause, retry and fix.
 - Domain errors are the same in every `lrh-*` connector: `InvalidRequest` (with `DownloadLimitExceeded`), `NotFound`, `Throttled`, `Upstream` (with `PermissionDenied`), `WriteOutcomeUnknown`, and `AuthenticationRequired` and `AccountMismatch` from the shared sign-in.
 
-### 5.8 [`store/`](../src/outlook_connector/store/)
+### 5.8 Local state
 
-One SQLite database per account fingerprint, holding the account binding and the folder cache only: no message data (research §3.2). A database with another owner is left untouched and a separate one is used.
+There is no local database (decided 2026-11-03). Each process keeps its folder list in memory (§5.9), and the data directory holds only downloads, exports and logs (§7). No message data is kept (research §3.2).
 
 ### 5.9 [`service/`](../src/outlook_connector/service/)
 
@@ -157,19 +157,19 @@ Outlook still has rounder corners than this rule on its search fields, folder bu
 
 The routing reflects the tenant's grants (research §2), not a fixed split between reads and writes; the Outlook profile is therefore needed by some read-only tools too.
 
-| Capability | Port | Adapter | Token profile |
-|---|---|---|---|
-| Folders, messages, conversations, search, attachments, MIME, profile and photo; read-after-write checks | MailReader | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
-| Exchange event search | CalendarSearchReader | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
-| Event hydration, attachment metadata and bytes | CalendarItemReader | [GraphCalendarItems](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` |
-| Calendar catalog and events in a window | CalendarViewReader | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` |
-| Drafts and send; read state, flags, move and soft delete | MailWriter | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
-| Inbox rules | RuleWriter | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
-| Native signature settings and contents | SignatureStore | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
+| Capability | Adapter | Token profile |
+|---|---|---|
+| Folders, messages, conversations, search, attachments, MIME, profile and photo; read-after-write checks | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
+| Exchange event search | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
+| Event hydration, attachment metadata and bytes | [GraphCalendarItems](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` |
+| Calendar catalog and events in a window | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` |
+| Drafts and send; read state, flags, move and soft delete | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
+| Inbox rules | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
+| Native signature settings and contents | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
 
-### 6.1 How the code stays swappable
+### 6.1 Changing a backend
 
-The service depends only on the ports; [`bootstrap.py`](../src/outlook_connector/bootstrap.py) picks one adapter per port, and each adapter requests its named profile. A write uses one backend and is never retried through another; no read falls back to another backend.
+Each capability has one adapter, and services take it directly; there are no interfaces with a single implementation (decided 2026-11-03). [`bootstrap.py`](../src/outlook_connector/bootstrap.py) builds the adapters, and each requests its named profile. To move a capability to another backend, write an adapter with the same methods and returned values, then change `bootstrap.py` and the service's type hints. Add an interface only when two adapters exist at once. A write uses one backend and is never retried through another; no read falls back to another backend.
 
 ### 6.2 Routes not used
 
@@ -184,10 +184,9 @@ Re-run the relevant probes from [research/README.md](../research/README.md), rec
 
 ## 7. Data and identity
 
-- **Account fingerprint:** a hash of tid + oid. It selects the database and must match the account `outlook.graph` returns.
+- **Account fingerprint:** a hash of tid + oid. Rule proposals are bound to it, and a change of it rebuilds the services.
 - **Keys:** a message is its Graph immutable id, which survives moves within the mailbox; a conversation is Graph's conversationId.
 - **Data directory:** `%USERPROFILE%/.lrh-outlook-connector` on Windows, `$XDG_DATA_HOME/lrh-outlook-connector` (or `~/.local/share/...`) elsewhere; `OUTLOOK_CONNECTOR_HOME` overrides it.
-  - Store: `accounts/<fingerprint>/mail.sqlite3`.
   - Exports: `exports/`. Downloads: `downloads/<source>/<name>`, one folder per message attachment (a hash of the two ids), and saved `.eml` files in `downloads/`. Both are removed after 7 days, one process per folder at a time, tolerating files another process removed first. An export's attachment downloads use an OS temp directory.
   - Logs: `logs/<command>-<start time>-<process id>.log`, one per `mcp` or `ui` process, rotated at midnight and kept 7 days. The MCP server logs to its file only, since stdout carries the protocol. [`logs.py`](../src/outlook_connector/logs.py) is the same module in every `lrh-*` connector: it redacts bearer tokens, credential headers, assigned secrets and secret query parameters, and holds `httpx` and `httpcore` (which log full URLs) at WARNING. `OUTLOOK_CONNECTOR_LOG_LEVEL` sets the level (default INFO).
 - **Token cache:** `~/.lrh-m365-auth/token-cache.bin` (`%USERPROFILE%` on Windows); `M365_AUTH_HOME` overrides it.

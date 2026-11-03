@@ -13,7 +13,7 @@ A local application for **one user's own Exchange Online mailbox**, with two sur
 - **Local UI:** find mail and extract it as AI-friendly text bundles.
 - **MCP server:** agents search, read, export and organize the same mail.
 
-**Remote first.** Delegate listing, filtering, search and conversation grouping to Outlook's servers. Keep locally only the account binding, the folder cache and export assembly.
+**Remote first.** Delegate listing, filtering, search and conversation grouping to Outlook's servers. Keep locally only a short-lived folder list, downloaded files and export assembly.
 
 ## 2. Ownership (2026-10-17)
 
@@ -76,7 +76,7 @@ Fresh-account consent is untested for every profile (roadmap). Graph mail write 
 
 ## 6. Account binding and identity
 
-- The SQLite database is bound to a fingerprint of `tid` + `oid`, never a name or address. With a different or unknown owner, the existing database is left untouched and a separate one is used.
+- **No local database** (decided 2026-11-03). The signed-in account is identified by a fingerprint of `tid` + `oid`, never a name or address; writes check that the Outlook sign-in is the same account.
 - Messages are keyed by their Graph immutable id, which survives moves; writes convert the same id for OWS (research §4.2).
 
 ## 7. Backend
@@ -86,7 +86,7 @@ Fresh-account consent is untested for every profile (roadmap). Graph mail write 
 
 ## 8. Data model and local cache
 
-- **Folders** are cached for 10 minutes; an older cache waits for a refresh.
+- **Folders** are kept in memory per process for 10 minutes; an older list waits for a refresh (one request, under a second).
 - **Message metadata is not mirrored.** Every list, search and conversation call reads the server (decided by R1: 25.6k items, two thirds of them Junk, and a full mirror takes about 12 minutes; research §3.2).
 - **Bodies and attachments** are fetched only on read or export. Downloaded files are kept a week in the data directory and reused; nothing else of a message is stored.
 - **No local retention** (decided 2026-10-02): mail deleted on the server is gone here too.
