@@ -140,7 +140,7 @@ class Exports:
                 *(
                     self.conversations.messages(
                         conversation_id,
-                        scope=Scope(deleted_items=request.scope.deleted_items),
+                        scope=Scope(deleted_items=_conversation_deleted_items(request.scope)),
                         merge_result=False,
                     )
                     for conversation_id in batch
@@ -442,3 +442,9 @@ def _groups(summaries: list[MessageSummary], combine: str) -> list[tuple[str, st
         subject = base_subject(members[0].subject) or "conversation"
         out.append((f"Conversation: {subject}", f"{_day(members[0])} {subject}", members))
     return out
+
+
+def _conversation_deleted_items(scope: Scope) -> bool:
+    """Conversation selections include Deleted Items and Junk, as get_conversation does, unless the
+    request set ``deleted_items`` itself; folder/date windows keep the export default (false)."""
+    return scope.deleted_items if "deleted_items" in scope.model_fields_set else True

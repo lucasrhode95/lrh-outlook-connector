@@ -689,9 +689,8 @@ class Mailbox:
             try:
                 sizes = {
                     s.conversation_id: s
-                    for s in await self.conversation_sizes(
-                        with_ids, scope=Scope(deleted_items=scope.deleted_items)
-                    )
+                    # get_conversation's default: the count is what opening the conversation returns
+                    for s in await self.conversation_sizes(with_ids)
                 }
             except Exception:  # counts are a courtesy; never fail the search for them
                 sizes = {}

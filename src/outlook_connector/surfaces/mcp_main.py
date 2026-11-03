@@ -65,7 +65,7 @@ omit it for the whole mailbox). Both return message ids and conversation ids; se
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
 - Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
-calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
+calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar.
 - Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
 order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
 between these dates", and for text in subjects or descriptions within those dates (contains: a list \
@@ -88,8 +88,9 @@ exports and read-state changes. `get_conversation` and conversation-size lookups
 default; pass `scope.deleted_items=false` to leave them out. A folder you name is always included; \
 subfolders count with their parent. True shows more mail, false filters more. Use \
 `scope.sent_items=false` for "the latest mail I received", including mail that rules filed into \
-other folders. Export scope filters folder/date windows and applies its own deleted-items default to \
-conversation selections. Explicit message ids are authoritative. coverage.excluded counts what was left out.
+other folders. Export scope filters folder/date windows; an export's conversation selections include \
+Deleted Items and Junk like get_conversation unless scope.deleted_items is given. Explicit message ids \
+are authoritative. coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, grouped into conversations \
 or selected by folder/date-window/conversation export, and \
@@ -123,14 +124,14 @@ your own file tools; list_attachments adds sizes and types. Downloads are limite
 attachment, download it directly from Outlook. Cloud links are not downloaded. save_message_mime saves \
 the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
-are included and merged. Folder/date-window selections follow scope; conversation selections follow \
-the export scope, whose default still leaves Deleted Items and Junk out. Sent and meeting mail stay \
-included. Scope alone does not select anything.
+are included and merged. Folder/date-window selections follow scope; conversation selections include \
+Deleted Items and Junk unless scope.deleted_items is given. Sent and meeting mail stay included. \
+Scope alone does not select anything.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
 and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
-2,000 messages (`limit` lowers that). Scope alone is not a selection; conversation selections follow \
-the export's deleted-items default (false), and explicit message ids are authoritative. For a large \
-period, prefer \
+2,000 messages (`limit` lowers that). Scope alone is not a selection; conversation selections include \
+Deleted Items and Junk unless scope.deleted_items is given, and explicit message ids are \
+authoritative. For a large period, prefer \
 a folder/date-window export over enumerating ids. Quoted history and attachment files are included by \
 default; pass body="unique" to omit quoted history and include_attachments=false to omit files. \
 format="jsonl" \

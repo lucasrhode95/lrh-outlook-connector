@@ -352,8 +352,9 @@ EXPORT_MAX_MESSAGES = 2000  # hard cap per export
 class ExportRequest(BaseModel):
     """What to export: conversations, messages, and/or every message in a folder/date window.
 
-    All selections are combined. Deleted/Junk scope also applies to conversations;
-    sent/meeting scope narrows only folder/date-window selections. Explicit ids are authoritative.
+    All selections are combined. Deleted/Junk scope also applies to conversations, which include them
+    unless ``scope.deleted_items`` is given; sent/meeting scope narrows only folder/date-window
+    selections. Explicit ids are authoritative.
     """
 
     conversation_ids: list[str] = Field(default_factory=list)

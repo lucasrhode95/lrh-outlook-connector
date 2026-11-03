@@ -8,11 +8,12 @@ Web form, so ``get_calendar_event`` can hydrate them.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from outlook_connector.domain.errors import InvalidRequest, Upstream
 from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, CalendarInfo, Recipient
@@ -30,15 +31,14 @@ from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
 
 VIEW_PATH = "/me/calendarView"
-EVENT_FIELDS = (
-    "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
-    "responseStatus,type,seriesMasterId"
-)
+CALENDAR_VIEW_LINK = re.compile(r"/me/calendars(?:\('(?P<quoted>[^']+)'\)|/(?P<plain>[^/]+))/calendarView")
 MAX_PAGE_SIZE = 100  # the largest page this module asks for; a continuation link may not ask for more
+MAX_EVENT_ATTACHMENTS = 500
 VIEW_FIELDS = (
     "id,subject,start,end,isAllDay,isCancelled,isOrganizer,location,organizer,attendees,"
     "responseStatus,type,seriesMasterId,onlineMeeting"
 )
+EVENT_FIELDS = f"{VIEW_FIELDS},responseRequested,sensitivity,iCalUId,body"
 PREFER_UTC = 'outlook.timezone="UTC"'
 # Graph does not return the view in start order on its own, and its pages follow that order. Ordering on
 # the server keeps every next link in time order (live check 2026-10-12, research §3.8).
@@ -50,6 +50,12 @@ RESPONSE_NAMES = {  # Graph's responseStatus.response -> the MyResponseType that
     "organizer": "Organizer",
     "notResponded": "NoResponseReceived",
     "none": "NoResponseReceived",
+}
+SENSITIVITY_NAMES = {  # Graph's sensitivity -> the Sensitivity that Exchange reports
+    "normal": "Normal",
+    "personal": "Personal",
+    "private": "Private",
+    "confidential": "Confidential",
 }
 ITEM_TYPE_NAMES = {  # Graph's event type -> the CalendarItemType that Exchange reports
     "singleInstance": "Single",
@@ -76,8 +82,7 @@ class GraphCalendarView:
         calendar_id: str | None = None,
     ) -> CalendarViewPage:
         """A continuation link must match this calendar and window before Graph receives it."""
-        view_path = _view_path(calendar_id)
-        if page is not None and not _continues_window(page, since, until, view_path):
+        if page is not None and not _continues_window(page, since, until, calendar_id):
             raise InvalidRequest("This cursor does not belong to this calendar window.")
         prefer = (PREFER_UTC, PREFER_TEXT_BODY)
         with operation("listing calendar events"):
@@ -90,7 +95,7 @@ class GraphCalendarView:
                     "$select": select,
                     "$orderby": ORDER_BY,
                 }
-                items, link = await self._graph.page(view_path, params, prefer=prefer)
+                items, link = await self._graph.page(_view_path(calendar_id), params, prefer=prefer)
             else:
                 items, link = await self._graph.page(page, prefer=prefer)
         return CalendarViewPage(events=[_event(item) for item in items], next_link=link)
@@ -121,37 +126,44 @@ class GraphCalendarItems:
         self._graph = graph
 
     async def get_event(self, event_id: str) -> CalendarEvent:
-        graph_id = ids.to_graph(event_id)
+        """Assumes (not re-checked here): ``event_id`` was validated by ``Calendar``."""
         with operation("reading a calendar event"):
             data = await self._graph.get(
-                f"/me/events/{quote(graph_id, safe='')}",
-                {"$select": f"{EVENT_FIELDS},body,onlineMeeting"},
-                prefer=(PREFER_TEXT_BODY,),
+                _event_path(event_id),
+                {"$select": EVENT_FIELDS},
+                prefer=(PREFER_UTC, PREFER_TEXT_BODY),
             )
         event = _event(data)
         event.id = event_id
-        event.attachments = await self._list_attachments(graph_id)
+        event.attachments = await self.list_attachments(event_id)
         return event
 
-    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
-        graph_id = ids.to_graph(event_id)
-        with operation("downloading a calendar attachment"):
-            _, size = await self._graph.download(
-                f"/me/events/{quote(graph_id, safe='')}/attachments/{quote(attachment_id, safe='')}/$value",
-                dest,
-            )
-        return size
-
-    async def _list_attachments(self, graph_id: str) -> list[CalendarAttachment]:
+    async def list_attachments(self, event_id: str) -> list[CalendarAttachment]:
+        """Every attachment Graph lists; ``hasAttachments`` is not trusted (false on some occurrences)."""
         with operation("listing calendar attachments"):
-            items, _ = await self._graph.collect(
-                f"/me/events/{quote(graph_id, safe='')}/attachments",
+            items, truncated = await self._graph.collect(
+                f"{_event_path(event_id)}/attachments",
                 {"$select": "id,name,contentType,size,isInline"},
-                max_items=500,
+                max_items=MAX_EVENT_ATTACHMENTS,
             )
+        if truncated:
+            raise Upstream(f"Graph listed more than {MAX_EVENT_ATTACHMENTS} attachments on this event.")
+        graph_id = ids.to_graph(event_id)
         return [
             CalendarAttachment.model_validate(map_attachment(item, graph_id).model_dump()) for item in items
         ]
+
+    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        """Assumes (not re-checked here): both ids come from this event's attachment listing."""
+        with operation("downloading a calendar attachment"):
+            _, size = await self._graph.download(
+                f"{_event_path(event_id)}/attachments/{quote(attachment_id, safe='')}/$value", dest
+            )
+        return size
+
+
+def _event_path(event_id: str) -> str:
+    return f"/me/events/{quote(ids.to_graph(event_id), safe='')}"
 
 
 def _iso(value: datetime) -> str:
@@ -165,13 +177,26 @@ def _view_path(calendar_id: str | None) -> str:
     return f"/me/calendars/{quote(calendar_id, safe='')}/calendarView"
 
 
-def _continues_window(link: str, since: datetime, until: datetime, view_path: str) -> bool:
+def _link_calendar(path: str) -> str | None:
+    """The calendar id a next link's path names: Graph answers ``/me/calendars('{id}')/calendarView``
+    for a request to ``/me/calendars/{id}/calendarView`` (live 2026-11-03), so both forms are read."""
+    match = CALENDAR_VIEW_LINK.fullmatch(unquote(path))
+    if match is None:
+        return None
+    return match.group("quoted") or match.group("plain")
+
+
+def _continues_window(link: str, since: datetime, until: datetime, calendar_id: str | None) -> bool:
     """Whether a next link is this view, for this window, with a page size this module would ask for.
 
     Cursors are not signed, so the link is checked against the window the caller passes in.
     """
-    parts = urlsplit(link)
-    if f"{parts.scheme}://{parts.netloc}{parts.path}" != f"{GRAPH_ROOT}{view_path}":
+    parts, root = urlsplit(link), urlsplit(GRAPH_ROOT)
+    if (parts.scheme, parts.netloc) != (root.scheme, root.netloc) or not parts.path.startswith(root.path):
+        return False
+    path = parts.path.removeprefix(root.path)
+    expected = VIEW_PATH if calendar_id is None else None
+    if path != expected and (calendar_id is None or _link_calendar(path) != calendar_id):
         return False
     query = parse_qs(parts.query)
     try:
@@ -202,7 +227,7 @@ def _event(data: dict[str, Any]) -> CalendarEvent:
     rows = [row for row in data.get("attendees") or [] if isinstance(row, dict)]
     event_id = text(data.get("id"))
     series = text(data.get("seriesMasterId"))
-    join_url = text(online.get("joinUrl")) or teams_join_url(description)
+    meeting_url = text(online.get("joinUrl"))
     return CalendarEvent(
         id=ids.to_ows(event_id) if event_id else None,
         immutable_id=event_id,
@@ -217,12 +242,16 @@ def _event(data: dict[str, Any]) -> CalendarEvent:
         is_cancelled=boolean(data.get("isCancelled")),
         is_all_day=boolean(data.get("isAllDay")),
         is_organizer=boolean(data.get("isOrganizer")),
+        is_response_requested=boolean(data.get("responseRequested")),
+        sensitivity=SENSITIVITY_NAMES.get(text(data.get("sensitivity")) or ""),
+        uid=text(data.get("iCalUId")),
         my_response_type=RESPONSE_NAMES.get(text(status.get("response")) or ""),
         calendar_item_type=ITEM_TYPE_NAMES.get(text(data.get("type")) or ""),
         series_master_id=ids.to_ows(series) if series else None,
         body_text=description,
-        teams_join_url=join_url,
-        teams_chat_id_from_join_link=teams_chat_id_from_join_link(join_url),
+        teams_join_url=meeting_url or teams_join_url(description),
+        # Only Graph's meeting link: the 54-of-56 evidence is from it, not from links in a description.
+        teams_chat_id_from_join_link=teams_chat_id_from_join_link(meeting_url),
     )
 
 
