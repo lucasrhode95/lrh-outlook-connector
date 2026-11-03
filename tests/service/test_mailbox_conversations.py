@@ -521,7 +521,8 @@ async def test_search_dates_are_exact_whatever_the_time_zone(mailbox: Mailbox) -
 
 async def test_search_hits_carry_the_conversation_size(mailbox: Mailbox) -> None:
     result = await mailbox.search("relatório")
-    assert result.conversations[0].message_count == 3  # m4 in Junk is not counted by default
+    # counted as get_conversation returns it: m4 in Junk too, although search itself leaves Junk out
+    assert result.conversations[0].message_count == 4
 
 
 async def test_unknown_folder_name_refreshes_the_folder_list(mailbox: Mailbox, fake: FakeGraph) -> None:

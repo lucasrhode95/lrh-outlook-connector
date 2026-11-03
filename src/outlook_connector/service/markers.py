@@ -26,14 +26,8 @@ def file_names(attachments: Sequence[Attachment | CalendarAttachment]) -> dict[s
     }
 
 
-def named(attachments: Sequence[Attachment]) -> list[Attachment]:
-    """The attachments with ``file_name`` set to their marker name."""
-    names = file_names(attachments)
-    return [a.model_copy(update={"file_name": names.get(a.id)}) for a in attachments]
-
-
-def named_calendar(attachments: Sequence[CalendarAttachment]) -> list[CalendarAttachment]:
-    """Publish the same safe event file names that downloads accept."""
+def named[Named: (Attachment, CalendarAttachment)](attachments: Sequence[Named]) -> list[Named]:
+    """The attachments with ``file_name`` set to their marker name, the name downloads accept."""
     names = file_names(attachments)
     return [
         a.model_copy(update={"file_name": names.get(a.id) if a.id is not None else None}) for a in attachments
