@@ -8,14 +8,15 @@ Web form, so ``get_calendar_event`` can hydrate them.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from outlook_connector.domain.errors import InvalidRequest, Upstream
-from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, Recipient
+from outlook_connector.domain.models import CalendarAttachment, CalendarEvent, CalendarInfo, Recipient
 from outlook_connector.remote import ids
 from outlook_connector.remote.calendar_mapping import (
     boolean,
@@ -30,6 +31,7 @@ from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
 
 VIEW_PATH = "/me/calendarView"
+CALENDAR_VIEW_LINK = re.compile(r"/me/calendars(?:\('(?P<quoted>[^']+)'\)|/(?P<plain>[^/]+))/calendarView")
 MAX_PAGE_SIZE = 100  # the largest page this module asks for; a continuation link may not ask for more
 MAX_EVENT_ATTACHMENTS = 500
 VIEW_FIELDS = (
@@ -77,9 +79,10 @@ class GraphCalendarView:
         page_size: int,
         page: str | None,
         include_body: bool,
+        calendar_id: str | None = None,
     ) -> CalendarViewPage:
-        """Entry point: a continuation link must be this view for this window; cursors can carry any link."""
-        if page is not None and not _continues_window(page, since, until):
+        """A continuation link must match this calendar and window before Graph receives it."""
+        if page is not None and not _continues_window(page, since, until, calendar_id):
             raise InvalidRequest("This cursor does not belong to this calendar window.")
         prefer = (PREFER_UTC, PREFER_TEXT_BODY)
         with operation("listing calendar events"):
@@ -92,10 +95,28 @@ class GraphCalendarView:
                     "$select": select,
                     "$orderby": ORDER_BY,
                 }
-                items, link = await self._graph.page(VIEW_PATH, params, prefer=prefer)
+                items, link = await self._graph.page(_view_path(calendar_id), params, prefer=prefer)
             else:
                 items, link = await self._graph.page(page, prefer=prefer)
         return CalendarViewPage(events=[_event(item) for item in items], next_link=link)
+
+    async def list_calendars(self) -> list[CalendarInfo]:
+        with operation("listing calendars"):
+            items, _ = await self._graph.collect(
+                "/me/calendars", {"$select": "id,name,isDefaultCalendar"}, max_items=None
+            )
+        calendars: list[CalendarInfo] = []
+        for item in items:
+            calendar_id, name = text(item.get("id")), text(item.get("name"))
+            if calendar_id is not None and name is not None:
+                calendars.append(
+                    CalendarInfo(
+                        id=calendar_id,
+                        name=name,
+                        is_default=boolean(item.get("isDefaultCalendar")) is True,
+                    )
+                )
+        return calendars
 
 
 class GraphCalendarItems:
@@ -149,13 +170,33 @@ def _iso(value: datetime) -> str:
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _continues_window(link: str, since: datetime, until: datetime) -> bool:
+def _view_path(calendar_id: str | None) -> str:
+    """The default calendar has a shortcut route; other calendars use their Graph id in the path."""
+    if calendar_id is None:
+        return VIEW_PATH
+    return f"/me/calendars/{quote(calendar_id, safe='')}/calendarView"
+
+
+def _link_calendar(path: str) -> str | None:
+    """The calendar id a next link's path names: Graph answers ``/me/calendars('{id}')/calendarView``
+    for a request to ``/me/calendars/{id}/calendarView`` (live 2026-11-03), so both forms are read."""
+    match = CALENDAR_VIEW_LINK.fullmatch(unquote(path))
+    if match is None:
+        return None
+    return match.group("quoted") or match.group("plain")
+
+
+def _continues_window(link: str, since: datetime, until: datetime, calendar_id: str | None) -> bool:
     """Whether a next link is this view, for this window, with a page size this module would ask for.
 
     Cursors are not signed, so the link is checked against the window the caller passes in.
     """
-    parts = urlsplit(link)
-    if f"{parts.scheme}://{parts.netloc}{parts.path}" != f"{GRAPH_ROOT}{VIEW_PATH}":
+    parts, root = urlsplit(link), urlsplit(GRAPH_ROOT)
+    if (parts.scheme, parts.netloc) != (root.scheme, root.netloc) or not parts.path.startswith(root.path):
+        return False
+    path = parts.path.removeprefix(root.path)
+    expected = VIEW_PATH if calendar_id is None else None
+    if path != expected and (calendar_id is None or _link_calendar(path) != calendar_id):
         return False
     query = parse_qs(parts.query)
     try:

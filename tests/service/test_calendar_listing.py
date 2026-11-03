@@ -12,7 +12,7 @@ from outlook_connector.domain.errors import (
     Throttled,
     Upstream,
 )
-from outlook_connector.domain.models import CalendarEvent, Recipient
+from outlook_connector.domain.models import CalendarEvent, CalendarInfo, Recipient
 from outlook_connector.remote.ports import CalendarViewPage
 from outlook_connector.service import cursors
 from outlook_connector.service.calendar_listing import (
@@ -67,6 +67,9 @@ class GraphStub:
             raise self.error
         return self.pages.pop(0) if len(self.pages) > 1 else self.pages[0]
 
+    async def list_calendars(self) -> list[CalendarInfo]:
+        return [CalendarInfo(id="synthetic-calendar", name="Planning", is_default=False)]
+
 
 class FlakyGraph:
     """Answers its first call with ``page``, then fails: a failure in the middle of a listing."""
@@ -81,6 +84,9 @@ class FlakyGraph:
         if self.calls > 1:
             raise self.error
         return self.page
+
+    async def list_calendars(self) -> list[CalendarInfo]:
+        return []
 
 
 async def test_graph_listing_is_in_time_order_and_continues_with_a_cursor() -> None:
@@ -104,6 +110,27 @@ async def test_graph_listing_is_in_time_order_and_continues_with_a_cursor() -> N
     assert [event.id for event in second.events] == ["middle"]
     assert second.coverage.complete and second.cursor is None
     assert graph.calls[1]["page"] == LINK_2
+
+
+async def test_calendar_catalog_and_selected_calendar_flow_through_the_service_and_cursor() -> None:
+    graph = GraphStub(
+        [
+            CalendarViewPage(events=[_event("first", 9)], next_link=LINK_2),
+            CalendarViewPage(events=[_event("next", 10)]),
+        ]
+    )
+    listing = CalendarListing(graph_view=graph)
+
+    calendars = await listing.list_calendars()
+    first = await listing.list_events(since=SINCE, until=UNTIL, limit=1, calendar_id="synthetic-calendar")
+    second = await listing.list_events(
+        since=SINCE, until=UNTIL, cursor=first.cursor, calendar_id="ignored-calendar"
+    )
+
+    assert calendars[0].name == "Planning" and not calendars[0].is_default
+    assert graph.calls[0]["calendar_id"] == "synthetic-calendar"
+    assert graph.calls[1]["calendar_id"] == "synthetic-calendar"
+    assert [event.id for event in second.events] == ["next"]
 
 
 async def test_contains_matches_subject_and_description_case_and_accent_insensitively() -> None:
@@ -212,6 +239,8 @@ async def test_window_limit_and_filter_inputs_are_checked_at_the_entry_point() -
         await listing.list_events(since=SINCE, until=UNTIL, limit=0)
     with pytest.raises(InvalidRequest, match="limit must be between 1 and 200"):
         await listing.list_events(since=SINCE, until=UNTIL, limit=201)
+    with pytest.raises(InvalidRequest, match="calendar_id"):
+        await listing.list_events(since=SINCE, until=UNTIL, calendar_id="bad\nid")
     with pytest.raises(InvalidRequest, match="non-empty text"):
         await listing.list_events(since=SINCE, until=UNTIL, contains=["   "])
     with pytest.raises(InvalidRequest, match="at most 200 characters"):

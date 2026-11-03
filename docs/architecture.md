@@ -85,7 +85,7 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - `count_messages` returns per-folder counts in one `$batch` (`$count`, `ConsistencyLevel: eventual`); a failed folder is left out instead of hiding the others.
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
 - Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
-- `GraphCalendarView` reads calendar windows; `GraphCalendarItems` hydrates `/me/events/{id}` and always reads its `/attachments` collection, with event downloads on `/me/events/{id}/attachments/{attachment-id}/$value` under `outlook.calendar` (research §3.8).
+- `GraphCalendarView` reads `/me/calendars` and calendar windows; selected calendars use `/me/calendars/{id}/calendarView`, and a cursor is accepted when its next link names the same calendar in either path form Graph uses (`/calendars/{id}` or `/calendars('{id}')`). `GraphCalendarItems` hydrates `/me/events/{id}` and always reads its `/attachments` collection, with event downloads on `/me/events/{id}/attachments/{attachment-id}/$value` under `outlook.calendar` (research §3.8).
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
 - [`html_body.py`](../src/outlook_connector/remote/html_body.py) maps HTML bodies to ordered text and image parts ([`domain/body.py`](../src/outlook_connector/domain/body.py)); attachment rendering is described in §8.6.
 
@@ -196,7 +196,7 @@ Graph handles mail-data reads and read-after-write checks; OWS handles mail chan
 | Folders, messages, conversations, search, attachment metadata and bytes, MIME, profile and photo; read-after-write checks | MailReader | [GraphMailReader](../src/outlook_connector/remote/graph_mail.py) | `outlook.graph` |
 | Exchange event search | CalendarSearchReader | [SubstrateEventSearch](../src/outlook_connector/remote/substrate_events.py) | `m365.search` |
 | Selected event hydration, attachment metadata and bytes | CalendarItemReader | [GraphCalendarItems](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` (`config.CALENDAR_PROFILE`) |
-| Calendar events in a window (`/me/calendarView`) | CalendarViewReader | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` (`config.CALENDAR_PROFILE`) |
+| Calendar catalog (`/me/calendars`) and events in a window (`/me/calendarView`, `/me/calendars/{id}/calendarView`) | CalendarViewReader | [GraphCalendarView](../src/outlook_connector/remote/graph_calendar.py) | `outlook.calendar` (`config.CALENDAR_PROFILE`) |
 | Draft creation and send; read-state, flag, move and soft-delete changes | MailWriter | [OwsMailWriter](../src/outlook_connector/remote/ows_mail.py) | `outlook.api` |
 | List and manage inbox rules | RuleWriter | [OwsRules](../src/outlook_connector/remote/ows_rules.py) | `outlook.api` |
 | List/read native roaming signature settings and contents; create, update, delete and set defaults | SignatureStore | [CloudSettings](../src/outlook_connector/remote/cloud_settings.py) | `outlook.api` |
@@ -366,15 +366,20 @@ Lists the events that overlap `since` to `until`, in time order, with recurring 
 - `contains`: a list of 1 to 20 terms, each up to 200 characters. An event matches when any term appears in its subject or its description (OR). Each term is one literal phrase, case- and accent-insensitive, and is never split on its spaces: `["budget review"]` needs that phrase, while `["budget", "review"]` matches either word. Each field is matched on its own, so a term cannot span both.
 - `include_body`: returns each description, cut to 4,000 characters. `body_truncated` marks a cut.
 - `limit`: matching events to collect before the call stops (1–200, default 50). A page can hold a few more.
-- `cursor`: continues the listing. With a cursor, the window and filters come from the cursor, and the other arguments are ignored.
+- `calendar_id`: a calendar id from `list_calendars`; omit it to use the default calendar.
+- `cursor`: continues the listing. With a cursor, the window, calendar and filters come from the cursor, and the other arguments are ignored.
 
 Results: `events`, with required and optional attendees (up to 15 of each, plus `attendee_count` for the total); `cursor`; and `coverage`, with `complete`, `scanned` and `notes`.
 
 - Graph answers every page. A failed Graph read (sign-in, throttling, an upstream error) is reported as that error; no other service answers instead.
 - One call reads at most ten Graph pages (up to 100 events each), so a filtered listing can need several calls. When a call stops at that budget before `limit` events match, `coverage.notes` says so. Follow `cursor` while `coverage.complete` is false.
-- Only the signed-in user's default calendar is listed. Shared calendars and other people's calendars are not.
+- Without `calendar_id`, the default calendar is listed. Shared and delegated calendar access remains in live verification (roadmap).
 - Graph reads use the `outlook.calendar` profile: the Teams client, which carries the calendar scope, under Outlook's own profile name. `outlook-connector auth` prepares it.
 - A Graph time that is not UTC is refused as an upstream error.
+
+#### `list_calendars`
+
+Returns the signed-in user's calendar `id`, `name` and `is_default` status from `GET /me/calendars`. Use a returned `id` as `calendar_id` on `list_calendar_events`; the default calendar can also be read by omitting it. This tool is read-only and uses the `outlook.calendar` profile.
 
 ### 8.9 Calendar search and event details
 

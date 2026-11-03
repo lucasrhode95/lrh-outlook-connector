@@ -11,7 +11,12 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from outlook_connector.domain.errors import InvalidRequest
-from outlook_connector.domain.models import CalendarEvent, CalendarListCoverage, CalendarListResult
+from outlook_connector.domain.models import (
+    CalendarEvent,
+    CalendarInfo,
+    CalendarListCoverage,
+    CalendarListResult,
+)
 from outlook_connector.domain.time import as_utc
 from outlook_connector.remote.ports import CalendarViewPage, CalendarViewReader
 from outlook_connector.service import cursors
@@ -34,6 +39,10 @@ class CalendarListing:
     def __init__(self, *, graph_view: CalendarViewReader) -> None:
         self._graph_view = graph_view
 
+    async def list_calendars(self) -> list[CalendarInfo]:
+        """List calendar ids and names so callers can select a calendar for a window read."""
+        return await self._graph_view.list_calendars()
+
     async def list_events(
         self,
         *,
@@ -43,6 +52,7 @@ class CalendarListing:
         include_body: bool = False,
         limit: int = 50,
         cursor: str | None = None,
+        calendar_id: str | None = None,
     ) -> CalendarListResult:
         """Entry point: checks the window, the text filter, the limit and the cursor, then lists.
 
@@ -56,10 +66,25 @@ class CalendarListing:
             raise InvalidRequest(f"limit must be between 1 and {MAX_LIMIT}.")
         if cursor is None:
             start, end = _window(since, until)
-            return await self._list_graph(start, end, limit, _contains(contains), include_body, link=None)
+            selected_calendar = _calendar_id(calendar_id)
+            return await self._list_graph(
+                start,
+                end,
+                limit,
+                _contains(contains),
+                include_body,
+                calendar_id=selected_calendar,
+                link=None,
+            )
         state = _decode(cursor)
         return await self._list_graph(
-            state["since"], state["until"], limit, state["contains"], state["include_body"], state["link"]
+            state["since"],
+            state["until"],
+            limit,
+            state["contains"],
+            state["include_body"],
+            calendar_id=state["calendar_id"],
+            link=state["link"],
         )
 
     async def _list_graph(
@@ -69,6 +94,7 @@ class CalendarListing:
         limit: int,
         terms: list[str] | None,
         include_body: bool,
+        calendar_id: str | None,
         link: str | None,
     ) -> CalendarListResult:
         """Graph's view page by page, until ``limit`` events match, the window ends or the budget is spent."""
@@ -84,6 +110,7 @@ class CalendarListing:
                 page_size=page_size,
                 page=link,
                 include_body=include_body or needles is not None,
+                calendar_id=calendar_id,
             )
             pages += 1
             scanned += len(page.events)
@@ -123,6 +150,7 @@ class CalendarListing:
                 until=end.isoformat(),
                 contains=terms,
                 include_body=include_body,
+                calendar_id=calendar_id,
             ),
             coverage=CalendarListCoverage(complete=complete, scanned=scanned, notes=notes),
         )
@@ -135,6 +163,17 @@ def _window(since: datetime, until: datetime) -> tuple[datetime, datetime]:
     if end - start > MAX_WINDOW:
         raise InvalidRequest(f"The window must be at most {MAX_WINDOW.days} days.")
     return start, end
+
+
+def _calendar_id(value: object) -> str | None:
+    """Validate a caller-supplied Graph calendar id at the service entry point."""
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > 4096:
+        raise InvalidRequest("calendar_id must be a non-empty calendar id no longer than 4096 characters.")
+    if any(ord(character) < 32 for character in value):
+        raise InvalidRequest("calendar_id contains a control character.")
+    return value
 
 
 def _contains(value: object) -> list[str] | None:
@@ -160,6 +199,7 @@ def _decode(cursor: str) -> dict[str, Any]:
     state = cursors.decode(cursor, CURSOR_KIND)
     since, until = _cursor_time(state.get("since")), _cursor_time(state.get("until"))
     contains, include_body = state.get("contains"), state.get("include_body")
+    calendar_id = _calendar_id(state.get("calendar_id"))
     if since is None or until is None or not isinstance(include_body, bool):
         raise InvalidRequest(INVALID_CURSOR)
     if not isinstance(state.get("link"), str) or not (contains is None or isinstance(contains, list)):
@@ -171,6 +211,7 @@ def _decode(cursor: str) -> dict[str, Any]:
         "until": end,
         "contains": _contains(contains),
         "include_body": include_body,
+        "calendar_id": calendar_id,
     }
 
 

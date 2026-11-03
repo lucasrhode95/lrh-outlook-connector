@@ -395,6 +395,9 @@ only:
 - **Other calendars.** `GET /me/calendars` returned 3 calendars, all the user's own, in 3 calendar groups.
   `GET /me/calendars/{id}/calendarView` answered 200 for each, with descriptions. The mailbox had no calendar
   shared by or delegated from another user, so `Calendars.Read.Shared` was not exercised.
+  Paging (live 2026-11-03, `$top=2`): the next link for `/me/calendars/{id}/calendarView` comes back as
+  `/me/calendars('{id}')/calendarView`, with the id unescaped, for the default calendar read by id too. Graph
+  answered 200 to that link. A cursor check that compares the request's path text refuses it.
 - **Teams meeting chat.** `GET /me/onlineMeetings?$filter=JoinWebUrl eq '…'` answered 403: the Teams client
   token has no `OnlineMeetings.*` scope. Each of 182 join links in a 90-day window holds a
   `19:meeting_…@thread.v2` thread id after `/meetup-join/`. Of the 56 distinct ids, 54 equal the id of a

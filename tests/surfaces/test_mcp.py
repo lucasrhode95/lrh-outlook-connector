@@ -17,7 +17,7 @@ from tests.fakes.msal_fakes import jwt
 
 READ_TOOLS = {
     "auth_status", "list_folders", "list_messages", "search_messages", "search_calendar_events",
-    "list_calendar_events", "get_calendar_event", "get_conversation",
+    "list_calendars", "list_calendar_events", "get_calendar_event", "get_conversation",
     "get_message", "list_attachments", "download_attachment", "save_message_mime", "export_messages",
     "list_rules", "list_signatures", "get_signature",
 }  # fmt: skip
@@ -111,6 +111,7 @@ async def test_tools_and_annotations(server: FastMCP) -> None:
     assert "Never confirm on the user's behalf" in (server.instructions or "")
     assert "Drafts are composed once" in (server.instructions or "")
     assert "Never delete first" in (server.instructions or "")
+    assert "list_calendars" in (server.instructions or "")
 
 
 async def test_signature_tools_are_public_and_default_for_argument_is_required(
