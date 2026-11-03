@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+from outlook_connector.domain.errors import Upstream
 from outlook_connector.domain.models import (
     Attachment,
     Folder,
@@ -144,6 +145,8 @@ def message(data: dict[str, Any], *, html: bool) -> Message:
 
 def attachment(data: dict[str, Any], message_id: str) -> Attachment:
     kind = str(data.get("@odata.type", "")).rsplit(".", 1)[-1]
+    if not isinstance(data.get("id"), str) or not data["id"]:
+        raise Upstream("Graph listed an attachment without an id.")
     return Attachment(
         id=data["id"],
         message_id=message_id,

@@ -29,8 +29,9 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.graph import MAX_DOWNLOAD_BYTES, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, CalendarSearchPage
 from outlook_connector.remote.transport import Transport
+from outlook_connector.service.calendar import Calendar
 from outlook_connector.service.conversations import Conversations
 from outlook_connector.service.export.attachments import dedupe, safe_name
 from outlook_connector.service.export.formatter import people
@@ -40,6 +41,36 @@ from outlook_connector.service.localfiles import kept_dir
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
+
+
+class NoSearch:
+    async def search_events(self, query: str, **kwargs: object) -> CalendarSearchPage:
+        raise AssertionError("downloads never search")
+
+
+class EventFiles:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_event(self, event_id: str) -> CalendarEvent:
+        raise AssertionError("downloads list attachments without reading the event")
+
+    async def list_attachments(self, event_id: str) -> list[CalendarAttachment]:
+        self.calls.append(("list", event_id))
+        return [
+            CalendarAttachment(
+                id="synthetic-event-attachment", name="report:one.txt", content_type="text/plain", size=15
+            )
+        ]
+
+    async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        self.calls.append((event_id, attachment_id))
+        dest.write_bytes(b"synthetic agenda")
+        return len(b"synthetic agenda")
+
+
+def files_for(mailbox: Mailbox, items: EventFiles | None = None) -> Files:
+    return Files(mailbox, Calendar(NoSearch(), items or EventFiles()))
 
 
 async def _no_sleep(_s: float) -> None:
@@ -72,7 +103,9 @@ def zip_text(path: str, name: str) -> str:
 
 
 async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], include_attachments=True, scope=Scope(deleted_items=False))
+    )
     assert (
         artifact.filename.endswith(".zip") and artifact.message_count == 3 and artifact.attachment_files == 3
     )
@@ -260,7 +293,7 @@ async def test_server_deleted_message_is_gone_from_the_export(exports: Exports, 
     del fake.messages["m2"]
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert artifact.message_count == 2 and "Thanks!" not in text and "DELETED" not in text
+    assert artifact.message_count == 3 and "Thanks!" not in text and "DELETED" not in text
 
 
 @pytest.mark.parametrize("body", ["full", "unique"])
@@ -526,7 +559,7 @@ async def test_meeting_scope_does_not_narrow_conversation_or_explicit_message_se
         )
     )
     records = [json.loads(line) for line in Path(conversation.path).read_text(encoding="utf-8").splitlines()]
-    assert {record["id"] for record in records} == {"m1", "m2", "m3", "meeting-export"}
+    assert {record["id"] for record in records} == {"m1", "m2", "m3", "m4", "meeting-export"}
 
     explicit = await exports.export(
         ExportRequest(
@@ -574,8 +607,8 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
     await exports.mailbox.folders()
     fake.throttle_items = 10_000  # every body sub-request stays throttled
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], combine="all"))
-    assert len(artifact.unavailable_message_ids) == 3
-    assert artifact.export_errors == {"fetching message bodies": 3}
+    assert len(artifact.unavailable_message_ids) == 4
+    assert artifact.export_errors == {"fetching message bodies": 4}
     text = Path(artifact.path).read_text(encoding="utf-8")
     block = (
         "[EXPORT ERROR] The body of this message could not be fetched.\n"
@@ -585,9 +618,9 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
         "the message itself is fine\n"
         "  Fix:    export it again in a few minutes"
     )
-    assert text.count(block) == 3
+    assert text.count(block) == 4
     summary = (
-        "Export errors: 3 message bodies (3 throttled) could not be exported; "
+        "Export errors: 4 message bodies (4 throttled) could not be exported; "
         "they are marked [EXPORT ERROR] below."
     )
     assert summary in text and artifact.error_summary == summary
@@ -701,7 +734,7 @@ async def test_jsonl_export_has_one_record_per_message(exports: Exports) -> None
     )
     assert artifact.filename.endswith(".jsonl") and artifact.content_type.startswith("application/x-ndjson")
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
-    assert [r["id"] for r in records] == ["m1", "m2", "m3"]
+    assert [r["id"] for r in records] == ["m1", "m2", "m3", "m4"]  # m4 in Junk, as get_conversation
     assert records[0]["received_at"] == "2026-09-28T09:00:00+00:00"
     assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report\n\nregards"
     assert records[2]["attachments"][0]["name"] == "numbers.xlsx" and records[0]["from"]["address"]
@@ -721,7 +754,7 @@ async def test_jsonl_export_with_attachment_files_is_a_zip(exports: Exports) -> 
 async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
     exports: Exports, fake: FakeGraph
 ) -> None:
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     first, second = await asyncio.gather(
         files.download_attachment("m3", ["numbers.xlsx"]), files.download_attachment("m3", ["NUMBERS.xlsx"])
     )
@@ -736,43 +769,21 @@ async def test_downloads_are_named_as_the_text_names_them_and_fetched_once(
 async def test_event_attachment_download_uses_event_id_and_graph_attachment_metadata(
     exports: Exports,
 ) -> None:
-    class EventFiles:
-        calls: list[tuple[str, str]] = []
-
-        async def get_event(self, event_id: str) -> CalendarEvent:
-            self.calls.append(("get", event_id))
-            return CalendarEvent(
-                id=event_id,
-                attachments=[
-                    CalendarAttachment(
-                        id="synthetic-event-attachment",
-                        name="report:one.txt",
-                        content_type="text/plain",
-                        size=15,
-                    )
-                ],
-            )
-
-        async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
-            self.calls.append((event_id, attachment_id))
-            dest.write_bytes(b"synthetic agenda")
-            return len(b"synthetic agenda")
-
     calendar = EventFiles()
-    saved = await Files(exports.mailbox, calendar).download_attachment(
+    saved = await files_for(exports.mailbox, calendar).download_attachment(
         event_id="synthetic-event-id", names=["report_one.txt"]
     )
 
     assert saved.files[0].name == "report_one.txt"
     assert Path(saved.files[0].path).read_bytes() == b"synthetic agenda"
-    assert calendar.calls == [
-        ("get", "synthetic-event-id"),
+    assert calendar.calls == [  # the file listing alone: no event or body read
+        ("list", "synthetic-event-id"),
         ("synthetic-event-id", "synthetic-event-attachment"),
     ]
 
 
 async def test_omitted_names_save_every_file_and_unknown_names_are_refused(exports: Exports) -> None:
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     saved = await files.download_attachment("m3")
     assert sorted(f.name for f in saved.files) == ["image001.png", "logo.png", "numbers.xlsx"]
     with pytest.raises(NotFound, match="Its files: numbers.xlsx, image001.png, logo.png"):
@@ -791,7 +802,7 @@ async def test_a_cloud_link_is_reported_unavailable_while_the_files_are_saved(
             ],
         )
     )  # fmt: skip
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     saved = await files.download_attachment("m-link")
     assert [f.name for f in saved.files] == ["notes.txt"] and saved.unavailable == []
     mixed = await files.download_attachment("m-link", ["plan.docx", "notes.txt"])
@@ -806,7 +817,7 @@ async def test_a_cloud_link_is_reported_unavailable_while_the_files_are_saved(
 
 
 async def test_save_mime_names_the_file_from_its_subject_header(exports: Exports, fake: FakeGraph) -> None:
-    files = Files(exports.mailbox)
+    files = files_for(exports.mailbox)
     fake.calls.clear()
     saved = await files.save_mime("m3")
     assert saved.name == "RE_ Relatório de exemplo semanal.eml"
@@ -929,7 +940,7 @@ async def test_explicit_hidden_copy_merges_with_whole_conversation_selection(
         )
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert artifact.message_count == 3 and "Also in: Hidden" in text
+    assert artifact.message_count == 4 and "Also in: Hidden" in text
     assert artifact.messages_excluded["hidden"] == 1
 
 
@@ -954,8 +965,22 @@ async def test_missing_mime_has_neutral_not_found_text(
 
     monkeypatch.setattr(exports.mailbox.reader, "download_mime", missing)
     with pytest.raises(NotFound, match="MIME source was not found;.*id may be wrong"):
-        await Files(exports.mailbox).save_mime("m1")
+        await files_for(exports.mailbox).save_mime("m1")
     assert exported_files() == []
+
+
+async def test_conversation_export_includes_deleted_and_junk_unless_scope_says_otherwise(
+    exports: Exports,
+) -> None:
+    default = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
+    assert default.message_count == 4 and default.messages_excluded == {}
+    assert "buy now" in Path(default.path).read_text(encoding="utf-8")
+    window = await exports.export(ExportRequest(folder="Junk Email", include_attachments=False))
+    assert window.message_count == 1  # a folder you name is always included
+    mailbox_wide = await exports.export(
+        ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), include_attachments=False)
+    )
+    assert mailbox_wide.messages_excluded.get("deleted_or_junk", 0) >= 1  # windows keep false
 
 
 @pytest.mark.parametrize("include_deleted", [False, True])
@@ -1068,5 +1093,5 @@ async def test_a_cache_folder_removed_before_the_claim_is_recreated(
         return real_claim(directory, filename)
 
     monkeypatch.setattr(files_module, "claim", claim_after_cleanup)
-    saved = await Files(exports.mailbox).download_attachment("m3", ["numbers.xlsx"])
+    saved = await files_for(exports.mailbox).download_attachment("m3", ["numbers.xlsx"])
     assert Path(saved.files[0].path).read_bytes() == b"xlsx-bytes"

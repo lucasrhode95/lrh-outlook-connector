@@ -16,6 +16,7 @@ from typing import Any, Literal, Protocol
 from outlook_connector.domain.errors import Failure
 from outlook_connector.domain.models import (
     Attachment,
+    CalendarAttachment,
     CalendarEvent,
     CalendarInfo,
     DraftMessage,
@@ -148,6 +149,8 @@ class CalendarItemReader(Protocol):
     async def get_event(self, event_id: str) -> CalendarEvent:
         """Hydrate one event through Graph using a Search v2 item reference."""
         ...
+
+    async def list_attachments(self, event_id: str) -> list[CalendarAttachment]: ...
 
     async def download_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int: ...
 
