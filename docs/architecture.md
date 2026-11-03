@@ -2,9 +2,9 @@
 
 **Inputs:** [Requirements v4](requirements.md) · [Roadmap](roadmap.md) · [API research](api-research.md)
 
-![Outlook connector architecture](diagrams/architecture.svg)
+[![Outlook connector code map](diagrams/code-map.svg)](diagrams/code-map.svg)
 
-The [code map](diagrams/code-map.svg) shows every class and who calls whom. This document records only the rules the code and diagrams cannot show. *What* the connector must do is in the requirements; *why* each API was chosen, with its evidence, is in the research. Each fact is stated once, in the file whose scope it is, and linked from elsewhere.
+The code map shows every class and who calls whom; open it in a browser to see the tooltips. This document records only the rules the code and the diagram cannot show. *What* the connector must do is in the requirements; *why* each API was chosen, with its evidence, is in the research. Each fact is stated once, in the file whose scope it is, and linked from elsewhere.
 
 ---
 
