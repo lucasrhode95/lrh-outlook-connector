@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="4230" viewBox="0 0 2600 4230" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="2600" height="4401" viewBox="0 0 2600 4401" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. Services call one adapter per backend: Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings); every remote request shares one Transport and the shared TokenProvider. OwsMailWriter uploads local draft files, then Writes checks file names and sizes through Graph. There is no local database: Mailbox keeps the folder list in memory, and the data directory holds downloads, exports and logs. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. Services call one adapter per backend: Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings); every remote request shares one Transport and the shared TokenProvider. OwsMailWriter uploads local draft files, then Writes checks file names and sizes through Graph. There is no local database: Mailbox keeps the folder list in memory, and the data directory holds downloads, exports and logs. AppContext in bootstrap.py builds the services on first use and again when the account changes. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -20,15 +20,12 @@
       g > title + text { cursor: help; }
       g:hover > text { fill: #183153; }
       .call-flow { fill: none; stroke: #71869b; stroke-width: 2.6; stroke-linecap: square; stroke-linejoin: miter; marker-end: url(#arrow); }
-      .impl-flow { fill: none; stroke: #71869b; stroke-width: 2.4; stroke-dasharray: 9 7; marker-end: url(#arrow); }
       .api-flow { fill: none; stroke: #4b7187; stroke-width: 2.8; stroke-linecap: square; marker-end: url(#api-arrow); }
-      .local-flow { fill: none; stroke: #7650a4; stroke-width: 2.8; stroke-linecap: square; marker-start: url(#purple-arrow); marker-end: url(#purple-arrow); }
     </style>
     <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#71869b"/></marker>
     <marker id="api-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#4b7187"/></marker>
-    <marker id="purple-arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M0 0 L9 4.5 L0 9 Z" fill="#7650a4"/></marker>
   </defs>
-  <rect width="2600" height="4230" fill="#fff"/>
+  <rect width="2600" height="4401" fill="#fff"/>
 <text class="title" x="1300" y="70" text-anchor="middle">Outlook connector code map</text>
 <text class="subtitle" x="1300" y="110" text-anchor="middle">Main classes and who calls whom · arrows point to the callee · hover an item for details</text>
 
@@ -41,22 +38,22 @@
 <text class="section-title" x="118" y="279"><tspan class="code">outlook-connector mcp</tspan></text>
 <text class="group-title" x="118" y="316">Calls</text>
 <g><title>Builds the FastMCP server around one AppContext and runs it over stdio until the client closes it.</title><text class="detail" x="118" y="346">• <tspan class="code">serve_mcp(unsecure)</tspan></text></g>
-<rect x="530" y="244" width="410" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="548" y="279"><tspan class="code">outlook-connector ui</tspan></text>
-<text class="group-title" x="548" y="316">Calls</text>
-<g><title>Starts uvicorn on 127.0.0.1 with a per-run session token, opens the browser, and stops after the idle timeout.</title><text class="detail" x="548" y="346">• <tspan class="code">serve_ui(...)</tspan></text></g>
-<rect x="960" y="244" width="410" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="978" y="279"><tspan class="code">outlook-connector auth</tspan></text>
-<text class="group-title" x="978" y="316">Calls</text>
-<g><title>The only place that ever prompts: prepares every shared profile silently where it can, and shows a device code only for profiles that need one.</title><text class="detail" x="978" y="346">• <tspan class="code">TokenProvider.bootstrap</tspan></text></g>
-<g><title>With --sign-out: deletes the shared token cache (every profile, every connector).</title><text class="detail" x="978" y="373">• <tspan class="code">TokenProvider.sign_out</tspan></text></g>
 <rect x="1390" y="244" width="410" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="1408" y="279"><tspan class="code">outlook-connector status</tspan></text>
+<text class="section-title" x="1408" y="279"><tspan class="code">outlook-connector ui</tspan></text>
 <text class="group-title" x="1408" y="316">Calls</text>
-<g><title>Offline view of the cache: no network calls, no token values.</title><text class="detail" x="1408" y="346">• <tspan class="code">TokenProvider.status</tspan></text></g>
-<g><title>With --check only: silent acquisition per profile; not a service-permission test.</title><text class="detail" x="1408" y="373">• <tspan class="code">TokenProvider.get_token</tspan></text></g>
-<path class="call-flow" d="M305 434 V490"/>
-<path class="call-flow" d="M1595 434 V490"/>
+<g><title>Starts uvicorn on 127.0.0.1 with a per-run session token, opens the browser, and stops after the idle timeout.</title><text class="detail" x="1408" y="346">• <tspan class="code">serve_ui(...)</tspan></text></g>
+<rect x="530" y="244" width="410" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="548" y="279"><tspan class="code">outlook-connector auth</tspan></text>
+<text class="group-title" x="548" y="316">Calls</text>
+<g><title>The only place that ever prompts: prepares every shared profile silently where it can, and shows a device code only for profiles that need one.</title><text class="detail" x="548" y="346">• <tspan class="code">TokenProvider.bootstrap</tspan></text></g>
+<g><title>With --sign-out: deletes the shared token cache (every profile, every connector).</title><text class="detail" x="548" y="373">• <tspan class="code">TokenProvider.sign_out</tspan></text></g>
+<rect x="960" y="244" width="410" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="978" y="279"><tspan class="code">outlook-connector status</tspan></text>
+<text class="group-title" x="978" y="316">Calls</text>
+<g><title>Offline view of the cache: no network calls, no token values.</title><text class="detail" x="978" y="346">• <tspan class="code">TokenProvider.status</tspan></text></g>
+<g><title>With --check only: silent acquisition per profile; not a service-permission test.</title><text class="detail" x="978" y="373">• <tspan class="code">TokenProvider.get_token</tspan></text></g>
+<path class="call-flow" d="M305 414 V490"/>
+<path class="call-flow" d="M1595 414 V490"/>
 
 <!-- MCP server. -->
 <rect x="80" y="494" width="850" height="531" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
@@ -107,7 +104,7 @@
 <rect x="970" y="494" width="850" height="531" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M970 568 V508 Q970 494 984 494 H1806 Q1820 494 1820 508 V568 Z" fill="#183153"/>
 <text class="card-title" x="990" y="527">LOCAL UI</text>
-<text class="card-subtitle" x="990" y="551"><tspan class="code">surfaces/web/web_main.py</tspan> <tspan class="code">serve_ui()</tspan> · <tspan class="code">routes.py</tspan>: Starlette JSON API + static JS</text>
+<text class="card-subtitle" x="990" y="551"><tspan class="code">surfaces/web/web_main.py</tspan> <tspan class="code">serve_ui()</tspan> · <tspan class="code">routes.py</tspan>: JSON API + static JS</text>
 <rect x="990" y="588" width="810" height="417" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="1008" y="626">Mail</text>
 <g><title>GET. The folder tree for the sidebar (?refresh=1 reloads it). → Mailbox.folders</title><text class="detail" x="1008" y="656">• <tspan class="code">/api/folders</tspan></text></g>
@@ -127,7 +124,7 @@
 <g><title>POST. Keeps the idle timer from stopping the UI while the page is open.</title><text class="detail" x="1530" y="737">• <tspan class="code">/api/heartbeat</tspan></text></g>
 <text class="muted" x="1008" y="985">mail reads and exports only · 127.0.0.1 · session token · stops when idle</text>
 <path class="call-flow" d="M505 1025 V1081"/>
-<text class="flow-label" x="525" y="1061" text-anchor="start"><tspan class="code">await services()</tspan> · domain models in, domain models out</text>
+<text class="flow-label" x="525" y="1061" text-anchor="start"><tspan class="code">await context.services()</tspan> · domain models in, domain models out</text>
 <path class="call-flow" d="M1395 1025 V1081"/>
 
 <!-- Service. -->
@@ -194,7 +191,7 @@
 <g><title>Flag or unflag messages.</title><text class="detail" x="1265" y="1661">• <tspan class="code">set_flag(ids, flagged)</tspan></text></g>
 <g><title>Move to a folder (not Deleted Items, not a hidden folder).</title><text class="detail" x="1265" y="1688">• <tspan class="code">move(ids, folder)</tspan></text></g>
 <g><title>Move to Deleted Items; messages already there are left alone. Never a hard delete.</title><text class="detail" x="1265" y="1715">• <tspan class="code">delete(ids)</tspan></text></g>
-<text class="muted" x="1265" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsMailWriter</tspan> · <tspan class="code">Writes.check_account</tspan></text>
+<text class="muted" x="1265" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsMailWriter</tspan> · <tspan class="code">Writes</tspan></text>
 
 <rect x="100" y="1831" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="1866"><tspan class="code">Calendar</tspan><tspan class="detail" dx="12">calendar.py</tspan></text>
@@ -223,7 +220,7 @@
 <g><title>With the user's code: one OWS write, resent only when Outlook refused it as throttled or unavailable (429, 503), then a fresh read-back.</title><text class="detail" x="1265" y="1987">• <tspan class="code">reorder_rules</tspan> · <tspan class="code">delete_rule</tspan></text></g>
 <text class="group-title" x="1265" y="2026">Rules</text>
 <text class="detail" x="1265" y="2056">propose → confirm → one write → read back</text>
-<text class="muted" x="1265" y="2094">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsRules</tspan> · <tspan class="code">Writes.check_account</tspan></text>
+<text class="muted" x="1265" y="2094">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">OwsRules</tspan> · <tspan class="code">Writes</tspan></text>
 
 <rect x="100" y="2130" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="118" y="2165"><tspan class="code">Signatures</tspan><tspan class="detail" dx="12">signatures.py</tspan></text>
@@ -250,154 +247,159 @@
 <text class="detail" x="1100" y="2321">validate once, at the entry point</text>
 <text class="detail" x="1100" y="2348">(CLAUDE.md, &quot;Input boundaries&quot;)</text>
 
-<path class="local-flow" d="M340 2433 V2495"/>
-<text class="flow-label" x="360" y="2471" text-anchor="start">downloads · exports</text>
 <path class="call-flow" d="M940 2429 V2495"/>
-<text class="flow-label" x="960" y="2471" text-anchor="start">mail and calendar reads → adapters</text>
+<text class="flow-label" x="960" y="2471" text-anchor="start">mail and calendar reads</text>
 <path class="call-flow" d="M1520 2429 V2495"/>
-<text class="flow-label" x="1540" y="2471" text-anchor="start">changes → adapters</text>
-
-<!-- Local files. -->
-<rect x="80" y="2499" width="520" height="415" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-<path d="M80 2573 V2513 Q80 2499 94 2499 H586 Q600 2499 600 2513 V2573 Z" fill="#183153"/>
-<text class="card-title" x="100" y="2532">LOCAL FILES</text>
-<text class="card-subtitle" x="100" y="2556">data directory · no database</text>
-<rect x="100" y="2593" width="480" height="301" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="group-title" x="118" y="2631">Kept a week</text>
-<g><title>Attachments and saved .eml files, one folder per message attachment; reused while kept. service/files.py and localfiles.py.</title><text class="detail" x="118" y="2661">• <tspan class="code">downloads/</tspan></text></g>
-<g><title>One file per export, created exclusively. service/export/packaging.py.</title><text class="detail" x="118" y="2688">• <tspan class="code">exports/</tspan></text></g>
-<g><title>One file per mcp or ui process, rotated at midnight. logs.py.</title><text class="detail" x="118" y="2715">• <tspan class="code">logs/</tspan></text></g>
-<text class="group-title" x="118" y="2757">In memory, per process</text>
-<g><title>Mailbox reloads it once it is 10 minutes old.</title><text class="detail" x="118" y="2787">• folder list (10 minutes)</text></g>
-<text class="group-title" x="118" y="2827">Not kept</text>
-<text class="detail" x="118" y="2857">messages, bodies, events</text>
+<text class="flow-label" x="1540" y="2471" text-anchor="start">changes · rules · signatures · event search</text>
 
 <!-- Remote. -->
-<rect x="640" y="2499" width="1180" height="1172" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="640" y="2499" width="1180" height="1428" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M640 2573 V2513 Q640 2499 654 2499 H1806 Q1820 2499 1820 2513 V2573 Z" fill="#183153"/>
 <text class="card-title" x="660" y="2532">REMOTE</text>
 <text class="card-subtitle" x="660" y="2556"><tspan class="code">remote/</tspan> · one adapter per backend, values in <tspan class="code">results.py</tspan>; the only code that knows wire formats and ids</text>
 
-<rect x="660" y="2593" width="560" height="332" fill="#f2f7fc" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="660" y="2593" width="560" height="888" fill="#f2f7fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="676" y="2607" width="32" height="26" rx="5" fill="#2b6cb0"/>
 <text class="badge" x="692" y="2626" text-anchor="middle">G</text>
 <text class="section-title" x="718" y="2628"><tspan class="code">GraphMailReader</tspan><tspan class="detail" dx="12">graph_mail.py</tspan></text>
-<g><title>Every folder, hidden ones included (the service decides what is out of reach).</title><text class="detail" x="678" y="2665">• <tspan class="code">list_folders</tspan></text></g>
-<g><title>One page of messages, newest first; a continuation, or skip N.</title><text class="detail" x="678" y="2692">• <tspan class="code">list_messages</tspan></text></g>
-<g><title>One page of $search hits.</title><text class="detail" x="678" y="2719">• <tspan class="code">search</tspan></text></g>
-<g><title>Every message of a conversation in every folder, and whether it was truncated.</title><text class="detail" x="678" y="2746">• <tspan class="code">conversation</tspan></text></g>
-<g><title>Server count per folder in a window ($count in one $batch).</title><text class="detail" x="678" y="2773">• <tspan class="code">count_messages</tspan></text></g>
-<g><title>One message, or many in batches; per-item failures are reported, not raised.</title><text class="detail" x="906" y="2665">• <tspan class="code">get_message(s)</tspan></text></g>
-<g><title>Batch lookup of summaries (folder, read state, flag).</title><text class="detail" x="906" y="2692">• <tspan class="code">get_summaries</tspan></text></g>
-<g><title>Attachment metadata per message.</title><text class="detail" x="906" y="2719">• <tspan class="code">list_attachments(_many)</tspan></text></g>
-<g><title>An attachment, or the message's MIME, streamed to a file.</title><text class="detail" x="906" y="2746">• <tspan class="code">download_*</tspan></text></g>
-<g><title>The signed-in user's name, address and photo.</title><text class="detail" x="906" y="2773">• <tspan class="code">profile(_photo)</tspan></text></g>
-<g><title>Draft status, version and folder, plus stored size expanded through Integer 0x0E08; no body or attachment listing.</title><text class="detail" x="906" y="2800">• <tspan class="code">draft_state</tspan></text></g>
-<rect x="676" y="2822" width="32" height="26" rx="5" fill="#2b6cb0"/>
-<text class="badge" x="692" y="2841" text-anchor="middle">G</text>
-<text class="section-title" x="718" y="2843"><tspan class="code">GraphCalendarView</tspan><tspan class="detail" dx="12">graph_calendar.py</tspan></text>
-<g><title>The user's calendars, and one page of a calendar's events in a window, occurrences expanded, times in UTC.</title><text class="detail" x="678" y="2880">• <tspan class="code">list_calendars</tspan> · <tspan class="code">list_events</tspan></text></g>
-<g><title>Hydrate one event; list or download its attachments (GraphCalendarItems, same module).</title><text class="detail" x="678" y="2907">• <tspan class="code">GraphCalendarItems</tspan>: <tspan class="code">get_event</tspan> · files</text></g>
+<text class="group-title" x="678" y="2665">Methods</text>
+<g><title>Every folder, hidden ones included (the service decides what is out of reach).</title><text class="detail" x="678" y="2695">• <tspan class="code">list_folders</tspan></text></g>
+<g><title>One page of messages, newest first; a continuation, or skip N.</title><text class="detail" x="678" y="2722">• <tspan class="code">list_messages</tspan></text></g>
+<g><title>One page of $search hits; one translateExchangeIds call turns their ids into the immutable ids every other call uses.</title><text class="detail" x="678" y="2749">• <tspan class="code">search</tspan></text></g>
+<g><title>Every message of a conversation in every folder, and whether it was truncated.</title><text class="detail" x="678" y="2776">• <tspan class="code">conversation</tspan></text></g>
+<g><title>Server count per folder in a window ($count in one $batch).</title><text class="detail" x="678" y="2803">• <tspan class="code">count_messages</tspan></text></g>
+<g><title>One message, or many in batches; per-item failures are reported, not raised.</title><text class="detail" x="906" y="2695">• <tspan class="code">get_message(s)</tspan></text></g>
+<g><title>Batch lookup of summaries (folder, read state, flag).</title><text class="detail" x="906" y="2722">• <tspan class="code">get_summaries</tspan></text></g>
+<g><title>Attachment metadata per message.</title><text class="detail" x="906" y="2749">• <tspan class="code">list_attachments(_many)</tspan></text></g>
+<g><title>An attachment, or the message's MIME, streamed to a file.</title><text class="detail" x="906" y="2776">• <tspan class="code">download_*</tspan></text></g>
+<g><title>The signed-in user's name, address and photo.</title><text class="detail" x="906" y="2803">• <tspan class="code">profile(_photo)</tspan></text></g>
+<g><title>Draft status, version and folder, plus stored size expanded through Integer 0x0E08; no body or attachment listing.</title><text class="detail" x="906" y="2830">• <tspan class="code">draft_state</tspan></text></g>
+<g><title>graph_mapping.py converts every Graph shape into domain models.</title><text class="muted" x="678" y="2867">uses <tspan class="code">Graph</tspan> · JSON → models in <tspan class="code">graph_mapping.py</tspan></text></g>
+<path d="M676 2902 H1204" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="676" y="2926" width="32" height="26" rx="5" fill="#2b6cb0"/>
+<text class="badge" x="692" y="2945" text-anchor="middle">G</text>
+<text class="section-title" x="718" y="2947"><tspan class="code">GraphCalendarView</tspan><tspan class="detail" dx="12">graph_calendar.py</tspan></text>
+<text class="group-title" x="678" y="2984">Methods</text>
+<g><title>The user's calendars, and one page of a calendar's events in a window, occurrences expanded, times in UTC; next links are checked against the selected calendar.</title><text class="detail" x="678" y="3014">• <tspan class="code">list_calendars</tspan> · <tspan class="code">list_events</tspan></text></g>
+<g><title>Its own Graph client with config.CALENDAR_PROFILE, because the Outlook Graph profile has no calendar scope.</title><text class="muted" x="678" y="3051">uses <tspan class="code">Graph</tspan> with <tspan class="code">outlook.calendar</tspan></text></g>
+<path d="M676 3086 H1204" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="676" y="3110" width="32" height="26" rx="5" fill="#2b6cb0"/>
+<text class="badge" x="692" y="3129" text-anchor="middle">G</text>
+<text class="section-title" x="718" y="3131"><tspan class="code">GraphCalendarItems</tspan><tspan class="detail" dx="12">graph_calendar.py</tspan></text>
+<text class="group-title" x="678" y="3168">Methods</text>
+<g><title>Hydrate one event: agenda, attendees, your response, attachment metadata.</title><text class="detail" x="678" y="3198">• <tspan class="code">get_event</tspan></text></g>
+<g><title>The event's attachments.</title><text class="detail" x="678" y="3225">• <tspan class="code">list_attachments</tspan></text></g>
+<g><title>Stream one event attachment to a file.</title><text class="detail" x="906" y="3198">• <tspan class="code">download_attachment</tspan></text></g>
+<text class="muted" x="678" y="3262">uses <tspan class="code">Graph</tspan> with <tspan class="code">outlook.calendar</tspan></text>
 
-<rect x="1240" y="2593" width="560" height="332" fill="#fdf8ef" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="1240" y="2593" width="560" height="888" fill="#fdf8ef" stroke="#c7d5e2" stroke-width="1.5"/>
 <rect x="1256" y="2607" width="32" height="26" rx="5" fill="#b7791f"/>
 <text class="badge" x="1272" y="2626" text-anchor="middle">O</text>
 <text class="section-title" x="1298" y="2628"><tspan class="code">OwsMailWriter</tspan><tspan class="detail" dx="12">ows_mail.py</tspan></text>
-<g><title>Save into Drafts without sending.</title><text class="detail" x="1258" y="2665">• <tspan class="code">create_draft</tspan></text></g>
-<g><title>Send an existing draft as it is, keeping a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2692">• <tspan class="code">send_draft</tspan></text></g>
-<g><title>Identity claims (tid, oid, upn) of the Outlook credential.</title><text class="detail" x="1258" y="2719">• <tspan class="code">account</tspan></text></g>
-<g><title>Read or unread; one outcome per message.</title><text class="detail" x="1529" y="2665">• <tspan class="code">set_read</tspan> · <tspan class="code">set_flag</tspan></text></g>
-<g><title>Move to a folder, or to Deleted Items; there is no hard delete.</title><text class="detail" x="1529" y="2692">• <tspan class="code">move</tspan> · <tspan class="code">delete</tspan></text></g>
-<g><title>Upload a local file in raw 14 MiB slices; the caller confirms it through Graph.</title><text class="detail small" x="1529" y="2719">• <tspan class="code">add_local_attachment</tspan></text></g>
-<g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">OwsRules</tspan> · <tspan class="code">*_rule</tspan></text></g>
-<g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">CloudSettings</tspan> · settings, contents, writes</text></g>
-<g><title>One page of Exchange event hits from Search v2.</title><text class="detail" x="1258" y="2812"><tspan class="code">SubstrateEventSearch</tspan> · <tspan class="code">search_events</tspan></text></g>
+<text class="group-title" x="1258" y="2665">Methods</text>
+<g><title>Save into Drafts without sending (CreateItem, SaveOnly).</title><text class="detail" x="1258" y="2695">• <tspan class="code">create_draft</tspan></text></g>
+<g><title>Send an existing draft as it is, keeping a copy in Sent Items (UpdateItem). Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2722">• <tspan class="code">send_draft</tspan></text></g>
+<g><title>Identity claims (tid, oid, upn) of the Outlook credential.</title><text class="detail" x="1258" y="2749">• <tspan class="code">account</tspan></text></g>
+<g><title>UpdateItem; one outcome per message.</title><text class="detail" x="1529" y="2695">• <tspan class="code">set_read</tspan> · <tspan class="code">set_flag</tspan></text></g>
+<g><title>MoveItem, or DeleteItem to Deleted Items; there is no hard delete.</title><text class="detail" x="1529" y="2722">• <tspan class="code">move</tspan> · <tspan class="code">delete</tspan></text></g>
+<g><title>Upload a local file in raw 14 MiB slices (CreateAttachmentFromLocalFile); the caller confirms it through Graph.</title><text class="detail small" x="1529" y="2749">• <tspan class="code">add_local_attachment</tspan></text></g>
+<text class="muted" x="1258" y="2786">uses <tspan class="code">Ows</tspan></text>
+<path d="M1256 2821 H1784" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="1256" y="2845" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="1272" y="2864" text-anchor="middle">O</text>
+<text class="section-title" x="1298" y="2866"><tspan class="code">OwsRules</tspan><tspan class="detail" dx="12">ows_rules.py</tspan></text>
+<text class="group-title" x="1258" y="2903">Methods</text>
+<g><title>Every inbox rule, in order.</title><text class="detail" x="1258" y="2933">• <tspan class="code">list_rules</tspan></text></g>
+<g><title>Inbox-rule actions in OWS's bare-request style.</title><text class="detail" x="1258" y="2960">• <tspan class="code">create_rule</tspan></text></g>
+<text class="detail" x="1258" y="2987">• <tspan class="code">update_rule</tspan></text>
+<text class="detail" x="1529" y="2933">• <tspan class="code">reorder_rules</tspan></text>
+<text class="detail" x="1529" y="2960">• <tspan class="code">delete_rule</tspan></text>
+<text class="muted" x="1258" y="3024">uses <tspan class="code">Ows</tspan></text>
+<path d="M1256 3059 H1784" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="1256" y="3083" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="1272" y="3102" text-anchor="middle">O</text>
+<text class="section-title" x="1298" y="3104"><tspan class="code">CloudSettings</tspan><tspan class="detail" dx="12">cloud_settings.py</tspan></text>
+<text class="group-title" x="1258" y="3141">Methods</text>
+<g><title>Native signature settings: names and defaults.</title><text class="detail" x="1258" y="3171">• <tspan class="code">settings</tspan></text></g>
+<g><title>One signature's HTML and text.</title><text class="detail" x="1258" y="3198">• <tspan class="code">contents</tspan></text></g>
+<g><title>The Outlook account the settings belong to.</title><text class="detail" x="1258" y="3225">• <tspan class="code">account</tspan></text></g>
+<text class="detail" x="1529" y="3171">• <tspan class="code">create</tspan> · <tspan class="code">update</tspan></text>
+<text class="detail" x="1529" y="3198">• <tspan class="code">delete</tspan></text>
+<g><title>Default for new mail or for replies.</title><text class="detail" x="1529" y="3225">• <tspan class="code">set_default</tspan></text></g>
+<g><title>Outlook Cloud Settings, not OWS: it calls Transport itself.</title><text class="muted" x="1258" y="3262">uses <tspan class="code">Transport</tspan> directly</text></g>
+<path d="M1256 3297 H1784" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="1256" y="3321" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="1272" y="3340" text-anchor="middle">O</text>
+<text class="section-title" x="1298" y="3342"><tspan class="code">SubstrateEventSearch</tspan><tspan class="detail" dx="12">substrate_events.py</tspan></text>
+<text class="group-title" x="1258" y="3379">Methods</text>
+<g><title>One page of Exchange event hits from Search v2; Cvid and LogicalId kept across one walk.</title><text class="detail" x="1258" y="3409">• <tspan class="code">search_events</tspan></text></g>
+<g><title>Search v2, not OWS: it calls Transport itself.</title><text class="muted" x="1258" y="3446">uses <tspan class="code">Transport</tspan> directly</text></g>
 
-<path class="impl-flow" d="M940 2925 V2971"/>
-<text class="flow-label" x="960" y="2957" text-anchor="start">built with</text>
-<path class="impl-flow" d="M1520 2925 V2971"/>
-<text class="flow-label" x="1540" y="2957" text-anchor="start">built with</text>
+<path class="call-flow" d="M940 3481 V3523"/>
+<path class="call-flow" d="M1520 3481 V3523"/>
+<path class="call-flow" d="M1800 3371 H1810 V3718 H1700 V3736"/>
 
-<rect x="660" y="2975" width="560" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="678" y="3010">Graph mail<tspan class="detail" dx="12">graph_mail.py · graph_mapping.py</tspan></text>
-<g><title>Builds Graph URLs and query options; graph_mapping.py converts every Graph shape into domain models.</title><text class="detail" x="678" y="3047">routes · JSON → models: <tspan class="code">graph_mapping.py</tspan></text></g>
-<g><title>$search returns regular ids; one translateExchangeIds call per page turns them into the immutable ids every other call uses.</title><text class="detail" x="678" y="3074"><tspan class="code">$search</tspan> ids → immutable ids</text></g>
-<text class="section-title" x="678" y="3128">Graph calendar<tspan class="detail" dx="12">graph_calendar.py</tspan></text>
-<g><title>Lists calendars and reads default or selected calendar views in UTC; next links are checked against the selected calendar.</title><text class="detail" x="678" y="3165"><tspan class="code">/me/calendars</tspan> · views · <tspan class="code">/me/events</tspan></text></g>
-<g><title>Built on its own Graph client with the profile in config.CALENDAR_PROFILE, because the Outlook Graph profile has no calendar scope.</title><text class="detail" x="678" y="3192">profile <tspan class="code">outlook.calendar</tspan> (<tspan class="code">CALENDAR_PROFILE</tspan>)</text></g>
+<rect x="660" y="3527" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="678" y="3562"><tspan class="code">Graph</tspan><tspan class="detail" dx="12">graph.py</tspan></text>
+<g><title>One JSON request; POST is for read-style APIs (search), so it is retried like a GET.</title><text class="detail" x="678" y="3599">• <tspan class="code">get</tspan> · <tspan class="code">post</tspan></text></g>
+<g><title>One page and the link to the next; or follow pages up to a maximum, stopping at a repeated link.</title><text class="detail" x="678" y="3626">• <tspan class="code">page</tspan> · <tspan class="code">collect</tspan></text></g>
+<g><title>Many GETs in $batch requests of 20, at most 2 in flight; throttled sub-requests re-sent after the advised delay.</title><text class="detail" x="678" y="3653">• <tspan class="code">batch</tspan></text></g>
+<g><title>A small binary GET (the profile photo).</title><text class="detail" x="949" y="3599">• <tspan class="code">get_bytes</tspan></text></g>
+<g><title>Stream a file to disk with a size cap.</title><text class="detail" x="949" y="3626">• <tspan class="code">download</tspan></text></g>
+<g><title>Every request asks for immutable ids, which survive moves.</title><text class="detail" x="949" y="3653"><tspan class="code">Prefer: ImmutableId</tspan></text></g>
 
-<rect x="1240" y="2975" width="560" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="1258" y="3010">Outlook Web and Search v2</text>
-<g><title>CreateItem (SaveOnly) for drafts and replies; CreateAttachmentFromLocalFile for raw, sliced uploads; UpdateItem for read, flag and send_draft; MoveItem; DeleteItem with MoveToDeletedItems.</title><text class="detail small" x="1258" y="3047"><tspan class="code">OwsMailWriter</tspan>: Create/Upload/Update/Move/DeleteItem</text></g>
-<g><title>Inbox-rule actions in OWS's bare-request style.</title><text class="detail small" x="1258" y="3074"><tspan class="code">OwsRules</tspan>: inbox-rule actions</text></g>
-<g><title>Search v2 Event/Exchange pages; Cvid and LogicalId kept across one walk. Calls Transport directly.</title><text class="detail small" x="1258" y="3101"><tspan class="code">SubstrateEventSearch</tspan>: Search v2</text></g>
-<g><title>Native signatures over Outlook Cloud Settings. Calls Transport directly.</title><text class="detail small" x="1258" y="3128"><tspan class="code">CloudSettings</tspan>: signature settings</text></g>
+<rect x="1240" y="3527" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="1258" y="3562"><tspan class="code">Ows</tspan><tspan class="detail" dx="12">ows.py</tspan></text>
+<g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read: reads, retried like GETs.</title><text class="detail" x="1258" y="3599">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan></text></g>
+<g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="3626">• <tspan class="code">call_request(action, ...)</tspan></text></g>
+<g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="3653">• <tspan class="code">account()</tspan></text></g>
+<g><title>CreateAttachment envelope on /owa/service.svc/CreateAttachmentFromLocalFile with metadata in the header and raw slice bytes.</title><text class="detail small" x="1470" y="3653">• <tspan class="code">upload_file_slice</tspan></text></g>
 
-<path class="call-flow" d="M940 3225 V3267"/>
-<path class="call-flow" d="M1520 3225 V3267"/>
-<path class="call-flow" d="M1800 3178 H1810 V3462 H1700 V3480"/>
+<path class="call-flow" d="M940 3694 V3736"/>
+<path class="call-flow" d="M1520 3694 V3736"/>
 
-<rect x="660" y="3271" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="678" y="3306"><tspan class="code">Graph</tspan><tspan class="detail" dx="12">graph.py</tspan></text>
-<g><title>One JSON request; POST is for read-style APIs (search), so it is retried like a GET.</title><text class="detail" x="678" y="3343">• <tspan class="code">get</tspan> · <tspan class="code">post</tspan></text></g>
-<g><title>One page and the link to the next; or follow pages up to a maximum, stopping at a repeated link.</title><text class="detail" x="678" y="3370">• <tspan class="code">page</tspan> · <tspan class="code">collect</tspan></text></g>
-<g><title>Many GETs in $batch requests of 20, at most 2 in flight; throttled sub-requests re-sent after the advised delay.</title><text class="detail" x="678" y="3397">• <tspan class="code">batch</tspan></text></g>
-<g><title>A small binary GET (the profile photo).</title><text class="detail" x="949" y="3343">• <tspan class="code">get_bytes</tspan></text></g>
-<g><title>Stream a file to disk with a size cap.</title><text class="detail" x="949" y="3370">• <tspan class="code">download</tspan></text></g>
-<g><title>Every request asks for immutable ids, which survive moves.</title><text class="detail" x="949" y="3397"><tspan class="code">Prefer: ImmutableId</tspan></text></g>
-
-<rect x="1240" y="3271" width="560" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="1258" y="3306"><tspan class="code">Ows</tspan><tspan class="detail" dx="12">ows.py</tspan></text>
-<g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read: reads, retried like GETs.</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan></text></g>
-<g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="3370">• <tspan class="code">call_request(action, ...)</tspan></text></g>
-<g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="3397">• <tspan class="code">account()</tspan></text></g>
-<g><title>CreateAttachment envelope on /owa/service.svc/CreateAttachmentFromLocalFile with metadata in the header and raw slice bytes.</title><text class="detail small" x="1470" y="3397">• <tspan class="code">upload_file_slice</tspan></text></g>
-
-<path class="call-flow" d="M940 3438 V3480"/>
-<path class="call-flow" d="M1520 3438 V3480"/>
-
-<rect x="660" y="3484" width="1140" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="678" y="3519"><tspan class="code">Transport</tspan><tspan class="detail" dx="12">transport.py</tspan></text>
-<g><title>Send one request with the named profile's token; return a successful response or raise a domain error.</title><text class="detail" x="678" y="3556">• <tspan class="code">request(...)</tspan></text></g>
-<g><title>request() and parse the JSON answer (size-capped).</title><text class="detail" x="678" y="3583">• <tspan class="code">json(...)</tspan></text></g>
-<g><title>Stream a GET body to a file, size-capped.</title><text class="detail" x="678" y="3610">• <tspan class="code">download(...)</tspan></text></g>
-<g><title>Only the configured Microsoft hosts (urls.py); at most 4 concurrent requests per mailbox (Exchange's limit).</title><text class="detail" x="1040" y="3556">host allowlist · ≤ 4 requests at once</text></g>
-<g><title>Up to 4 attempts, honouring Retry-After. Writes are retried only on 429 or 503 (nothing applied); no answer or another 5xx = WriteOutcomeUnknown, never resent.</title><text class="detail" x="1040" y="3583">reads retried on 429/502/503/504</text></g>
-<g><title>A rejected token is refreshed once (with the CAE claims challenge, if any); a second 401 asks for sign-in.</title><text class="detail" x="1040" y="3610">401 → renew the token once</text></g>
-
-<path class="call-flow" d="M1230 3671 V3737"/>
-<text class="flow-label" x="1250" y="3711" text-anchor="start"><tspan class="code">get_token(profile)</tspan> for every request, bound to the account</text>
+<rect x="660" y="3740" width="1140" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="678" y="3775"><tspan class="code">Transport</tspan><tspan class="detail" dx="12">transport.py</tspan></text>
+<g><title>Send one request with the named profile's token; return a successful response or raise a domain error.</title><text class="detail" x="678" y="3812">• <tspan class="code">request(...)</tspan></text></g>
+<g><title>request() and parse the JSON answer (size-capped).</title><text class="detail" x="678" y="3839">• <tspan class="code">json(...)</tspan></text></g>
+<g><title>Stream a GET body to a file, size-capped.</title><text class="detail" x="678" y="3866">• <tspan class="code">download(...)</tspan></text></g>
+<g><title>Only the configured Microsoft hosts (urls.py); at most 4 concurrent requests per mailbox (Exchange's limit).</title><text class="detail" x="1040" y="3812">host allowlist · ≤ 4 requests at once</text></g>
+<g><title>Up to 4 attempts, honouring Retry-After. Writes are retried only on 429 or 503 (nothing applied); no answer or another 5xx = WriteOutcomeUnknown, never resent.</title><text class="detail" x="1040" y="3839">reads retried on 429/502/503/504</text></g>
+<g><title>A rejected token is refreshed once (with the CAE claims challenge, if any); a second 401 asks for sign-in.</title><text class="detail" x="1040" y="3866">401 → renew the token once</text></g>
 
 <!-- Tokens. -->
-<rect x="640" y="3741" width="1180" height="404" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-<path d="M640 3815 V3755 Q640 3741 654 3741 H1806 Q1820 3741 1820 3755 V3815 Z" fill="#183153"/>
-<text class="card-title" x="660" y="3774">TOKENS</text>
-<text class="card-subtitle" x="660" y="3798"><tspan class="code">lrh-m365-auth</tspan> · shared MSAL profiles · no app registration, no secrets</text>
-<rect x="660" y="3835" width="560" height="290" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="678" y="3870"><tspan class="code">TokenProvider</tspan><tspan class="detail" dx="12">shared auth</tspan></text>
-<text class="group-title" x="678" y="3907">Methods</text>
-<g><title>Silent: memory, then the cache, refreshing if needed. Never prompts. Called by Transport for every request (through AccountBoundTokenSource).</title><text class="detail" x="678" y="3937">• <tspan class="code">get_token(profile)</tspan></text></g>
-<g><title>Prepare every profile: silent where possible, a device code only where needed. Only the auth command calls it.</title><text class="detail" x="678" y="3964">• <tspan class="code">bootstrap()</tspan></text></g>
-<g><title>Delete the cache; or an offline view of it (no network, no token values).</title><text class="detail" x="678" y="3991">• <tspan class="code">sign_out()</tspan> · <tspan class="code">status()</tspan></text></g>
-<rect x="1240" y="3835" width="560" height="290" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="group-title" x="1258" y="3873">Profiles used here</text>
-<g><title>Graph Mail.Read for mailbox data and User.Read for the signed-in profile and photo.</title><text class="detail" x="1258" y="3903">• <tspan class="code">outlook.graph</tspan>: Outlook Mobile</text></g>
-<g><title>→ outlook.office.com. Mail changes, inbox rules and native signatures.</title><text class="detail" x="1258" y="3930">• <tspan class="code">outlook.api</tspan>: One Outlook Web</text></g>
-<g><title>→ Search v2, for calendar event search.</title><text class="detail" x="1258" y="3957">• <tspan class="code">m365.search</tspan>: One Outlook Web</text></g>
-<g><title>Asks for Calendars.Read on the Teams client for the Graph calendar view; the Outlook Graph profile has no calendar scope.</title><text class="detail" x="1258" y="3984">• <tspan class="code">outlook.calendar</tspan>: Teams client</text></g>
-<text class="group-title" x="1258" y="4023">Cache</text>
-<g><title>Shared token-cache.bin under .lrh-m365-auth, encrypted for your user by the operating system; a lock file serialises refreshes across processes.</title><text class="detail" x="1258" y="4053">encrypted file · cross-process lock</text></g>
-<g><title>One active Microsoft account is shared by every lrh-* Microsoft 365 connector.</title><text class="detail" x="1258" y="4080">one account for every connector</text></g>
-<path class="call-flow" d="M80 202 H48 V3901 H636"/>
-<text class="flow-label" x="70" y="3889" text-anchor="start"><tspan class="code">auth</tspan>, <tspan class="code">status</tspan></text>
+<rect x="80" y="3348" width="500" height="579" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+<path d="M80 3422 V3362 Q80 3348 94 3348 H566 Q580 3348 580 3362 V3422 Z" fill="#183153"/>
+<text class="card-title" x="100" y="3381">TOKENS</text>
+<text class="card-subtitle" x="100" y="3405"><tspan class="code">lrh-m365-auth</tspan> · shared MSAL profiles</text>
+<rect x="100" y="3442" width="460" height="275" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="group-title" x="118" y="3480">Profiles used here</text>
+<g><title>Graph Mail.Read for mailbox data and User.Read for the signed-in profile and photo.</title><text class="detail" x="118" y="3510">• <tspan class="code">outlook.graph</tspan>: Outlook Mobile</text></g>
+<g><title>→ outlook.office.com. Mail changes, inbox rules and native signatures.</title><text class="detail" x="118" y="3537">• <tspan class="code">outlook.api</tspan>: One Outlook Web</text></g>
+<g><title>→ Search v2, for calendar event search.</title><text class="detail" x="118" y="3564">• <tspan class="code">m365.search</tspan>: One Outlook Web</text></g>
+<g><title>Asks for Calendars.Read on the Teams client for the Graph calendar view; the Outlook Graph profile has no calendar scope.</title><text class="detail" x="118" y="3591">• <tspan class="code">outlook.calendar</tspan>: Teams client</text></g>
+<text class="group-title" x="118" y="3630">Cache</text>
+<g><title>Shared token-cache.bin under .lrh-m365-auth, encrypted for your user by the operating system; a lock file serialises refreshes across processes.</title><text class="detail" x="118" y="3660">encrypted file · cross-process lock</text></g>
+<g><title>One active Microsoft account is shared by every lrh-* Microsoft 365 connector.</title><text class="detail" x="118" y="3687">one account for every connector</text></g>
+<rect x="100" y="3737" width="460" height="170" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="118" y="3772"><tspan class="code">TokenProvider</tspan><tspan class="detail" dx="12">shared auth</tspan></text>
+<text class="group-title" x="118" y="3809">Methods</text>
+<g><title>Silent: memory, then the cache, refreshing if needed. Never prompts. Called by Transport for every API request (through AccountBoundTokenSource).</title><text class="detail" x="118" y="3839">• <tspan class="code">get_token(profile)</tspan></text></g>
+<g><title>Prepare every profile: silent where possible, a device code only where needed. Only the auth command calls it.</title><text class="detail" x="118" y="3866">• <tspan class="code">bootstrap()</tspan></text></g>
+<g><title>Delete the cache; or an offline view of it (no network, no token values).</title><text class="detail" x="118" y="3893">• <tspan class="code">sign_out()</tspan> · <tspan class="code">status()</tspan></text></g>
+<g><title>get_token(profile) for every API request, bound to the signed-in account.</title><path class="call-flow" d="M660 3823 H564"/></g>
+<text class="flow-label" x="610" y="3811" text-anchor="middle">token</text>
+<path d="M735 244 V234" fill="none" stroke="#71869b" stroke-width="2.6"/>
+<path class="call-flow" d="M1165 244 V234 H48 V3823 H96"/>
+<text class="flow-label" x="40" y="3803" text-anchor="start" transform="rotate(-90 40 3803)"><tspan class="code">auth</tspan>, <tspan class="code">status</tspan></text>
 
-<!-- Wiring. -->
+<!-- Service setup. -->
 <rect x="1900" y="150" width="620" height="500" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M1900 224 V164 Q1900 150 1914 150 H2506 Q2520 150 2520 164 V224 Z" fill="#183153"/>
-<text class="card-title" x="1920" y="183">WIRING</text>
-<text class="card-subtitle" x="1920" y="207"><tspan class="code">bootstrap.py</tspan> · <tspan class="code">AppContext.services()</tspan></text>
+<text class="card-title" x="1920" y="183">SERVICE SETUP</text>
+<text class="card-subtitle" x="1920" y="207"><tspan class="code">bootstrap.py</tspan> · <tspan class="code">AppContext</tspan> builds every service and adapter</text>
 <rect x="1920" y="244" width="580" height="386" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="group-title" x="1938" y="282">Built once per process, on first use</text>
+<text class="group-title" x="1938" y="282">Built on first use, again per account</text>
 <g><title>Encrypted cache unless --unsecure (a separate plaintext development cache).</title><text class="detail small" x="1938" y="312">• <tspan class="code">TokenProvider(unsecure)</tspan></text></g>
 <g><title>Every token request is checked against the signed-in account.</title><text class="detail small" x="1938" y="339">• <tspan class="code">AccountBoundTokenSource(...)</tspan></text></g>
 <g><title>One HTTPS client for every Microsoft service.</title><text class="detail small" x="1938" y="366">• <tspan class="code">Transport(account_tokens)</tspan></text></g>
@@ -410,85 +412,79 @@
 <g><title>Native signatures over Cloud Settings.</title><text class="detail small" x="1938" y="555">• <tspan class="code">Signatures(CloudSettings, account)</tspan></text></g>
 <text class="detail small" x="1938" y="582">• <tspan class="code">Writes</tspan> · <tspan class="code">Mutations</tspan> · <tspan class="code">Rules</tspan></text>
 
-<rect x="1900" y="690" width="620" height="560" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
+<path class="call-flow" d="M1820 329 H1896"/>
+<text class="flow-label" x="1826" y="318" text-anchor="start">creates</text>
+<path class="call-flow" d="M1900 600 H1860 V1122 H1824"/>
+<text class="flow-label" x="1888" y="1030" text-anchor="start" transform="rotate(-90 1888 1030)">builds</text>
+
+<rect x="1900" y="690" width="620" height="230" rx="14" fill="#eff8f6" stroke="#9fd3cb" stroke-width="1.5"/>
 <text class="note-title" x="1924" y="730">How to read it</text>
-<text class="detail" x="1924" y="770">Each layer calls only the one below it.</text>
-<text class="detail" x="1924" y="806">Services call one adapter per backend;</text>
-<text class="detail" x="1924" y="842">only remote/ knows wire formats.</text>
-<text class="detail" x="1924" y="878">Graph (blue) profiles: mail data,</text>
-<text class="detail" x="1924" y="914">verification and calendar windows.</text>
-<text class="detail" x="1924" y="950">Outlook Web (amber) profiles: changes,</text>
-<text class="detail" x="1924" y="986">rules, signatures and calendar events.</text>
-<text class="detail" x="1924" y="1022">API flows are neutral; one shared Transport.</text>
-<text class="detail" x="1924" y="1058">Nothing stays in memory between</text>
-<text class="detail" x="1924" y="1094">processes: cursors carry their state.</text>
-<text class="detail" x="1924" y="1130">Hover an item for its details: open this</text>
-<text class="detail" x="1924" y="1166">file directly in a browser (tooltips do</text>
-<text class="detail" x="1924" y="1202">not show when it is embedded as an image).</text>
-
-<!-- Microsoft 365. -->
-<rect x="1900" y="2499" width="620" height="1646" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
-<path d="M1900 2573 V2513 Q1900 2499 1914 2499 H2506 Q2520 2499 2520 2513 V2573 Z" fill="#183153"/>
-<text class="card-title" x="1920" y="2532">MICROSOFT 365</text>
-<text class="card-subtitle" x="1920" y="2556">first-party public clients · no app registration</text>
-
-<rect x="1920" y="2593" width="580" height="221" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<rect x="1936" y="2607" width="32" height="26" rx="5" fill="#2b6cb0"/>
-<text class="badge" x="1952" y="2626" text-anchor="middle">G</text>
-<text class="section-title" x="1978" y="2628"><tspan class="code">Microsoft Graph</tspan></text>
-<g><title>Documented API.</title><text class="detail" x="1938" y="2665"><tspan class="code">graph.microsoft.com/v1.0</tspan></text></g>
-<g><title>Folders, messages, conversations (conversationId filter).</title><text class="detail" x="1938" y="2692"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan></text></g>
-<g><title>Calendar catalog, calendar windows and events under the outlook.calendar profile.</title><text class="detail" x="1938" y="2719"><tspan class="code">/me/calendars</tspan> · views · events</text></g>
-<g><title>Search, up to 20 requests in one, server counts.</title><text class="detail" x="1938" y="2746"><tspan class="code">$search</tspan> · <tspan class="code">$batch</tspan> · <tspan class="code">$count</tspan></text></g>
-<g><title>Attachment bytes, the original .eml, and id translation for $search hits.</title><text class="detail" x="1938" y="2773">attachments · MIME · <tspan class="code">translateExchangeIds</tspan></text></g>
-
-<rect x="1920" y="2844" width="580" height="221" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<rect x="1936" y="2858" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="1952" y="2877" text-anchor="middle">O</text>
-<text class="section-title" x="1978" y="2879"><tspan class="code">Outlook Web (OWS)</tspan></text>
-<g><title>Outlook Web's private JSON API under the outlook.api profile. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1938" y="2916"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text></g>
-<g><title>Drafts, sending, read state, flags.</title><text class="detail" x="1938" y="2943"><tspan class="code">CreateItem</tspan> · <tspan class="code">UpdateItem</tspan></text></g>
-<g><title>Moves and soft deletes.</title><text class="detail" x="1938" y="2970"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
-<g><title>Raw sliced local draft file uploads.</title><text class="detail" x="1938" y="2997"><tspan class="code">CreateAttachmentFromLocalFile</tspan></text></g>
-<g><title>OWS rule actions support reading and confirmed changes to supported inbox rules.</title><text class="detail" x="1938" y="3024">inbox rules: read and supported writes</text></g>
-
-<rect x="1920" y="3095" width="580" height="130" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<rect x="1936" y="3109" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="1952" y="3128" text-anchor="middle">O</text>
-<text class="section-title" x="1978" y="3130"><tspan class="code">Search v2</tspan></text>
-<g><title>Outlook-hosted Microsoft Search, under the m365.search profile.</title><text class="detail" x="1938" y="3167"><tspan class="code">outlook.office.com/searchservice</tspan></text></g>
-<g><title>Event entity, Exchange content source; a page may not start at offset 1,000 or later.</title><text class="detail" x="1938" y="3194">Exchange events, bounded pages</text></g>
-
-<rect x="1920" y="3255" width="580" height="130" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<rect x="1936" y="3269" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="1952" y="3288" text-anchor="middle">O</text>
-<text class="section-title" x="1978" y="3290"><tspan class="code">Cloud Settings</tspan></text>
-<text class="detail" x="1938" y="3327">Native roaming signatures · read and write</text>
-<text class="detail" x="1938" y="3354">Account-bound Outlook profile</text>
-
-<rect x="1920" y="3835" width="580" height="167" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
-<text class="section-title" x="1938" y="3870"><tspan class="code">Entra ID</tspan></text>
-<g><title>Microsoft's sign-in service.</title><text class="detail" x="1938" y="3907"><tspan class="code">login.microsoftonline.com</tspan></text></g>
-<g><title>Sign-in by code in a browser; refresh tokens renew access silently.</title><text class="detail" x="1938" y="3934">device code · refresh tokens</text></g>
-<g><title>Through MSAL.</title><text class="detail" x="1938" y="3961">only <tspan class="code">TokenProvider</tspan> talks to it</text></g>
-
-<!-- Transport to Microsoft 365. -->
-<path class="api-flow" d="M1800 3510 H1832 V2650 H1916"/>
-<path class="api-flow" d="M1800 3545 H1848 V2900 H1916"/>
-<path class="api-flow" d="M1800 3580 H1864 V3160 H1916"/>
-<path class="api-flow" d="M1800 3615 H1880 V3320 H1916"/>
-<path class="call-flow" d="M1820 3901 H1916"/>
-<text class="flow-label" x="1868" y="3889" text-anchor="middle">sign-in</text>
+<text class="detail" x="1924" y="770">Arrows point to the callee.</text>
+<text class="detail" x="1924" y="806">Each layer calls only the one below it.</text>
+<text class="detail" x="1924" y="842">Open this file in a browser and hover</text>
+<text class="detail" x="1924" y="878">an item for its details.</text>
 
 <!-- Legend. -->
-<rect x="80" y="4175" width="32" height="26" rx="5" fill="#2b6cb0"/>
-<text class="badge" x="96" y="4194" text-anchor="middle">G</text>
-<text class="flow-label" x="122" y="4195">Graph profiles</text>
-<rect x="290" y="4175" width="32" height="26" rx="5" fill="#b7791f"/>
-<text class="badge" x="306" y="4194" text-anchor="middle">O</text>
-<text class="flow-label" x="332" y="4195">Outlook Web profiles</text>
-<path class="api-flow" d="M570 4188 H630"/><text class="flow-label" x="642" y="4195">API call over HTTPS</text>
-<path class="local-flow" d="M975 4188 H1035"/><text class="flow-label" x="1047" y="4195">local read and write</text>
-<path class="call-flow" d="M1255 4188 H1315"/><text class="flow-label" x="1327" y="4195">calls (points to the callee)</text>
-<path class="impl-flow" d="M1600 4188 H1660"/><text class="flow-label" x="1672" y="4195">built with</text>
+<rect x="1900" y="950" width="620" height="250" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="note-title" x="1924" y="990">Legend</text>
+<rect x="1924" y="1014" width="32" height="26" rx="5" fill="#2b6cb0"/>
+<text class="badge" x="1940" y="1033" text-anchor="middle">G</text>
+<text class="flow-label" x="1972" y="1034">Graph profiles</text>
+<rect x="1924" y="1058" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="1940" y="1077" text-anchor="middle">O</text>
+<text class="flow-label" x="1972" y="1078">Outlook Web profiles</text>
+<path class="api-flow" d="M1924 1115 H1956"/><text class="flow-label" x="1972" y="1122">API call over HTTPS</text>
+<path class="call-flow" d="M1924 1159 H1956"/><text class="flow-label" x="1972" y="1166">calls (points to the callee)</text>
+
+<!-- Microsoft 365. -->
+<rect x="80" y="3997" width="2420" height="364" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
+<path d="M80 4071 V4011 Q80 3997 94 3997 H2486 Q2500 3997 2500 4011 V4071 Z" fill="#183153"/>
+<text class="card-title" x="100" y="4030">MICROSOFT 365</text>
+<text class="card-subtitle" x="100" y="4054">first-party public clients · no app registration</text>
+<rect x="100" y="4091" width="460" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<text class="section-title" x="118" y="4126"><tspan class="code">Entra ID</tspan></text>
+<g><title>Microsoft's sign-in service.</title><text class="detail" x="118" y="4163"><tspan class="code">login.microsoftonline.com</tspan></text></g>
+<g><title>Sign-in by code in a browser; refresh tokens renew access silently.</title><text class="detail" x="118" y="4190">device code · refresh tokens</text></g>
+<g><title>Through MSAL.</title><text class="detail" x="118" y="4217">only <tspan class="code">TokenProvider</tspan> talks to it</text></g>
+<rect x="580" y="4091" width="460" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="596" y="4105" width="32" height="26" rx="5" fill="#2b6cb0"/>
+<text class="badge" x="612" y="4124" text-anchor="middle">G</text>
+<text class="section-title" x="638" y="4126"><tspan class="code">Microsoft Graph</tspan></text>
+<g><title>Documented API.</title><text class="detail" x="598" y="4163"><tspan class="code">graph.microsoft.com/v1.0</tspan></text></g>
+<g><title>Folders, messages, conversations (conversationId filter).</title><text class="detail" x="598" y="4190"><tspan class="code">/me/mailFolders</tspan> · <tspan class="code">/me/messages</tspan></text></g>
+<g><title>Calendar catalog, calendar windows and events under the outlook.calendar profile.</title><text class="detail" x="598" y="4217"><tspan class="code">/me/calendars</tspan> · views · events</text></g>
+<g><title>Search, up to 20 requests in one, server counts.</title><text class="detail" x="598" y="4244"><tspan class="code">$search</tspan> · <tspan class="code">$batch</tspan> · <tspan class="code">$count</tspan></text></g>
+<g><title>Attachment bytes and the original .eml.</title><text class="detail" x="598" y="4271">attachments · MIME</text></g>
+<g><title>One call per page turns $search ids into immutable ids.</title><text class="detail" x="598" y="4298">id translation: <tspan class="code">translateExchangeIds</tspan></text></g>
+<rect x="1060" y="4091" width="460" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="1076" y="4105" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="1092" y="4124" text-anchor="middle">O</text>
+<text class="section-title" x="1118" y="4126"><tspan class="code">Outlook Web (OWS)</tspan></text>
+<g><title>Outlook Web's private JSON API under the outlook.api profile. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1078" y="4163"><tspan class="code">outlook.cloud.microsoft</tspan></text></g>
+<text class="detail" x="1078" y="4190"><tspan class="code">/owa/service.svc</tspan></text>
+<g><title>Drafts, sending, read state, flags.</title><text class="detail" x="1078" y="4217"><tspan class="code">CreateItem</tspan> · <tspan class="code">UpdateItem</tspan></text></g>
+<g><title>Moves and soft deletes.</title><text class="detail" x="1078" y="4244"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
+<g><title>Raw sliced local draft file uploads.</title><text class="detail" x="1078" y="4271"><tspan class="code">CreateAttachmentFromLocalFile</tspan></text></g>
+<g><title>OWS rule actions support reading and confirmed changes to supported inbox rules.</title><text class="detail" x="1078" y="4298">inbox rules: read and supported writes</text></g>
+<rect x="1540" y="4091" width="460" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="1556" y="4105" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="1572" y="4124" text-anchor="middle">O</text>
+<text class="section-title" x="1598" y="4126"><tspan class="code">Search v2</tspan></text>
+<g><title>Outlook-hosted Microsoft Search, under the m365.search profile.</title><text class="detail" x="1558" y="4163"><tspan class="code">outlook.office.com/searchservice</tspan></text></g>
+<g><title>Event entity, Exchange content source; a page may not start at offset 1,000 or later.</title><text class="detail" x="1558" y="4190">Exchange events, bounded pages</text></g>
+<rect x="2020" y="4091" width="460" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
+<rect x="2036" y="4105" width="32" height="26" rx="5" fill="#b7791f"/>
+<text class="badge" x="2052" y="4124" text-anchor="middle">O</text>
+<text class="section-title" x="2078" y="4126"><tspan class="code">Cloud Settings</tspan></text>
+<text class="detail" x="2038" y="4163">Native roaming signatures</text>
+<text class="detail" x="2038" y="4190">read and write</text>
+<text class="detail" x="2038" y="4217">Account-bound Outlook profile</text>
+<!-- Down to Microsoft 365. -->
+<path class="api-flow" d="M810 3907 V3993"/>
+<path class="api-flow" d="M1290 3907 V3993"/>
+<path class="api-flow" d="M1680 3907 V3993"/>
+<path class="api-flow" d="M1800 3823 H2250 V3993"/>
+<path class="call-flow" d="M330 3907 V3993"/>
+<text class="flow-label" x="350" y="3969" text-anchor="start">sign-in</text>
+
 </svg>
