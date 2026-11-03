@@ -63,9 +63,7 @@ omit it for the whole mailbox). Both return message ids and conversation ids; se
 carry the conversation's message_count. Results are compact by default (detail="full" adds \
 recipients, categories and Internet ids).
 - Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
-calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
-- Calendars: list_calendars returns each calendar's id, name and default status. Pass its id as \
-calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar. \
+calendar_id to list_calendar_events to read that calendar; omit it to use the default calendar.
 - Calendar windows: list_calendar_events returns the events that overlap a since/until window in time \
 order, with recurring meetings expanded per occurrence (times are UTC). Use it for "what do I have \
 between these dates", and for text in subjects or descriptions within those dates (contains: a list \

@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from uuid import UUID, uuid4
 
 from outlook_connector.domain.errors import InvalidRequest
-from outlook_connector.domain.models import CalendarEvent, CalendarSearchCoverage, CalendarSearchResult
+from outlook_connector.domain.models import (
+    CalendarAttachment,
+    CalendarEvent,
+    CalendarSearchCoverage,
+    CalendarSearchResult,
+)
 from outlook_connector.remote.ports import CalendarItemReader, CalendarSearchReader
 from outlook_connector.service import cursors, markers
 
@@ -111,14 +117,27 @@ class Calendar:
         )
 
     async def get_event(self, event_id: str) -> CalendarEvent:
-        """Validate the public event reference and publish Graph metadata with download names."""
-        if not isinstance(event_id, str) or not event_id or len(event_id) > 4096:
-            raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
-        if any(ord(character) < 32 for character in event_id):
-            raise InvalidRequest("event_id contains a control character.")
+        """Entry point: validate the event reference; publish Graph metadata with download names."""
+        _check_event_id(event_id)
         event = await self._items.get_event(event_id)
-        event.attachments = markers.named_calendar(event.attachments)
+        event.attachments = markers.named(event.attachments)
         return event
+
+    async def event_attachments(self, event_id: str) -> list[CalendarAttachment]:
+        """Entry point: validate the event reference; list only its files, with download names."""
+        _check_event_id(event_id)
+        return markers.named(await self._items.list_attachments(event_id))
+
+    async def download_event_attachment(self, event_id: str, attachment_id: str, dest: Path) -> int:
+        """Assumes (not re-checked here): both ids come from ``event_attachments`` in this call."""
+        return await self._items.download_attachment(event_id, attachment_id, dest)
+
+
+def _check_event_id(event_id: object) -> None:
+    if not isinstance(event_id, str) or not event_id or len(event_id) > 4096:
+        raise InvalidRequest("event_id must be a non-empty Outlook event reference.")
+    if any(ord(character) < 32 for character in event_id):
+        raise InvalidRequest("event_id contains a control character.")
 
 
 def _cursor_uuid(value: object, label: str) -> str:
