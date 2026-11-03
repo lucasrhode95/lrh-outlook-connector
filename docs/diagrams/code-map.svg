@@ -251,17 +251,17 @@
 <text class="detail" x="1100" y="2348">(CLAUDE.md, &quot;Input boundaries&quot;)</text>
 
 <path class="local-flow" d="M340 2433 V2495"/>
-<text class="flow-label" x="360" y="2471" text-anchor="start">downloads · exports</text>
+<text class="flow-label" x="360" y="2471" text-anchor="start">files · folder list</text>
 <path class="call-flow" d="M940 2429 V2495"/>
 <text class="flow-label" x="960" y="2471" text-anchor="start">mail and calendar reads → adapters</text>
 <path class="call-flow" d="M1520 2429 V2495"/>
 <text class="flow-label" x="1540" y="2471" text-anchor="start">changes → adapters</text>
 
-<!-- Local files. -->
+<!-- Local state. -->
 <rect x="80" y="2499" width="520" height="415" rx="14" fill="#f7f9fc" stroke="#c7d5e2" stroke-width="1.5"/>
 <path d="M80 2573 V2513 Q80 2499 94 2499 H586 Q600 2499 600 2513 V2573 Z" fill="#183153"/>
-<text class="card-title" x="100" y="2532">LOCAL FILES</text>
-<text class="card-subtitle" x="100" y="2556">data directory · no database</text>
+<text class="card-title" x="100" y="2532">LOCAL STATE</text>
+<text class="card-subtitle" x="100" y="2556">files in the data directory · memory · no database</text>
 <rect x="100" y="2593" width="480" height="301" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="group-title" x="118" y="2631">Kept a week</text>
 <g><title>Attachments and saved .eml files, one folder per message attachment; reused while kept. service/files.py and localfiles.py.</title><text class="detail" x="118" y="2661">• <tspan class="code">downloads/</tspan></text></g>
