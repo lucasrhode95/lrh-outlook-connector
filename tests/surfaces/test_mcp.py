@@ -163,8 +163,12 @@ async def test_list_search_conversation_message_flow(server: FastMCP) -> None:
     found = await call(server, "search_messages", query="relatório")
     conversation_id = found["conversations"][0]["conversation_id"]
     conversation = await call(server, "get_conversation", conversation_id=conversation_id)
-    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3"]
+    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3", "m4"]
     assert "> First report" in conversation["messages"][1]["text"]
+    without_deleted = await call(
+        server, "get_conversation", conversation_id=conversation_id, scope={"deleted_items": False}
+    )
+    assert [m["message"]["id"] for m in without_deleted["messages"]] == ["m1", "m2", "m3"]
     message = await call(server, "get_message", message_id="m2")
     assert message["text"] == "Thanks!\n\n> First report"
     short = await call(server, "get_message", message_id="m2", max_chars=1)
@@ -176,6 +180,12 @@ async def test_scope_is_one_tool_argument(server: FastMCP) -> None:
     for name in ("list_messages", "search_messages", "get_conversation", "export_messages", "set_read_state"):
         properties = tools[name].inputSchema["properties"]
         assert "scope" in properties
+
+
+@pytest.mark.parametrize("scope", [{}, {"sent_items": True}, {"meeting_mail": True}])
+async def test_partial_conversation_scope_keeps_deleted_mail(server: FastMCP, scope: dict[str, bool]) -> None:
+    conversation = await call(server, "get_conversation", conversation_id="c-rel", scope=scope)
+    assert [m["message"]["id"] for m in conversation["messages"]] == ["m1", "m2", "m3", "m4"]
 
 
 async def test_numeric_limits_are_descriptive_only(server: FastMCP) -> None:
@@ -238,7 +248,7 @@ async def test_attachment_download_and_export_return_local_paths(server: FastMCP
     eml = await call(server, "save_message_mime", message_id="m1")
     assert eml["path"].endswith(".eml")
     artifact = await call(server, "export_messages", conversation_ids=["c-rel"])
-    assert Path(artifact["path"]).exists() and artifact["message_count"] == 3
+    assert Path(artifact["path"]).exists() and artifact["message_count"] == 4  # with m4 in Junk
     assert zipfile.is_zipfile(artifact["path"])
 
 

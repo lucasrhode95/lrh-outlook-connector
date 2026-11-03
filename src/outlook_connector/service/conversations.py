@@ -13,7 +13,7 @@ from typing import Literal
 
 from outlook_connector.domain.errors import InvalidRequest, NotFound
 from outlook_connector.domain.models import (
-    DEFAULT_SCOPE,
+    CONVERSATION_DEFAULT_SCOPE,
     EXCLUSION_TEXT,
     Conversation,
     ConversationMessage,
@@ -73,7 +73,7 @@ class Conversations:
         *,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "full",
-        scope: Scope = DEFAULT_SCOPE,
+        scope: Scope = CONVERSATION_DEFAULT_SCOPE,
         max_chars: int = 40000,
         cursor: str | None = None,
     ) -> Conversation:

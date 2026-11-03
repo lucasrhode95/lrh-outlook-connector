@@ -68,15 +68,6 @@ today. The draft is saved without the PDF, and you attach it by hand in Outlook.
 Settle while building where the send limit comes from. Research §4.6 puts the send ceiling between 34 and
 35.3 MiB: a 34 MiB file was delivered, and 35.3 MiB bounced.
 
-#### Include deleted mail in conversations
-
-You reply to a thread and then delete the original. `get_conversation` returns only your reply; the original
-appears only with `scope={"deleted_items": true}`.
-
-**Change** (decided 2026-11-02): conversations include Deleted Items and Junk by default.
-`scope={"deleted_items": false}` still leaves them out. Listing, search, exports by folder or date and
-read-state changes keep today's default.
-
 #### Reply tree for branch-aware conversations (parked)
 
 Alice sends a proposal. Bob replies to all. Carol forwards it to Dan, who replies to Carol. `get_conversation`

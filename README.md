@@ -128,6 +128,9 @@ systems. Set `OUTLOOK_CONNECTOR_HOME` to override it.
 
 ## MCP tools
 
+Conversation reads include Deleted Items and Junk even with an empty or partial scope object;
+pass `scope={"deleted_items": false}` to exclude them.
+
 The MCP server exposes the tools below. Each one's inputs, results and caveats are in [architecture §8](docs/architecture.md#8-surfaces-tools-and-endpoints).
 
 | MCP tool | Service module | Behavior |
@@ -140,7 +143,7 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `list_calendars` | [`service/calendar_listing.py`](src/outlook_connector/service/calendar_listing.py) | List calendar ids and names and identify the default calendar |
 | `list_calendar_events` | [`service/calendar_listing.py`](src/outlook_connector/service/calendar_listing.py) | List the events overlapping a window in time order, optionally for a selected calendar |
 | `get_calendar_event` | [`service/calendar.py`](src/outlook_connector/service/calendar.py) | Hydrate an event's agenda, attendees, response, join URL, link-derived Teams chat id and attachment metadata through Graph |
-| `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation using the requested scope |
+| `get_conversation` | [`service/conversations.py`](src/outlook_connector/service/conversations.py) | Read a conversation; Deleted Items and Junk are included by default |
 | `get_message` | [`service/mailbox.py`](src/outlook_connector/service/mailbox.py) | Read a message body |
 | `list_attachments` | [`service/files.py`](src/outlook_connector/service/files.py) | List all attachment metadata: file names, sizes, types and inline image IDs |
 | `download_attachment` | [`service/files.py`](src/outlook_connector/service/files.py) | Save a message's or event's files locally by their listed names |

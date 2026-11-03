@@ -20,6 +20,7 @@ from pydantic import Field
 
 from outlook_connector.bootstrap import AppContext, Services
 from outlook_connector.domain.models import (
+    CONVERSATION_DEFAULT_SCOPE,
     DEFAULT_SCOPE,
     EXPORT_MAX_MESSAGES,
     Attachment,
@@ -30,6 +31,7 @@ from outlook_connector.domain.models import (
     CalendarSearchResult,
     CombineMode,
     Conversation,
+    ConversationScope,
     Detail,
     DraftResult,
     ExportArtifact,
@@ -81,12 +83,14 @@ belong to the Teams connector. Event-to-Teams linkage is not inferred when Searc
 identifier.
 - Scope is one object with independent keys: `scope.sent_items` (default true) includes Sent Items, \
 Drafts and Outbox; `scope.meeting_mail` (default true) includes invitations, RSVPs and cancellations; \
-`scope.deleted_items` (default false) includes Deleted Items and Junk Email. A folder you name is \
-always included; subfolders count with their parent. True shows more mail, false filters more. Use \
+`scope.deleted_items` includes Deleted Items and Junk Email. It defaults to false for list, search, \
+exports and read-state changes. `get_conversation` and conversation-size lookups include them by \
+default; pass `scope.deleted_items=false` to leave them out. A folder you name is always included; \
+subfolders count with their parent. True shows more mail, false filters more. Use \
 `scope.sent_items=false` for "the latest mail I received", including mail that rules filed into \
-other folders. Export scope filters folder/date windows; conversations follow scope.deleted_items but keep \
-sent and meeting mail, and explicit message ids are authoritative. \
-coverage.excluded counts what was left out.
+other folders. Export scope filters folder/date windows; an export's conversation selections include \
+Deleted Items and Junk like get_conversation unless scope.deleted_items is given. Explicit message ids \
+are authoritative. coverage.excluded counts what was left out.
 - Out of reach: hidden folders, and items outside the mail folders (Teams meeting records, settings \
 and other non-mail items), are never listed, searched, counted, grouped into conversations \
 or selected by folder/date-window/conversation export, and \
@@ -119,13 +123,14 @@ your own file tools; list_attachments adds sizes and types. Downloads are limite
 attachment, download it directly from Outlook. Cloud links are not downloaded. save_message_mime saves \
 the original .eml.
 - Explicit export message_ids are authoritative like get_message(id); readable hidden/out-of-reach ids \
-are included and merged. Folder/date-window selections follow scope; conversations follow \
-scope.deleted_items but keep sent and meeting mail. \
+are included and merged. Folder/date-window selections follow scope; conversation selections include \
+Deleted Items and Junk unless scope.deleted_items is given. Sent and meeting mail stay included. \
 Scope alone does not select anything.
 - export_messages writes one local file and returns its path. Select conversations, message ids \
 and/or a folder/date window (since/until/folder, narrowed by `scope`), up to \
-2,000 messages (`limit` lowers that). Scope alone is not a selection; conversations follow \
-scope.deleted_items, and explicit message ids are authoritative. For a large period, prefer \
+2,000 messages (`limit` lowers that). Scope alone is not a selection; conversation selections include \
+Deleted Items and Junk unless scope.deleted_items is given, and explicit message ids are \
+authoritative. For a large period, prefer \
 a folder/date-window export over enumerating ids. Quoted history and attachment files are included by \
 default; pass body="unique" to omit quoted history and include_attachments=false to omit files. \
 format="jsonl" \
@@ -376,7 +381,7 @@ def build_server(context: AppContext) -> FastMCP:
         conversation_id: str,
         include_bodies: bool = True,
         body: Literal["unique", "full"] = "full",
-        scope: Scope = DEFAULT_SCOPE,
+        scope: ConversationScope = CONVERSATION_DEFAULT_SCOPE,
         max_chars: Annotated[
             int, Field(description="Maximum body size from 1 to 400000 characters.")
         ] = 40_000,
@@ -385,7 +390,11 @@ def build_server(context: AppContext) -> FastMCP:
             Field(description="Continuation; it restores the original options, which are then ignored."),
         ] = None,
     ) -> Conversation:
-        """A whole conversation, oldest first; full (default) includes quoted history, unique omits it."""
+        """A whole conversation, oldest first; includes Deleted Items and Junk by default.
+
+        Empty or partial scope objects retain these defaults for omitted keys.
+        Set scope.deleted_items=false to leave them out. Full bodies include quoted history by default;
+        unique omits it."""
         return await (await services()).conversations.get_conversation(
             conversation_id,
             include_bodies=include_bodies,
@@ -480,7 +489,9 @@ def build_server(context: AppContext) -> FastMCP:
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
         are exported once. Sent/meeting scope narrows only folder/date-window selections.
-        Conversations follow scope.deleted_items; explicit message ids are authoritative.
+        Conversation selections follow scope.deleted_items, which defaults to false for exports.
+        get_conversation itself includes Deleted Items and Junk by default. Explicit message ids are
+        authoritative.
         Full bodies including quoted history and attachment files are included by default. Set
         body="unique" to omit quoted history, or include_attachments=false to omit attachment files.
         Scope alone is not a selection.

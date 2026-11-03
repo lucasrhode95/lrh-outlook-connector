@@ -109,7 +109,9 @@ def zip_text(path: str, name: str) -> str:
 
 
 async def test_conversation_with_attachments_is_one_zip_with_sibling_folder(exports: Exports) -> None:
-    artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=True))
+    artifact = await exports.export(
+        ExportRequest(conversation_ids=["c-rel"], include_attachments=True, scope=Scope(deleted_items=False))
+    )
     assert artifact.filename.endswith(".zip") and artifact.message_count == 3
     stem = "2026-09-28 Relatório de exemplo semanal"
     # The chart is referenced by the selected source body; the unreferenced signature and junk are out.
@@ -298,7 +300,7 @@ async def test_server_deleted_message_is_gone_from_the_export(exports: Exports, 
     del fake.messages["m2"]
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert artifact.message_count == 2 and "Thanks!" not in text and "DELETED" not in text
+    assert artifact.message_count == 3 and "Thanks!" not in text and "DELETED" not in text
 
 
 @pytest.mark.parametrize("body", ["full", "unique"])
@@ -596,7 +598,7 @@ async def test_meeting_scope_does_not_narrow_conversation_or_explicit_message_se
         )
     )
     records = [json.loads(line) for line in Path(conversation.path).read_text(encoding="utf-8").splitlines()]
-    assert {record["id"] for record in records} == {"m1", "m2", "m3", "meeting-export"}
+    assert {record["id"] for record in records} == {"m1", "m2", "m3", "m4", "meeting-export"}
 
     explicit = await exports.export(
         ExportRequest(
@@ -644,8 +646,8 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
     await exports.mailbox.folders()
     fake.throttle_items = 10_000  # every body sub-request stays throttled
     artifact = await exports.export(ExportRequest(conversation_ids=["c-rel"], combine="all"))
-    assert len(artifact.unavailable_message_ids) == 3
-    assert artifact.export_errors == {"fetching message bodies": 3}
+    assert len(artifact.unavailable_message_ids) == 4
+    assert artifact.export_errors == {"fetching message bodies": 4}
     text = Path(artifact.path).read_text(encoding="utf-8")
     block = (
         "[EXPORT ERROR] The body of this message could not be fetched.\n"
@@ -655,9 +657,9 @@ async def test_throttled_bodies_are_export_error_blocks_not_fatal(exports: Expor
         "the message itself is fine\n"
         "  Fix:    export it again in a few minutes"
     )
-    assert text.count(block) == 3
+    assert text.count(block) == 4
     summary = (
-        "Export errors: 3 message bodies (3 throttled) could not be exported; "
+        "Export errors: 4 message bodies (4 throttled) could not be exported; "
         "they are marked [EXPORT ERROR] below."
     )
     assert summary in text and artifact.error_summary == summary
@@ -771,7 +773,7 @@ async def test_jsonl_export_has_one_record_per_message(exports: Exports) -> None
     )
     assert artifact.filename.endswith(".jsonl") and artifact.content_type.startswith("application/x-ndjson")
     records = [json.loads(line) for line in Path(artifact.path).read_text(encoding="utf-8").splitlines()]
-    assert [r["id"] for r in records] == ["m1", "m2", "m3"]
+    assert [r["id"] for r in records] == ["m1", "m2", "m3", "m4"]  # m4 in Junk, as get_conversation
     assert records[0]["received_at"] == "2026-09-28T09:00:00+00:00"
     assert records[0]["conversation_id"] == "c-rel" and records[0]["body"] == "First report\n\nregards"
     assert records[2]["attachments"][0]["name"] == "numbers.xlsx" and records[0]["from"]["address"]
@@ -977,7 +979,7 @@ async def test_explicit_hidden_copy_merges_with_whole_conversation_selection(
         )
     )
     text = Path(artifact.path).read_text(encoding="utf-8")
-    assert artifact.message_count == 3 and "Also in: Hidden" in text
+    assert artifact.message_count == 4 and "Also in: Hidden" in text
     assert artifact.messages_excluded["hidden"] == 1
 
 
@@ -1004,6 +1006,20 @@ async def test_missing_mime_has_neutral_not_found_text(
     with pytest.raises(NotFound, match="MIME source was not found;.*id may be wrong"):
         await files_for(exports.mailbox).save_mime("m1")
     assert exported_files() == []
+
+
+async def test_conversation_export_includes_deleted_and_junk_unless_scope_says_otherwise(
+    exports: Exports,
+) -> None:
+    default = await exports.export(ExportRequest(conversation_ids=["c-rel"], include_attachments=False))
+    assert default.message_count == 4 and default.messages_excluded == {}
+    assert "buy now" in Path(default.path).read_text(encoding="utf-8")
+    window = await exports.export(ExportRequest(folder="Junk Email", include_attachments=False))
+    assert window.message_count == 1  # a folder you name is always included
+    mailbox_wide = await exports.export(
+        ExportRequest(since=datetime(2026, 9, 1, tzinfo=UTC), include_attachments=False)
+    )
+    assert mailbox_wide.messages_excluded.get("deleted_or_junk", 0) >= 1  # windows keep false
 
 
 @pytest.mark.parametrize("include_deleted", [False, True])

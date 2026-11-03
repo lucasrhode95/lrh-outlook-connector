@@ -3,11 +3,12 @@
 Remote first: every call asks Outlook (Graph). The local store caches the folder list only; no
 message data is kept locally, so a message deleted on the server is gone here too.
 
-Scope filters list, search, conversation reads, sizes and folder/date-window exports.
+Scope filters list, search, conversation reads, sizes and folder/date-window exports. Conversation reads
+and sizes default to including Deleted Items and Junk; other operations keep the shared default.
 Export conversations follow Deleted/Junk scope; explicit message ids are authoritative.
 A folder counts with its parents:
 - Deleted Items and Junk Email are left out unless ``scope.deleted_items`` (a folder asked for by
-  name is always included).
+  name is always included). Conversation reads and sizes use a scope with this key enabled by default.
   Sent Items, Drafts and Outbox are included unless ``scope.sent_items`` is false. List and
   search also leave out meeting mail (invitations, replies to them, cancellations) when
   ``scope.meeting_mail`` is false: a conversation that is only meeting traffic disappears, one
@@ -33,6 +34,7 @@ from typing import Any
 
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound
 from outlook_connector.domain.models import (
+    CONVERSATION_DEFAULT_SCOPE,
     DEFAULT_SCOPE,
     Attachment,
     BodyKind,
@@ -493,7 +495,7 @@ class Mailbox:
         return sum(count.count for count in counts.values()) if len(counts) == len(set(in_scope)) else None
 
     async def conversation_sizes(
-        self, conversation_ids: list[str], *, scope: Scope = DEFAULT_SCOPE
+        self, conversation_ids: list[str], *, scope: Scope = CONVERSATION_DEFAULT_SCOPE
     ) -> list[ConversationSize]:
         """How many messages each conversation has, counted the way get_conversation lists them.
 
@@ -708,9 +710,8 @@ class Mailbox:
             try:
                 sizes = {
                     s.conversation_id: s
-                    for s in await self.conversation_sizes(
-                        with_ids, scope=Scope(deleted_items=scope.deleted_items)
-                    )
+                    # get_conversation's default: the count is what opening the conversation returns
+                    for s in await self.conversation_sizes(with_ids)
                 }
             except Exception:  # counts are a courtesy; never fail the search for them
                 sizes = {}

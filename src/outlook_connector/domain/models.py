@@ -100,6 +100,15 @@ class Scope(BaseModel):
 DEFAULT_SCOPE = Scope()
 
 
+class ConversationScope(Scope):
+    """The same scope keys, with conversation defaults applied to omitted input fields."""
+
+    deleted_items: bool = Field(default=True, description="Include Deleted Items and Junk Email.")
+
+
+CONVERSATION_DEFAULT_SCOPE = ConversationScope()
+
+
 MeetingKind = Literal["invite", "update", "cancelled", "accepted", "tentative", "declined"]
 
 
@@ -340,7 +349,7 @@ class UserProfile(Compact):
 
 class ConversationSize(Compact):
     conversation_id: str
-    messages: int  # what get_conversation would list with the same scope.deleted_items
+    messages: int  # what get_conversation would list with the same scope
     at_least: bool = False  # the conversation is larger than the server listed in one request
 
 
@@ -350,8 +359,9 @@ EXPORT_MAX_MESSAGES = 2000  # hard cap per export
 class ExportRequest(BaseModel):
     """What to export: conversations, messages, and/or every message in a folder/date window.
 
-    All selections are combined. Deleted/Junk scope also applies to conversations;
-    sent/meeting scope narrows only folder/date-window selections. Explicit ids are authoritative.
+    All selections are combined. Deleted/Junk scope also applies to conversations, which include them
+    unless ``scope.deleted_items`` is given; sent/meeting scope narrows only folder/date-window
+    selections. Explicit ids are authoritative.
     """
 
     conversation_ids: list[str] = Field(default_factory=list)
