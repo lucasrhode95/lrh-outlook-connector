@@ -1,4 +1,4 @@
-![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/connector-overview.svg)
+![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/diagrams/connector-overview.svg)
 
 A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
