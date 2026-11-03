@@ -141,6 +141,7 @@ class MessageSummary(Compact):
     flagged: bool = False
     preview: str | None = None
     internet_message_id: str | None = None
+    size: int | None = Field(default=None, exclude=True)  # Graph's stored message size; internal send guard
     meeting: Meeting | None = None  # set on meeting mail only
     also_in: list[str] = Field(default_factory=list)  # folders holding another copy (same Internet id)
 
@@ -416,6 +417,7 @@ class OutgoingMessage(BaseModel):
     reply_all: bool = False
     signature: str | None = None
     include_signature: bool = True
+    attachments: list[str] = Field(default_factory=list)
 
 
 class InlineImage(BaseModel):
@@ -425,6 +427,14 @@ class InlineImage(BaseModel):
     content_type: str
     content_id: str
     content: bytes
+
+
+class LocalAttachment(BaseModel):
+    """A local file checked before draft creation, then uploaded and confirmed through Graph."""
+
+    path: str
+    name: str
+    size: int
 
 
 class DraftMessage(Compact):
@@ -438,6 +448,7 @@ class DraftMessage(Compact):
     reply_to_message_id: str | None = None
     reply_all: bool = False
     inline_images: list[InlineImage] = Field(default_factory=list, exclude=True)
+    local_attachments: list[LocalAttachment] = Field(default_factory=list, exclude=True)
 
 
 class SignatureInfo(Compact):

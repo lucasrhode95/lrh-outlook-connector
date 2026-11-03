@@ -9,6 +9,7 @@ import tempfile
 from collections import Counter
 from html import escape
 from pathlib import Path
+from typing import NoReturn
 
 from m365_auth import Account
 
@@ -27,6 +28,7 @@ from outlook_connector.domain.models import (
     DraftMessage,
     DraftResult,
     InlineImage,
+    LocalAttachment,
     Message,
     OutgoingMessage,
     Recipient,
@@ -39,6 +41,12 @@ from outlook_connector.service.passive_html import passive_start_tags
 from outlook_connector.service.signatures import Signatures
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
+# Stored size (Integer 0x0E08). A draft stored at 35,655,221 bytes was delivered; one at 37,023,315 bounced
+# with "The limit is 35 MB" (research §4.6, live 2026-10-15 and 2026-11-03).
+MAX_SEND_BYTES = 35 * 1024 * 1024
+# Graph lists a file attachment's size above its byte count: 192 to 238 bytes more for uploaded files
+# (research §4.6, live 2026-11-03). Read-back accepts that overhead, never less than the file.
+ATTACHMENT_SIZE_OVERHEAD = 64 * 1024
 
 
 class Writes:
@@ -59,7 +67,23 @@ class Writes:
             raise WriteOutcomeUnknown(
                 "Outlook did not report a draft id; check Drafts before creating again."
             )
-        result = await self._read_back(draft_id, expected=resolved.inline_images)
+        for attachment in resolved.local_attachments:
+            try:
+                current = await self.mailbox.reader.draft_state(draft_id)
+                if not current.revision:
+                    raise Upstream("Outlook did not report the saved draft version for attachment upload.")
+                await self.writer.add_local_attachment(draft_id, current.revision, attachment)
+            except ConnectorError as exc:
+                await self._attachment_failure(draft_id, attachment, str(exc))
+        result, failed_local = await self._read_back(
+            draft_id,
+            expected=resolved.inline_images,
+            expected_local=resolved.local_attachments,
+        )
+        if failed_local:
+            await self._attachment_failure(
+                draft_id, failed_local[0], "Graph could not confirm this file's name and size."
+            )
         if resolved.reply_to_message_id and result.verified:
             try:
                 assert original is not None
@@ -75,6 +99,11 @@ class Writes:
         The host obtains human approval; the connector never reconstructs or retries the message.
         """
         draft = await self._draft(draft_id)
+        # An unknown size is sent: Outlook's own limit still answers an oversized send with a bounce.
+        if draft.size is not None and draft.size > MAX_SEND_BYTES:
+            raise InvalidRequest(
+                f"This draft is too large to send ({draft.size:,} bytes stored; Outlook's limit is 35 MiB)."
+            )
         if not draft.revision:
             raise Upstream("Outlook did not report the draft's version, so it was not sent.")
         self.check_account()
@@ -82,7 +111,7 @@ class Writes:
             await self.writer.send_draft(draft_id, draft.revision)
         except WriteOutcomeUnknown as exc:
             try:
-                item = await self.mailbox.message(draft_id)
+                item = await self.mailbox.reader.draft_state(draft_id)
                 sent = await self.mailbox.resolve_folder("sentitems")
                 if item.is_draft is False and item.folder_id == sent.id:
                     return SendResult(
@@ -99,7 +128,7 @@ class Writes:
         """Validate a public draft id against current server state."""
         if not draft_id.strip():
             raise InvalidRequest("draft_id must not be empty.")
-        message = await self.mailbox.message(draft_id)
+        message = await self.mailbox.reader.draft_state(draft_id)
         if not message.is_draft:
             raise InvalidRequest("The message is not an existing Outlook draft.")
         return message
@@ -126,6 +155,7 @@ class Writes:
             raise InvalidRequest("reply_all needs reply_to_message_id.")
         _validate_envelope(to, cc, bcc, subject)
         inline_images: list[InlineImage] = []
+        local_attachments = _local_attachments(message.attachments)
         if message.include_signature:
             selected = await self.signatures.resolve_for_draft(
                 message.signature, is_reply=bool(message.reply_to_message_id)
@@ -144,21 +174,31 @@ class Writes:
             reply_to_message_id=message.reply_to_message_id,
             reply_all=message.reply_all,
             inline_images=inline_images,
+            local_attachments=local_attachments,
         )
         return draft, original
 
-    async def _read_back(self, draft_id: str, *, expected: list[InlineImage] | None = None) -> DraftResult:
+    async def _read_back(
+        self,
+        draft_id: str,
+        *,
+        expected: list[InlineImage] | None = None,
+        expected_local: list[LocalAttachment] | None = None,
+    ) -> tuple[DraftResult, list[LocalAttachment]]:
         """Assumes (not re-checked here): reliable id from a single successful write. Retries reads only."""
         for attempt in range(3):
             try:
                 text = await self.mailbox.reader.get_message(draft_id)
-                page = await self.mailbox.reader.get_message(draft_id, body_format="html")
+                page = await self.mailbox.reader.get_message(
+                    draft_id, body_format="html", include_attachments=False
+                )
                 findings = []
+                failed_local: list[LocalAttachment] = []
                 if not (text.body_text or "").strip():
                     findings.append("The server draft body is empty or missing.")
                 cids = re.findall(r"cid:([^\"' >]+)", page.body_html or "", re.IGNORECASE)
-                if cids or expected:
-                    attachments = await self.mailbox.reader.list_attachments(draft_id)
+                if cids or expected or expected_local:
+                    attachments = text.attachments
                     present = {
                         attachment.content_id
                         for attachment in attachments
@@ -187,7 +227,20 @@ class Writes:
                                     != hashlib.sha256(image.content).digest()
                                 ):
                                     findings.append("A signature image changed in the server draft.")
-                return DraftResult(
+                    if expected_local:
+                        unmatched = [attachment for attachment in attachments if not attachment.is_inline]
+                        for local in expected_local:
+                            match = next(
+                                (attachment for attachment in unmatched if _confirms(attachment, local)), None
+                            )
+                            if match is not None:
+                                unmatched.remove(match)
+                            else:
+                                failed_local.append(local)
+                                findings.append(
+                                    f"Attachment '{local.name}' is missing or smaller than the file."
+                                )
+                result = DraftResult(
                     id=draft_id,
                     status="saved",
                     verified=True,
@@ -196,16 +249,31 @@ class Writes:
                     html_body=page.body_html,
                     findings=findings,
                 )
+                return result, failed_local
             except ConnectorError as exc:
                 if attempt == 2:
-                    return DraftResult(
+                    result = DraftResult(
                         id=draft_id,
                         status="failed",
                         verified=False,
                         findings=[f"Draft saved, but Graph read-back failed: {exc}"],
                     )
+                    return result, expected_local or []
                 await asyncio.sleep(0.2 * (attempt + 1))
         raise AssertionError("unreachable")
+
+    async def _attachment_failure(self, draft_id: str, attachment: LocalAttachment, detail: str) -> NoReturn:
+        """Report a checked local file's failure and discard this call's known partial draft once."""
+        try:
+            deleted = (await self.writer.delete([draft_id]))[draft_id] is None
+        except ConnectorError:
+            deleted = False
+        disposition = (
+            "The draft was moved to Deleted Items."
+            if deleted
+            else "The draft could not be moved to Deleted Items; check Drafts before continuing."
+        )
+        raise Upstream(f"Could not attach local file '{attachment.path}': {detail} {disposition}")
 
     async def _reply_problem(self, original: Message, result: DraftResult) -> str | None:
         """Check quoted history using the original and read-back draft already fetched this call.
@@ -215,7 +283,9 @@ class Writes:
         """
         if result.message is None:
             return "the draft or the original could not be read back"
-        original_page = await self.mailbox.reader.get_message(original.id, body_format="html")
+        original_page = await self.mailbox.reader.get_message(
+            original.id, body_format="html", include_attachments=False
+        )
         if _flat(original.body_text) not in _flat(result.text_body):
             return "the quoted original is not the original's full text"
         # Exchange re-wraps the original's HTML when it quotes it, so the HTML is not compared as
@@ -223,12 +293,9 @@ class Writes:
         lost = _structure(original_page.body_html) - _structure(result.html_body)
         if lost:
             return "the quoted original lost formatting (" + ", ".join(sorted(lost.elements())) + ")"
-        found, failed = await self.mailbox.reader.list_attachments_many([original.id, result.id])
-        if failed:
-            return "its attachments could not be listed"
         hashes = {
-            original.id: await self._inline_hashes(original.id, found.get(original.id, [])),
-            result.id: await self._inline_hashes(result.id, found.get(result.id, [])),
+            original.id: await self._inline_hashes(original.id, original.attachments),
+            result.id: await self._inline_hashes(result.id, result.message.attachments),
         }
         missing = Counter(hashes[original.id]) - Counter(hashes[result.id])
         if missing:
@@ -257,6 +324,41 @@ class Writes:
                 "The Outlook sign-in belongs to a different Microsoft account than the one this "
                 "connector reads; nothing was written."
             )
+
+
+def _confirms(attachment: Attachment, local: LocalAttachment) -> bool:
+    """Graph's listed size is the file plus a small overhead (``ATTACHMENT_SIZE_OVERHEAD``)."""
+    size = attachment.size
+    return (
+        attachment.name == local.name
+        and size is not None
+        and local.size <= size <= local.size + ATTACHMENT_SIZE_OVERHEAD
+    )
+
+
+def _local_attachments(paths: list[str]) -> list[LocalAttachment]:
+    """Validate every path before CreateItem so a missing local file never leaves a draft behind, and
+    refuse files that together exceed the send limit before any of them is uploaded."""
+    out: list[LocalAttachment] = []
+    for value in paths:
+        path = Path(value)
+        if not value.strip() or not path.name:
+            raise InvalidRequest("Attachment paths must name a local file.")
+        try:
+            if not path.is_file():
+                raise InvalidRequest(f"Cannot read local attachment '{path}': it is not a file.")
+            size = path.stat().st_size
+            with path.open("rb"):
+                pass
+        except OSError as exc:
+            raise InvalidRequest(f"Cannot read local attachment '{path}': {exc}") from None
+        out.append(LocalAttachment(path=str(path), name=path.name, size=size))
+    total = sum(local.size for local in out)
+    if total > MAX_SEND_BYTES:
+        raise InvalidRequest(
+            f"The attachments total {total:,} bytes; a draft over 35 MiB cannot be sent, so none was created."
+        )
+    return out
 
 
 def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[list[str], list[str]]:

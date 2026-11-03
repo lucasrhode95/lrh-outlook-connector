@@ -98,6 +98,152 @@ async def test_draft_readback_and_recipient_dedup(writes: Writes, fake: FakeGrap
     assert fake.messages[draft.id].is_draft and not fake.sent_drafts
 
 
+async def test_local_files_upload_in_chained_14_mib_slices_and_graph_confirms_them(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    data = b"x" * (14 * 1024 * 1024) + b"tail"
+    path = tmp_path / "report.txt"
+    path.write_bytes(data)
+
+    draft = await writes.create_draft(message(attachments=[str(path)]))
+
+    assert draft.verified and not draft.findings
+    stored = fake.messages[draft.id].attachments
+    assert [(item.name, len(item.data)) for item in stored] == [("report.txt", len(data))]
+    assert b"".join(content for _, content in fake.attachment_slices) == data
+    assert [body["SliceNumber"] for body, _ in fake.attachment_slices] == [0, 1]
+    assert {body["TotalSlices"] for body, _ in fake.attachment_slices} == {2}
+    first, second = (body for body, _ in fake.attachment_slices)
+    assert first["CancellationId"] == second["CancellationId"]
+    assert first["CancellationId"]
+    assert "AttachmentId" not in first["Attachments"][0]
+    assert second["Attachments"][0]["AttachmentId"]["Id"] == "upload-1"  # the whole returned object
+
+
+@pytest.mark.parametrize(
+    ("listed_extra", "confirmed"), [(-1, False), (0, True), (218, True), (70_000, False)]
+)
+async def test_graph_confirms_a_file_listed_at_its_size_plus_graphs_overhead(
+    writes: Writes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, listed_extra: int, confirmed: bool
+) -> None:
+    path = tmp_path / "report.txt"
+    path.write_bytes(b"synthetic report")
+    listing = writes.mailbox.reader.list_attachments
+
+    async def listed_at(message_id: str) -> list[Any]:
+        return [
+            a.model_copy(update={"size": len(b"synthetic report") + listed_extra})
+            for a in await listing(message_id)
+        ]
+
+    monkeypatch.setattr(writes.mailbox.reader, "list_attachments", listed_at)
+    if confirmed:
+        assert (await writes.create_draft(message(attachments=[str(path)]))).verified
+    else:
+        with pytest.raises(Upstream, match="report.txt.*Deleted Items"):
+            await writes.create_draft(message(attachments=[str(path)]))
+
+
+async def test_files_over_the_send_limit_are_refused_before_the_draft_is_created(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    paths = []
+    for name in ("a.bin", "b.bin"):
+        path = tmp_path / name
+        with path.open("wb") as handle:
+            handle.truncate(18 * 1024 * 1024)  # 36 MiB together, over the 35 MiB limit
+        paths.append(str(path))
+    with pytest.raises(InvalidRequest, match="35 MiB"):
+        await writes.create_draft(message(attachments=paths))
+    assert not fake.ows_calls
+
+
+async def test_unreadable_local_attachment_fails_before_draft_creation(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    with pytest.raises(InvalidRequest, match="Cannot read local attachment"):
+        await writes.create_draft(message(attachments=[str(tmp_path / "missing.txt")]))
+    assert not fake.ows_calls
+
+
+async def test_local_draft_reuses_attachment_metadata_in_readback(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    path = tmp_path / "synthetic.txt"
+    path.write_bytes(b"synthetic")
+    await writes.create_draft(message(attachments=[str(path)], include_signature=False))
+    reads = [call for call in fake.calls if call.startswith("GET /v1.0/me/messages/")]
+    assert len(reads) == 4  # one state read, text plus attachments, and HTML only
+
+
+async def test_failed_verification_identifies_the_correct_same_named_local_file(
+    writes: Writes, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second = tmp_path / "first" / "report.txt", tmp_path / "second" / "report.txt"
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_bytes(b"first")
+    second.write_bytes(b"second file")
+    listing = writes.mailbox.reader.list_attachments
+
+    async def missing_second(message_id: str) -> list[Any]:
+        attachments = await listing(message_id)
+        return attachments[:-1] if len(attachments) == 2 else attachments
+
+    monkeypatch.setattr(writes.mailbox.reader, "list_attachments", missing_second)
+    with pytest.raises(Upstream) as error:
+        await writes.create_draft(message(attachments=[str(first), str(second)]))
+    assert str(second) in str(error.value) and str(first) not in str(error.value)
+
+
+async def test_replacement_draft_contains_only_files_listed_for_that_call(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    first_path = tmp_path / "first.txt"
+    replacement_path = tmp_path / "replacement.txt"
+    first_path.write_text("first", encoding="utf-8")
+    replacement_path.write_text("replacement", encoding="utf-8")
+
+    original = await writes.create_draft(message(attachments=[str(first_path)]))
+    replacement = await writes.create_draft(message(attachments=[str(replacement_path)]))
+
+    assert [a.name for a in fake.messages[original.id].attachments] == ["first.txt"]
+    assert [a.name for a in fake.messages[replacement.id].attachments] == ["replacement.txt"]
+
+
+async def test_failed_local_upload_moves_partial_draft_to_deleted_items(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    path = tmp_path / "report.txt"
+    path.write_text("file contents", encoding="utf-8")
+    fake.file_upload_fail_at = 1
+
+    with pytest.raises(Upstream, match="report.txt.*Deleted Items"):
+        await writes.create_draft(message(attachments=[str(path)]))
+
+    draft = next(item for item in fake.messages.values() if item.subject == "Hi")
+    assert draft.folder == fake.aliases["deleteditems"]
+
+
+async def test_graph_must_confirm_local_attachment_name_and_size(
+    writes: Writes, fake: FakeGraph, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "report.txt"
+    path.write_text("file contents", encoding="utf-8")
+    original = writes.mailbox.reader.list_attachments
+
+    async def missing(message_id: str) -> list[Any]:
+        if message_id.startswith("w"):
+            return []
+        return await original(message_id)
+
+    monkeypatch.setattr(writes.mailbox.reader, "list_attachments", missing)
+    with pytest.raises(Upstream, match="report.txt.*Deleted Items"):
+        await writes.create_draft(message(attachments=[str(path)]))
+    draft = next(item for item in fake.messages.values() if item.subject == "Hi")
+    assert draft.folder == fake.aliases["deleteditems"]
+
+
 async def test_reply_defaults_and_self_replies(writes: Writes, fake: FakeGraph) -> None:
     fake.messages["m1"].to = ("me@example.com", "dan@example.com")
     fake.messages["m1"].cc = ("erin@example.com", "me@example.com")
@@ -186,18 +332,36 @@ async def test_send_uses_only_the_stored_draft(writes: Writes, fake: FakeGraph) 
         await writes.send_draft(draft.id)
 
 
+async def test_send_refuses_a_draft_over_the_send_limit(writes: Writes, fake: FakeGraph) -> None:
+    draft = await writes.create_draft(message())
+    fake.messages[draft.id].size_override = 35 * 1024 * 1024 + 1
+
+    with pytest.raises(InvalidRequest, match="too large to send.*35 MiB"):
+        await writes.send_draft(draft.id)
+
+    assert fake.sent_drafts == []
+    assert [action for action, _ in fake.ows_calls].count("UpdateItem") == 0
+
+
+async def test_send_accepts_a_draft_the_size_outlook_delivered(writes: Writes, fake: FakeGraph) -> None:
+    draft = await writes.create_draft(message())
+    fake.messages[draft.id].size_override = 35_655_221  # a 34 MiB file's draft, delivered (research §4.6)
+
+    assert (await writes.send_draft(draft.id)).status == "sent"
+
+
 async def test_a_draft_edited_after_the_send_read_it_is_not_sent(
     writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     draft = await writes.create_draft(reply())
-    read = writes.mailbox.message
+    read = writes.mailbox.reader.draft_state
 
     async def read_then_edited_in_outlook(*args: Any, **kwargs: Any) -> Any:
         message = await read(*args, **kwargs)
         fake.messages[draft.id].subject = "Edited in Outlook meanwhile"
         return message
 
-    monkeypatch.setattr(writes.mailbox, "message", read_then_edited_in_outlook)
+    monkeypatch.setattr(writes.mailbox.reader, "draft_state", read_then_edited_in_outlook)
     with pytest.raises(Upstream, match="nothing was changed or sent"):
         await writes.send_draft(draft.id)
     assert fake.sent_drafts == [] and fake.messages[draft.id].subject == "Edited in Outlook meanwhile"
@@ -317,7 +481,7 @@ async def test_failed_check_after_ambiguous_send_stays_unknown(
     writes: Writes, fake: FakeGraph, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     draft = await writes.create_draft(message())
-    original = writes.mailbox.message
+    original = writes.mailbox.reader.draft_state
     calls = 0
 
     async def unavailable_after_validation(*args: Any, **kwargs: Any) -> Any:
@@ -327,7 +491,7 @@ async def test_failed_check_after_ambiguous_send_stays_unknown(
             raise Throttled("Graph unavailable")
         return await original(*args, **kwargs)
 
-    monkeypatch.setattr(writes.mailbox, "message", unavailable_after_validation)
+    monkeypatch.setattr(writes.mailbox.reader, "draft_state", unavailable_after_validation)
     fake.ows_next = ["done-no-answer"]
     result = await writes.send_draft(draft.id)
     assert result.status == "unknown" and len(fake.ows_calls) == 2

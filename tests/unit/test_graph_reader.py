@@ -46,6 +46,24 @@ def fake() -> FakeGraph:
     return sample_mailbox()
 
 
+async def test_draft_state_reads_mapi_size_without_attachment_requests(fake: FakeGraph) -> None:
+    fake.messages["m1"].size_override = 12345
+    state = await reader_for(fake).draft_state("m1")
+    assert state.size == 12345 and state.revision == fake.messages["m1"].change_key()
+    assert fake.calls == ["GET /v1.0/me/messages/m1"]
+
+
+async def test_graph_rejects_a_top_level_message_size_selection(fake: FakeGraph) -> None:
+    with pytest.raises(InvalidRequest):
+        await graph_for(fake).get("/me/messages/m1", {"$select": "id,size"})
+
+
+async def test_html_read_can_skip_attachment_metadata_already_read(fake: FakeGraph) -> None:
+    message = await reader_for(fake).get_message("m1", body_format="html", include_attachments=False)
+    assert message.body_html and not message.attachments
+    assert fake.calls == ["GET /v1.0/me/messages/m1"]
+
+
 def test_summary_uses_one_received_first_timestamp() -> None:
     data = FakeMessage("time", "Date", "f-inbox", "2026-09-30T12:00:00Z").json(text_body=True)
     data["receivedDateTime"] = "2026-09-30T12:00:00Z"

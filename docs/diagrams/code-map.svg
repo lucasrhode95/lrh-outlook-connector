@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="2600" height="4230" viewBox="0 0 2600 4230" role="img" aria-labelledby="title description">
   <title id="title">Outlook connector code map</title>
-  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and three calendar ports. Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
+  <desc id="description">The connector's main classes and who calls whom. The command line starts the MCP server or the web UI, prepares sign-in, or shows its status. Both surfaces call service classes: Mailbox, Conversations, Exports, Files, Writes, Mutations, Calendar, CalendarListing, Rules and Signatures. The service depends on the ports in remote/ports.py: MailReader, MailWriter, RuleWriter, SignatureStore and three calendar ports. Graph adapters (GraphMailReader, GraphCalendarView, GraphCalendarItems) and Outlook Web adapters (OwsMailWriter, OwsRules, SubstrateEventSearch, CloudSettings) implement them; every remote request shares one Transport and the shared TokenProvider. MailWriter uploads local draft files through OwsMailWriter, then Writes checks file names and sizes through Graph. Mailbox keeps only the folder cache and account binding in the local Store. AppContext in bootstrap.py builds the services once per process. Hover an item for details.</desc>
   <defs>
     <style>
       text { font-family: Arial, Helvetica, sans-serif; }
@@ -182,8 +182,8 @@
 <rect x="673" y="1532" width="553" height="279" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="691" y="1567"><tspan class="code">Writes</tspan><tspan class="detail" dx="12">writes.py</tspan></text>
 <text class="group-title" x="691" y="1604">Methods</text>
-<g><title>Save explicit text or HTML (checked once by passive_html) into Drafts with the native signature; require Graph read-back. Replies are checked for intact quoted history. Nothing is sent.</title><text class="detail" x="691" y="1634">• <tspan class="code">create_draft(message)</tspan></text></g>
-<g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. An unclear answer is checked against Sent Items and never resent; the send is resent only when Outlook refused it as throttled or unavailable (429, 503).</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
+<g><title>Save explicit text or HTML into Drafts with the native signature; upload only the listed local files and verify their names and sizes through Graph. Failed uploads move the partial draft to Deleted Items. Replies are checked for intact quoted history.</title><text class="detail" x="691" y="1634">• <tspan class="code">create_draft(message)</tspan></text></g>
+<g><title>Send an existing draft exactly as stored, once, bound to the change key it was read at. Refuses drafts stored over 35 MiB; an unclear answer is checked against Sent Items and never resent.</title><text class="detail" x="691" y="1661">• <tspan class="code">send_draft(draft_id)</tspan></text></g>
 <g><title>Refuses to write unless the Outlook sign-in is the bound Microsoft account.</title><text class="detail" x="691" y="1688">• <tspan class="code">check_account()</tspan></text></g>
 <text class="muted" x="691" y="1795">uses <tspan class="code">Mailbox</tspan> · <tspan class="code">MailWriter</tspan> · <tspan class="code">Signatures</tspan></text>
 
@@ -243,7 +243,7 @@
 <g><title>Concurrent reads that finish or are cancelled before their caller returns.</title><text class="detail" x="691" y="2306">• <tspan class="code">concurrency.py</tspan></text></g>
 <g><title>The one HTML check for draft bodies and signatures: no declarations, no active content, no markup left open, no elements that change how the rest is read.</title><text class="detail" x="691" y="2333">• <tspan class="code">passive_html.py</tspan></text></g>
 <text class="group-title" x="1100" y="2168">Domain</text>
-<g><title>Pydantic models, including ConversationScope with conversation input defaults: the single schema for the service, the MCP tools and the web API. Never mirrors a Microsoft wire format.</title><text class="detail" x="1100" y="2198">• <tspan class="code">domain/models.py</tspan></text></g>
+<g><title>Pydantic models, including ConversationScope with conversation input defaults: the single schema for the service, the MCP tools and the web API. LocalAttachment carries the checked path, name and size used by draft uploads; models never mirror a Microsoft wire format.</title><text class="detail" x="1100" y="2198">• <tspan class="code">domain/models.py</tspan> · <tspan class="code">LocalAttachment</tspan></text></g>
 <g><title>ConnectorError and its kinds (NotFound, Throttled, AuthenticationRequired, WriteOutcomeUnknown, ...); surfaces know how to present them.</title><text class="detail" x="1100" y="2225">• <tspan class="code">domain/errors.py</tspan></text></g>
 <g><title>A time without a zone is UTC; an aware time is converted. Applied once where a window enters.</title><text class="detail" x="1100" y="2252">• <tspan class="code">domain/time.py</tspan></text></g>
 <text class="group-title" x="1100" y="2291">Rule</text>
@@ -292,6 +292,7 @@
 <g><title>Attachment metadata per message.</title><text class="detail" x="906" y="2719">• <tspan class="code">list_attachments(_many)</tspan></text></g>
 <g><title>An attachment, or the message's MIME, streamed to a file.</title><text class="detail" x="906" y="2746">• <tspan class="code">download_*</tspan></text></g>
 <g><title>The signed-in user's name, address and photo.</title><text class="detail" x="906" y="2773">• <tspan class="code">profile(_photo)</tspan></text></g>
+<g><title>Draft status, version and folder, plus stored size expanded through Integer 0x0E08; no body or attachment listing.</title><text class="detail" x="906" y="2800">• <tspan class="code">draft_state</tspan></text></g>
 <rect x="676" y="2822" width="32" height="26" rx="5" fill="#2b6cb0"/>
 <text class="badge" x="692" y="2841" text-anchor="middle">G</text>
 <text class="section-title" x="718" y="2843"><tspan class="code">CalendarViewReader</tspan></text>
@@ -301,11 +302,12 @@
 <rect x="1256" y="2607" width="32" height="26" rx="5" fill="#b7791f"/>
 <text class="badge" x="1272" y="2626" text-anchor="middle">O</text>
 <text class="section-title" x="1298" y="2628"><tspan class="code">MailWriter</tspan><tspan class="detail" dx="12">ports.py</tspan></text>
-<g><title>Save into Drafts without sending; the draft's id when the backend reports it.</title><text class="detail" x="1258" y="2665">• <tspan class="code">create_draft</tspan></text></g>
+<g><title>Save into Drafts without sending.</title><text class="detail" x="1258" y="2665">• <tspan class="code">create_draft</tspan></text></g>
 <g><title>Send an existing draft as it is, keeping a copy in Sent Items. Raises WriteOutcomeUnknown when it cannot tell.</title><text class="detail" x="1258" y="2692">• <tspan class="code">send_draft</tspan></text></g>
 <g><title>Identity claims (tid, oid, upn) of the Outlook credential.</title><text class="detail" x="1258" y="2719">• <tspan class="code">account</tspan></text></g>
 <g><title>Read or unread; one outcome per message.</title><text class="detail" x="1529" y="2665">• <tspan class="code">set_read</tspan> · <tspan class="code">set_flag</tspan></text></g>
 <g><title>Move to a folder, or to Deleted Items; there is no hard delete.</title><text class="detail" x="1529" y="2692">• <tspan class="code">move</tspan> · <tspan class="code">delete</tspan></text></g>
+<g><title>Upload a local file in raw 14 MiB slices; the caller confirms it through Graph.</title><text class="detail small" x="1529" y="2719">• <tspan class="code">add_local_attachment</tspan></text></g>
 <g><title>Inbox rules: list, create, update, reorder and delete.</title><text class="detail" x="1258" y="2758"><tspan class="code">RuleWriter</tspan> · <tspan class="code">*_rule</tspan></text></g>
 <g><title>Native signature settings and contents: read, create, update, delete, set defaults.</title><text class="detail" x="1258" y="2785"><tspan class="code">SignatureStore</tspan> · settings, contents, writes</text></g>
 <g><title>Hydrate one event by its Outlook item id; list or download its attachments.</title><text class="detail" x="1258" y="2812"><tspan class="code">CalendarItemReader</tspan> · <tspan class="code">get_event</tspan> · files</text></g>
@@ -326,7 +328,7 @@
 
 <rect x="1240" y="2975" width="560" height="250" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>
 <text class="section-title" x="1258" y="3010">Calendar + Outlook adapters</text>
-<g><title>CreateItem (SaveOnly) for drafts and replies; UpdateItem for read, flag and send_draft (SendAndSaveCopy); MoveItem; DeleteItem with MoveToDeletedItems.</title><text class="detail small" x="1258" y="3047"><tspan class="code">OwsMailWriter</tspan>: Create/Update/Move/DeleteItem</text></g>
+<g><title>CreateItem (SaveOnly) for drafts and replies; CreateAttachmentFromLocalFile for raw, sliced uploads; UpdateItem for read, flag and send_draft; MoveItem; DeleteItem with MoveToDeletedItems.</title><text class="detail small" x="1258" y="3047"><tspan class="code">OwsMailWriter</tspan>: Create/Upload/Update/Move/DeleteItem</text></g>
 <g><title>Inbox-rule actions in OWS's bare-request style.</title><text class="detail small" x="1258" y="3074"><tspan class="code">OwsRules</tspan>: inbox-rule actions</text></g>
 <g><title>Event search uses Search v2; event details and attachment reads use Graph under outlook.calendar.</title><text class="detail small" x="1258" y="3101"><tspan class="code">GraphCalendarItems</tspan>: event details + files</text></g>
 <g><title>Search v2 Event/Exchange pages; Cvid and LogicalId kept across one walk. Calls Transport directly.</title><text class="detail small" x="1258" y="3128"><tspan class="code">SubstrateEventSearch</tspan>: Search v2</text></g>
@@ -350,6 +352,7 @@
 <g><title>call: one item action in the JsonRequest envelope, resent only when Outlook refused it as throttled or unavailable (429, 503). call_read: reads, retried like GETs.</title><text class="detail" x="1258" y="3343">• <tspan class="code">call</tspan> · <tspan class="code">call_read</tspan></text></g>
 <g><title>Inbox-rule actions use this bare-request style; success is indicated by WasSuccessful and ErrorCode.</title><text class="detail" x="1258" y="3370">• <tspan class="code">call_request(action, ...)</tspan></text></g>
 <g><title>Claims of the Outlook token: the account writes act as.</title><text class="detail" x="1258" y="3397">• <tspan class="code">account()</tspan></text></g>
+<g><title>CreateAttachment envelope on /owa/service.svc/CreateAttachmentFromLocalFile with metadata in the header and raw slice bytes.</title><text class="detail small" x="1470" y="3397">• <tspan class="code">upload_file_slice</tspan></text></g>
 
 <path class="call-flow" d="M940 3438 V3480"/>
 <path class="call-flow" d="M1520 3438 V3480"/>
@@ -447,7 +450,7 @@
 <g><title>Outlook Web's private JSON API under the outlook.api profile. A gap fill: Graph cannot write mail with the usable clients.</title><text class="detail" x="1938" y="2916"><tspan class="code">outlook.cloud.microsoft/owa/service.svc</tspan></text></g>
 <g><title>Drafts, sending, read state, flags.</title><text class="detail" x="1938" y="2943"><tspan class="code">CreateItem</tspan> · <tspan class="code">UpdateItem</tspan></text></g>
 <g><title>Moves and soft deletes.</title><text class="detail" x="1938" y="2970"><tspan class="code">MoveItem</tspan> · <tspan class="code">DeleteItem</tspan></text></g>
-<g><title>Event details.</title><text class="detail" x="1938" y="2997"><tspan class="code">GetItem</tspan></text></g>
+<g><title>Raw sliced local draft file uploads.</title><text class="detail" x="1938" y="2997"><tspan class="code">CreateAttachmentFromLocalFile</tspan></text></g>
 <g><title>OWS rule actions support reading and confirmed changes to supported inbox rules.</title><text class="detail" x="1938" y="3024">inbox rules: read and supported writes</text></g>
 
 <rect x="1920" y="3095" width="580" height="130" fill="#fff" stroke="#c7d5e2" stroke-width="1.5"/>

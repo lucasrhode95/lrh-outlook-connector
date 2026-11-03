@@ -31,25 +31,6 @@ and `download_attachment` by name.
 
 ### Enhancements
 
-#### Attach local files to drafts
-
-You ask the agent: "Draft a reply to the team and attach `report.pdf`." `create_draft` takes no files
-today. The draft is saved without the PDF, and you attach it by hand in Outlook.
-
-**Change:** build the design in
-[requirements §12.1](requirements.md#121-drafts-sending-and-signatures):
-
-- An `attachments` list of local paths on `create_draft`.
-- After `CreateItem` saves the draft, each file uploads through `CreateAttachmentFromLocalFile` in 14 MiB
-  slices, with a `CancellationId` ([research §4.6](api-research.md#46-message-size-limits); decided
-  2026-11-02). One path for every size, up to Outlook's own send ceiling.
-- Graph read-back confirms each file by name and size.
-- A failed upload leaves no half-built draft: the draft moves to Deleted Items and the call reports which
-  file failed.
-
-Settle while building where the send limit comes from. Research §4.6 puts the send ceiling between 34 and
-35.3 MiB: a 34 MiB file was delivered, and 35.3 MiB bounced.
-
 #### Reply tree for branch-aware conversations (parked)
 
 Alice sends a proposal. Bob replies to all. Carol forwards it to Dan, who replies to Carol. `get_conversation`

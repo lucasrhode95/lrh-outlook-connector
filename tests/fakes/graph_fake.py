@@ -23,6 +23,8 @@ import httpx
 from outlook_connector.remote.ids import to_graph, to_ows
 from outlook_connector.remote.urls import GRAPH_ROOT
 
+# Graph lists an attachment's size above its byte count (192 to 238 bytes live, 2026-11-03)
+GRAPH_ATTACHMENT_OVERHEAD = 200
 REST_PREFIX = "rest."  # marks the regular (move-sensitive) id form that $search returns
 
 
@@ -77,12 +79,23 @@ class FakeMessage:
     unique_html: str | None = None
     is_read: bool = True
     attachments: list[FakeAttachment] = field(default_factory=list)
+    size_override: int | None = None
     internet_id: str | None = None  # copies of one message (e.g. sent to yourself) share it
     meeting: dict[str, Any] = field(default_factory=dict)  # eventMessage fields of meeting mail
 
     def change_key(self) -> str:
         """Like Exchange's change key: a new value whenever the item changes."""
-        state = (self.subject, self.folder, self.to, self.cc, self.bcc, self.text, self.html, self.is_draft)
+        state = (
+            self.subject,
+            self.folder,
+            self.to,
+            self.cc,
+            self.bcc,
+            self.text,
+            self.html,
+            self.is_draft,
+            tuple((a.id, a.name, len(a.data)) for a in self.attachments),
+        )
         return hashlib.sha256(repr(state).encode()).hexdigest()[:16]
 
     def json(self, *, text_body: bool) -> dict[str, Any]:
@@ -134,6 +147,10 @@ class FakeGraph:
     batch_sizes: list[int] = field(default_factory=list)
     sent_drafts: list[str] = field(default_factory=list)  # drafts sent with UpdateItem
     ows_calls: list[tuple[str, dict[str, Any]]] = field(default_factory=list)  # (action, request body)
+    attachment_slices: list[tuple[dict[str, Any], bytes]] = field(default_factory=list)
+    upload_buffers: dict[str, bytearray] = field(default_factory=dict)
+    upload_attachment_ids: dict[str, str] = field(default_factory=dict)
+    file_upload_fail_at: int | None = None
     inbox_rules: list[dict[str, Any]] = field(default_factory=list)
     ows_next: list[Any] = field(default_factory=list)  # scripted answers for upcoming OWS calls:
     # "no-answer" (connection drops after sending), "done-no-answer" (applied, then dropped),
@@ -287,18 +304,23 @@ class FakeGraph:
 
     # ------------------------------------------------------------------ OWS (writes)
     def handle_ows(self, request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/owa/service.svc", request.url.path
+        upload = request.url.path == "/owa/service.svc/CreateAttachmentFromLocalFile"
+        assert upload or request.url.path == "/owa/service.svc", request.url.path
         assert request.headers.get("authorization", "").startswith("Bearer ")
         assert 'IdType="ImmutableId"' in request.headers.get("prefer", "")
-        action = request.url.params["action"]
+        action = "CreateAttachmentFromLocalFile" if upload else request.url.params["action"]
+        assert action != "CreateAttachmentFromLocalFile" or upload, "uploads use the dedicated path"
         assert request.headers.get("action") == action
         posted = request.headers.get("x-owa-urlpostdata")
+        if upload:
+            assert posted, "upload metadata must be in X-OWA-UrlPostData"
         envelope = json.loads(unquote(posted)) if posted else json.loads(request.content)
         if envelope["__type"] == f"{action}Request:#Exchange":  # bare request style (inbox rules)
             return self._ows_bare(action, envelope, request)
-        assert envelope["__type"] == f"{action}JsonRequest:#Exchange"
+        request_type = "CreateAttachment" if upload else action
+        assert envelope["__type"] == f"{request_type}JsonRequest:#Exchange"
         body = envelope["Body"]
-        assert body["__type"] == f"{action}Request:#Exchange"
+        assert body["__type"] == f"{request_type}Request:#Exchange"
         self.ows_calls.append((action, body))
         script = self.ows_next.pop(0) if self.ows_next else None
         if script == "no-answer":
@@ -311,7 +333,10 @@ class FakeGraph:
             return httpx.Response(script, headers={"x-owa-error": "FakeError"}, json={})
         if isinstance(script, dict):
             return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": [script]}}})
-        items = getattr(self, f"ows_{action}")(body)
+        if action == "CreateAttachmentFromLocalFile":
+            items = self.ows_CreateAttachmentFromLocalFile(body, request.content)
+        else:
+            items = getattr(self, f"ows_{action}")(body)
         if script == "done-no-answer":
             raise httpx.ReadTimeout("no answer", request=request)
         return httpx.Response(200, json={"Body": {"ResponseMessages": {"Items": items}}})
@@ -428,6 +453,52 @@ class FakeGraph:
         created = [{"ItemId": {"Id": to_ows(new_id)}}] if disposition == "SaveOnly" else []
         return [{"ResponseClass": "Success", "ResponseCode": "NoError", "Items": created}]
 
+    def ows_CreateAttachmentFromLocalFile(self, body: dict[str, Any], content: bytes) -> list[dict[str, Any]]:  # noqa: N802
+        self.attachment_slices.append((body, content))
+        if self.file_upload_fail_at == len(self.attachment_slices):
+            return [{"ResponseClass": "Error", "ResponseCode": "ErrorMessageSizeExceeded"}]
+        parent = body["ParentItemId"]
+        message = self.messages.get(to_graph(parent["Id"]))
+        if message is None or not message.is_draft:
+            return [{"ResponseClass": "Error", "ResponseCode": "ErrorItemNotFound"}]
+        assert parent["ChangeKey"] == message.change_key()
+        (item,) = body["Attachments"]
+        cancellation_id = body["CancellationId"]
+        if body["SliceNumber"] == 0:
+            attachment_id = f"upload-{len(self.attachment_slices)}"
+            self.upload_attachment_ids[cancellation_id] = attachment_id
+            self.upload_buffers[cancellation_id] = bytearray()
+        else:
+            attachment_id = self.upload_attachment_ids[cancellation_id]
+            assert item["AttachmentId"]["Id"] == attachment_id  # the previous slice's whole object
+        self.upload_buffers[cancellation_id].extend(content)
+        if body["SliceNumber"] + 1 == body["TotalSlices"]:
+            message.attachments.append(
+                FakeAttachment(
+                    attachment_id,
+                    item["Name"],
+                    bytes(self.upload_buffers.pop(cancellation_id)),
+                    item["ContentType"],
+                )
+            )
+        return [
+            {
+                "ResponseClass": "Success",
+                "ResponseCode": "NoError",
+                # Outlook's shape (live 2026-11-03): the change key is inside AttachmentId
+                "Attachments": [
+                    {
+                        "__type": "FileAttachment:#Exchange",
+                        "AttachmentId": {
+                            "Id": attachment_id,
+                            "RootItemId": parent["Id"],
+                            "RootItemChangeKey": message.change_key(),
+                        },
+                    }
+                ],
+            }
+        ]
+
     def _ows_target(self, item_id: dict[str, Any]) -> FakeMessage | None:
         return self.messages.get(to_graph(item_id["Id"]))
 
@@ -542,8 +613,21 @@ class FakeGraph:
             msg = self.messages.get(m[1].removeprefix(REST_PREFIX))  # either id form is readable
             if not msg:
                 return 404, {"error": {"code": "ErrorItemNotFound"}}, None
+            if "size" in params.get("$select", "").split(","):
+                return (
+                    400,
+                    {"error": {"code": "Request_BadRequest", "message": "Unknown property size"}},
+                    None,
+                )
             # like Graph (live 2026-10-03): the id comes back in the form it was asked with
-            return 200, msg.json(text_body=text_body) | {"id": m[1]}, None
+            result = msg.json(text_body=text_body) | {"id": m[1]}
+            if "$expand" in params:
+                assert params["$expand"] == "singleValueExtendedProperties($filter=id eq 'Integer 0x0E08')"
+                size = msg.size_override
+                if size is None:
+                    size = len(msg.text.encode("utf-8")) + sum(len(a.data) for a in msg.attachments)
+                result["singleValueExtendedProperties"] = [{"id": "Integer 0x0E08", "value": str(size)}]
+            return 200, result, None
         if m := re.fullmatch(r"/me/messages/([^/]+)/attachments", path):
             msg = self.messages.get(m[1])
             if not msg:
@@ -576,7 +660,7 @@ class FakeGraph:
             "id": a.id,
             "name": a.name,
             "contentType": a.content_type,
-            "size": len(a.data),
+            "size": len(a.data) + GRAPH_ATTACHMENT_OVERHEAD,
             "isInline": a.inline,
         }
         if a.kind == "fileAttachment":

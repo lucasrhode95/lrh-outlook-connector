@@ -108,6 +108,7 @@ class Transport:
         profile: str,
         headers: dict[str, str] | None = None,
         json_body: Any = None,
+        content: bytes | None = None,
         retry: bool | None = None,
         write: bool = False,
     ) -> httpx.Response:
@@ -121,6 +122,7 @@ class Transport:
             profile=profile,
             headers=headers,
             json_body=json_body,
+            content=content,
             retry=retry,
             write=write,
         )
@@ -175,6 +177,7 @@ class Transport:
         profile: str,
         headers: dict[str, str] | None,
         json_body: Any = None,
+        content: bytes | None = None,
         retry: bool | None,
         write: bool,
         destination: BinaryIO | None = None,
@@ -202,7 +205,7 @@ class Transport:
                 async with (
                     self._limit,
                     self._response(
-                        method, url, request_headers, json_body=json_body, stream=streaming
+                        method, url, request_headers, json_body=json_body, content=content, stream=streaming
                     ) as response,
                 ):
                     log.debug(
@@ -271,16 +274,15 @@ class Transport:
         headers: dict[str, str],
         *,
         json_body: Any,
+        content: bytes | None,
         stream: bool,
     ) -> AsyncIterator[httpx.Response]:
         """Keep a streamed response open while its consumer reads it."""
         if stream:
-            if json_body is not None:
-                raise AssertionError("A streamed download cannot carry a JSON body.")
             async with self._client.stream(method, url, headers=headers) as response:
                 yield response
         else:
-            yield await self._client.request(method, url, headers=headers, json=json_body)
+            yield await self._client.request(method, url, headers=headers, json=json_body, content=content)
 
     @staticmethod
     async def _stream_response(

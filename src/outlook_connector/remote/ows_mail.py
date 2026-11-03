@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import mimetypes
+import uuid
+from pathlib import Path
 from typing import Any
 
-from outlook_connector.domain.models import DraftMessage
+from outlook_connector.domain.errors import InvalidRequest, WriteOutcomeUnknown
+from outlook_connector.domain.models import DraftMessage, LocalAttachment
 from outlook_connector.remote import ows_mapping as mapping
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ports import FolderTarget, MailWriter
 from outlook_connector.remote.transport import operation
+
+FILE_SLICE_BYTES = 14 * 1024 * 1024
 
 
 class OwsMailWriter(MailWriter):
@@ -30,6 +36,72 @@ class OwsMailWriter(MailWriter):
         """Save into Drafts (never sends). Returns the draft's Graph id when Outlook reports it."""
         with operation("saving a draft"):
             return mapping.created_id(await self._ows.call("CreateItem", mapping.create(message)))
+
+    async def add_local_attachment(self, draft_id: str, revision: str, attachment: LocalAttachment) -> None:
+        """Upload a file in 14 MiB raw OWS slices, chaining each returned attachment id."""
+        path = Path(attachment.path)
+        total_slices = max(1, (attachment.size + FILE_SLICE_BYTES - 1) // FILE_SLICE_BYTES)
+        cancellation_id = str(uuid.uuid4())
+        content_type = mimetypes.guess_type(attachment.name)[0] or "application/octet-stream"
+        previous_attachment_id: Any = None
+        change_key = revision
+        offset = 0
+        try:
+            with path.open("rb") as source:
+                for slice_number in range(total_slices):
+                    expected_size = min(FILE_SLICE_BYTES, max(0, attachment.size - offset))
+                    content = source.read(FILE_SLICE_BYTES)
+                    if len(content) != expected_size:
+                        raise InvalidRequest(
+                            f"Local file '{attachment.name}' changed while it was being attached."
+                        )
+                    body_attachment: dict[str, Any] = {
+                        "__type": "FileAttachment:#Exchange",
+                        "Content": "",
+                        "ContentType": content_type,
+                        "IsInline": False,
+                        "Name": attachment.name,
+                        "Size": attachment.size,
+                    }
+                    if previous_attachment_id:
+                        body_attachment["AttachmentId"] = previous_attachment_id
+                    body = {
+                        "ParentItemId": {
+                            "__type": "ItemId:#Exchange",
+                            "Id": mapping.item_id(draft_id)["Id"],
+                            "ChangeKey": change_key,
+                        },
+                        "Attachments": [body_attachment],
+                        "IncludeContentIdInResponse": True,
+                        "SliceNumber": slice_number,
+                        "TotalSlices": total_slices,
+                        "CancellationId": cancellation_id,
+                    }
+                    with operation(f"uploading draft attachment {attachment.name}"):
+                        (answer,) = await self._ows.upload_file_slice(body, content)
+                    uploaded = answer.get("Attachments")
+                    result = uploaded[0] if isinstance(uploaded, list) and uploaded else {}
+                    returned_id = result.get("AttachmentId") if isinstance(result, dict) else None
+                    if returned_id is None or returned_id == "":
+                        raise WriteOutcomeUnknown(
+                            f"Outlook did not report an attachment id for '{attachment.name}'; "
+                            "the upload may have completed."
+                        )
+                    previous_attachment_id = returned_id
+                    # Outlook returns {Id, RootItemId, RootItemChangeKey} (live 2026-11-03); the next
+                    # slice carries the whole object back and is bound to the new change key.
+                    returned_change_key = (
+                        returned_id.get("RootItemChangeKey") if isinstance(returned_id, dict) else None
+                    )
+                    if isinstance(returned_change_key, str) and returned_change_key:
+                        change_key = returned_change_key
+                    offset += len(content)
+                if source.read(1):
+                    raise InvalidRequest(
+                        f"Local file '{attachment.name}' changed while it was being attached."
+                    )
+        except OSError as exc:
+            raise InvalidRequest(f"Cannot read local attachment '{attachment.name}': {exc}") from None
 
     async def send_draft(self, draft_id: str, revision: str) -> None:
         """Send only this existing draft, unchanged: ``UpdateItem`` with ``SendAndSaveCopy`` and no

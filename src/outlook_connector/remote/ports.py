@@ -22,6 +22,7 @@ from outlook_connector.domain.models import (
     DraftMessage,
     Folder,
     InboxRule,
+    LocalAttachment,
     Message,
     MessageSummary,
     RuleChange,
@@ -98,7 +99,13 @@ class MailReader(Protocol):
         A failed folder is left out, so one failure never hides the others' results."""
         ...
 
-    async def get_message(self, message_id: str, *, body_format: BodyFormat = "text") -> Message: ...
+    async def get_message(
+        self, message_id: str, *, body_format: BodyFormat = "text", include_attachments: bool = True
+    ) -> Message: ...
+
+    async def draft_state(self, message_id: str) -> Message:
+        """Read draft status, version, folder and MAPI stored size, without bodies or attachments."""
+        ...
 
     async def get_messages(
         self, message_ids: list[str], *, body_format: BodyFormat = "text"
@@ -241,6 +248,10 @@ class MailWriter(Protocol):
 
     async def create_draft(self, message: DraftMessage) -> str | None:
         """Save into Drafts without sending; the draft's id when the backend reports it."""
+        ...
+
+    async def add_local_attachment(self, draft_id: str, revision: str, attachment: LocalAttachment) -> None:
+        """Upload one local file to an existing draft. The caller verifies it through MailReader."""
         ...
 
     async def send_draft(self, draft_id: str, revision: str) -> None:
