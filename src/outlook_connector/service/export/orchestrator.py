@@ -29,7 +29,7 @@ from outlook_connector.domain.models import (
     MessageSummary,
     Scope,
 )
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.remote.results import MAX_CONCURRENT_REQUESTS
 from outlook_connector.service import markers
 from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.conversations import BODY_MISSING, Conversations, base_subject, oldest_first

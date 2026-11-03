@@ -181,7 +181,7 @@ async def test_update_item_reports_each_message(fake: FakeGraph) -> None:
 
 
 async def test_move_to_a_well_known_or_any_folder(fake: FakeGraph) -> None:
-    from outlook_connector.remote.ports import FolderTarget
+    from outlook_connector.remote.results import FolderTarget
 
     writer = writer_for(fake)
     assert await writer.move(["m1"], FolderTarget("f-archive", "archive")) == {"m1": None}

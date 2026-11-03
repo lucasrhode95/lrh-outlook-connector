@@ -18,7 +18,6 @@ from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.signatures import Signatures
 from outlook_connector.service.writes import Writes
-from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeGraph, StaticTokens, sample_mailbox
 
 ME = Account(tenant_id="tenant-x", object_id="user-x", username="me@example.com")
@@ -31,7 +30,7 @@ async def _no_sleep(_seconds: float) -> None:
 def make_services(fake: FakeGraph, tmp_path: Path) -> tuple[Signatures, Writes]:
     tokens = StaticTokens()
     transport = Transport(tokens, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
-    mailbox = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "signature.sqlite3", "fp"))
+    mailbox = Mailbox(GraphMailReader(Graph(transport)))
     signatures = Signatures(CloudSettings(transport, tokens), ME)
     writer = OwsMailWriter(Ows(transport, tokens))
     return signatures, Writes(mailbox, writer, ME, signatures)

@@ -9,7 +9,6 @@ from typing import Any
 from outlook_connector.domain.errors import Upstream
 from outlook_connector.domain.models import Folder, InboxRule, RuleChange
 from outlook_connector.remote.ows import SERVER_VERSION, Ows
-from outlook_connector.remote.ports import RuleWriter
 
 FIELDS = {
     "name": "Name",
@@ -54,7 +53,7 @@ INACTIVE = {
 }
 
 
-class OwsRules(RuleWriter):
+class OwsRules:
     def __init__(self, ows: Ows) -> None:
         self.ows = ows
 

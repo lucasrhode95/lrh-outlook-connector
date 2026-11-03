@@ -28,12 +28,8 @@ from outlook_connector.domain.models import (
     MutationResult,
     Scope,
 )
-from outlook_connector.remote.ports import (
-    MAX_CONCURRENT_REQUESTS,
-    FetchedSummaries,
-    FolderTarget,
-    MailWriter,
-)
+from outlook_connector.remote.ows_mail import OwsMailWriter
+from outlook_connector.remote.results import MAX_CONCURRENT_REQUESTS, FetchedSummaries, FolderTarget
 from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.failures import describe
 from outlook_connector.service.mailbox import Mailbox
@@ -45,7 +41,7 @@ Send = Callable[[list[str]], Awaitable[dict[str, str | None]]]
 
 
 class Mutations:
-    def __init__(self, mailbox: Mailbox, writer: MailWriter, check_account: Callable[[], None]) -> None:
+    def __init__(self, mailbox: Mailbox, writer: OwsMailWriter, check_account: Callable[[], None]) -> None:
         self.mailbox = mailbox
         self.writer = writer
         self.check_account = check_account

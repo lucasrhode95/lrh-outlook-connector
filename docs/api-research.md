@@ -114,7 +114,6 @@ Live, 2026-10-02 to 2026-10-04, on the tested mailbox:
 | Metadata walk (`$top=500`, 17 fields) | 37 records/s, about 1.7 KB each: a full mirror takes about 11.5 minutes and 45 MB |
 | Inbox delta bootstrap | 139 records, one page, 1.6 s |
 
-
 **Listing without a folder.** `/me/messages` pages newest first across every folder, Junk and Deleted Items
 included (86% of this mailbox), so filtering after paging kept 13 of 100 rows. Counting first (one `$batch` of
 per-folder counts for the window) and then listing the in-scope folders that have mail, merged newest first,
@@ -305,17 +304,11 @@ but cannot establish provenance by themselves. Every tested ordinary image produ
 including hidden and external images; the VML/fallback pair produced one, and quoted image nodes
 excluded from U produced none there. VML-only images and other clients remain unverified.
 
-Exchange's conversion is usable as reading text for ordinary prose, basic lists, links and preformatted
-text, but it is lossy: table structure, quote depth, heading levels, emphasis and nondefault numbering
-are lost, and hidden content may be revealed or joined to visible text. It is not a faithful rendering
-or a reliable source of attachment identity. Selecting a placement/rendering strategy remains a design
-decision, not a result of this research.
-
-Five sends total: four from the Exchange Online test mailbox and one from the external Gmail account.
-Four Outlook drafts were created and sent; the resulting four Sent Items messages and three received
-test messages were verified in Deleted Items. All three Gmail test messages were verified in Trash,
-with no matching test messages left outside either recovery folder. No send had an uncertain outcome
-and none was resent. No Gmail draft was created.
+Exchange's conversion reads well for prose, basic lists, links and preformatted text, but it is lossy:
+table structure, quote depth, heading levels, emphasis and nondefault numbering are lost, and hidden
+content may be revealed or joined to visible text. It is not a faithful rendering or a source of
+attachment identity. Every send was to the owner or the external test account and was cleaned up
+afterwards; none had an uncertain outcome.
 
 #### Inline images in replies
 
@@ -366,21 +359,18 @@ only:
   `$orderby=start/dateTime asc` it is, and next links keep that order (page sizes 1, 2, 3 and 100 returned
   the same 16 events, no duplicates).
 - Graph's immutable event ids, mapped as in §4.2, equal the ids OWS `GetCalendarView` returns for the same
-  week, and hydrate through OWS `GetItem`.
-- Start and end times from `GetItem` and from both listings denote the same instants.
+  week, with the same start and end instants.
 - `POST /search/query` with `entityTypes=["event"]` and a word from one event's description returned 12 hits
   in one page; the hydrated hit had the word in its description, not its subject.
-- `GET /me/events/{id}?$select=subject,body` read one event's subject and description.
 
 **Live, read-only, 2026-11-02** (`outlook.calendar` profile: the Teams client asking for `Calendars.Read`):
 
 - **Hydration by id.** Every id the connector holds hydrates through `GET /me/events/{id}` with
   `Prefer: IdType="ImmutableId"`: Search v2's `ItemId.Id` and `ImmutableId`, and the Graph listing's ids,
   each after the §4.2 alphabet swap (12 events; the returned id swaps back to the input).
-- **Fields against OWS `GetItem`.** Attendee counts and join-link presence agreed on all 12. Graph's
-  `responseStatus.response` (`accepted`, `tentativelyAccepted`) was set on all 12; the connector's `GetItem`
-  mapping gave no response type. Text bodies (`Prefer: outlook.body-content-type="text"`) matched in length
-  and words, up to 3,921 characters.
+- **Fields.** Attendee counts and join links agreed with OWS `GetItem` on all 12, and text bodies matched
+  in length and words, up to 3,921 characters. Graph's `responseStatus.response` was set on all 12, where
+  `GetItem` gave no response type.
 - **Attachments.** `GET /me/events/{id}/attachments` lists `fileAttachment` entries with `name`,
   `contentType`, `size` and `isInline`; `/attachments/{id}/$value` downloads the bytes (200, `image/png`,
   27,518 bytes; `size` reports more than the byte count). `hasAttachments` said `false` on a recurring
@@ -395,9 +385,10 @@ only:
 - **Other calendars.** `GET /me/calendars` returned 3 calendars, all the user's own, in 3 calendar groups.
   `GET /me/calendars/{id}/calendarView` answered 200 for each, with descriptions. The mailbox had no calendar
   shared by or delegated from another user, so `Calendars.Read.Shared` was not exercised.
-  Paging (live 2026-11-03, `$top=2`): the next link for `/me/calendars/{id}/calendarView` comes back as
-  `/me/calendars('{id}')/calendarView`, with the id unescaped, for the default calendar read by id too. Graph
-  answered 200 to that link. A cursor check that compares the request's path text refuses it.
+- **Paging a selected calendar** (live 2026-11-03, `$top=2`): the next link for
+  `/me/calendars/{id}/calendarView` comes back as `/me/calendars('{id}')/calendarView`, with the id unescaped,
+  for the default calendar read by id too, and Graph answers it. A cursor check that compares path text
+  refuses it. With both forms accepted, the connector followed three pages of a secondary calendar.
 - **Teams meeting chat.** `GET /me/onlineMeetings?$filter=JoinWebUrl eq '…'` answered 403: the Teams client
   token has no `OnlineMeetings.*` scope. Each of 182 join links in a 90-day window holds a
   `19:meeting_…@thread.v2` thread id after `/meetup-join/`. Of the 56 distinct ids, 54 equal the id of a
@@ -449,23 +440,16 @@ A message saved through OWS reads back through Graph with a trailing CRLF on its
 - Proven but unused for ordinary mail data (2026-10-01): `FindFolder`, `GetFolder`, `FindItem`,
   `FindConversation`, `GetConversationItems`, `GetTimeZone`. `ExecuteSearch` answered 400 for every variant
   tried.
-- `GetItem` hydrates calendar events: `BaseShape: "Default"`, `BodyType: "Text"` and `AdditionalProperties`
-  `item:Body` and `item:Attachments` return the agenda, attachment metadata and required and optional attendees
-  (2026-10-10). On 2026-10-10 the default shape capped the body at 2,048 characters and said so in
-  `Body.IsTruncated`. On 2026-11-02 twelve text bodies up to 3,921 characters came back whole, with
-  `IsTruncated: false`, equal to Graph's (§3.8). The text body is not HTML-entity-decoded.
-- `GetCalendarView` with a UTC `TimeZoneContext` returns a window's events directly in `Body`, without
-  descriptions, and the same events as Graph's `calendarView` (§3.8).
+- `GetItem` (with `item:Body` and `item:Attachments`) and `GetCalendarView` (with a UTC `TimeZoneContext`)
+  hydrate and list calendar events; the connector uses Graph instead (§3.8). On 2026-10-10 `GetItem`'s default
+  shape capped a body at 2,048 characters with `Body.IsTruncated`; on 2026-11-02 bodies up to 3,921 characters
+  came back whole. Its text body is not HTML-entity-decoded.
 - `GetOwaUserConfiguration` answers with null legacy signature contents; it is not the modern signature list
   (§5.2).
 - Browser: `FindConversation` rows carry cross-folder `GlobalItemIds` and `GlobalMessageCount`.
-- **File attachments (Browser, 2026-10-07; live from our process 2026-11-02, see §4.6):** Outlook Web uploads with
-  `POST /owa/service.svc/CreateAttachmentFromLocalFile`. The metadata travels as URL-encoded JSON in
-  `X-OWA-UrlPostData` (`CreateAttachmentJsonRequest:#Exchange` → `CreateAttachmentRequest:#Exchange`:
-  `ParentItemId {Id, ChangeKey}`, `Attachments: [{"__type": "FileAttachment:#Exchange", "Content": "",
-  "ContentType", "IsInline", "Name", "Size"}]`, `IncludeContentIdInResponse: true`, `SliceNumber: 0`,
-  `TotalSlices: 1`); the bytes are the request body. The answer gives `AttachmentId`, `ContentId`,
-  `LastModifiedTime` and `IsInline`.
+- **File attachments:** Outlook Web uploads with `CreateAttachmentFromLocalFile`, metadata in
+  `X-OWA-UrlPostData` and the bytes as the request body (Browser, 2026-10-07). The contract, as used live, is
+  in §4.6.
 - Unusable: the B2 route `/messageservice/ows/…` answered 500. `/outlookgatewayb2/graphql` is Outlook's own
   GraphQL, not Microsoft Graph.
 
@@ -557,67 +541,45 @@ from the recipients' clients only. Other mail clients were not tested.
 
 ### 4.6 Message size limits
 
-Live, 2026-10-15: synthetic self-drafts, each carrying non-inline `FileAttachment:#Exchange` files of random
-bytes (`IsInline: false`), saved through the connector's own OWS client. Two of them were sent to the
-owner's address.
+Synthetic self-drafts of random bytes, saved through the connector's own OWS client with the `outlook.api`
+token. Live 2026-10-15, 2026-11-02 and 2026-11-03.
 
-- **Request size.** One OWS request body holds about 30,000,000 bytes. A `CreateItem` carrying a 21.3 MiB
-  file (about 29.8 MB of base64) saved. One carrying 21.5 MiB (about 30.1 MB) failed with **HTTP 500**,
-  `Microsoft.AspNetCore.Http.BadHttpRequestException` or no error code at all, and saved nothing (checked
-  through Graph). The 500 looks like an unknown outcome, but nothing was saved: the request was refused
-  before Exchange read it. Larger sizes (23, 30 MiB) failed the same way.
-- **Adding files to a draft.** `CreateAttachment` with `ParentItemId {Id, ChangeKey}` and `Attachments: [...]`
-  (the same `FileAttachment` shape, `Content` base64) adds a file to an existing draft and returns the new
-  `RootItemChangeKey` in `Attachments[0].AttachmentId`. The same request-size cap applies to each call.
-- **Stored size.** Adding 20 MiB to a 21.3 MiB draft failed with `ErrorMessageSizeExceeded` ("The message
-  exceeds the maximum supported size.", "Cannot save changes made to an item to store."). The draft kept its
-  earlier state. Adding 14 MiB (35.3 MiB in total) saved. Graph's stored size (`Integer 0x0E08`) matched the
-  file sizes.
-- **Send.** Sending the 35.3 MiB draft (`UpdateItem` with `SendAndSaveCopy`) was accepted at once. Two seconds
-  later a non-delivery report reached the Inbox: too large, "The limit is 35 MB. Your message is 36 MB." A
-  copy stayed in Sent Items. The send limit is therefore learned from a later NDR, not from the send call.
-  A 1 MiB attachment sent and arrived normally.
-- **MailTips.** Graph `POST /me/getMailTips` with `MailTipsOptions: "maxMessageSize"` for the user's own
-  address returned 37,748,736 bytes (36 MiB), using the Graph mail profile. That figure matches the
-  stored-size limit rather than the 35 MB that the NDR states.
+**Request size.** One OWS request body holds about 30,000,000 bytes; a larger one fails with HTTP 500
+`Microsoft.AspNetCore.Http.BadHttpRequestException` and saves nothing (checked through Graph), although a 500
+looks like an unknown outcome. With base64 in `CreateItem` or `CreateAttachment` that is about 21.3 MiB of file;
+as raw bytes in `CreateAttachmentFromLocalFile`, 28 MiB saved and 29 MiB failed. The figure equals ASP.NET Core
+Kestrel's default maximum request body size (an inference).
 
-**Raw and sliced uploads** (live 2026-11-02, synthetic self-drafts of random bytes, `outlook.api` token;
-slicing contract from Outlook Web source the same day). `CreateAttachmentFromLocalFile` (§4.3) carries the
-file as raw request bytes, not base64:
+**Sliced uploads** (`CreateAttachmentFromLocalFile`):
 
-- **One request.** 25 MiB and 28 MiB (29,360,128 bytes) saved. 29 MiB (30,408,704 bytes) failed with HTTP
-  500 and `Microsoft.AspNetCore.Http.BadHttpRequestException`, and saved nothing. The same cap of about
-  30,000,000 bytes per request body applies; without base64, one request holds about 28.6 MiB of file.
-  The figure equals ASP.NET Core Kestrel's default maximum request body size (an inference; Microsoft does
-  not document it for OWS).
-- **Slices** (Source): Outlook Web cuts a file into 14 MiB (`0xE00000`) slices and sends them one at a
-  time. Each request adds `SliceNumber` (from 0) and `TotalSlices`, and carries the `AttachmentId`
-  returned by the previous slice. Live: a `CancellationId` string is required; without it the first slice
-  answered HTTP 500 `ArgumentNullException`. With it, a 34 MiB file went up in three slices (14, 14 and
-  6 MiB) and read back through Graph as one attachment whose downloaded bytes had the same SHA-256.
-- **Send.** That 34 MiB single-file draft (35,651,584 bytes of file) was sent to the owner and delivered
-  without an NDR. With the 35.3 MiB bounce above, the send ceiling lies between 34 and 35.3 MiB. The
-  NDR's "35 MB" fits 35 MiB rather than 35,000,000 bytes (an inference).
-- **Stored sizes** (live 2026-11-03, read-only, `Integer 0x0E08`): that delivered draft was stored at
-  35,655,221 bytes (the sent copy 35,660,243), above 34 MiB because of its body and headers. The bounced
-  2026-10-15 message was stored at 37,023,315 bytes. A stored-size cutoff at 34 MiB would have refused a
-  draft Outlook delivered.
+```text
+POST /owa/service.svc/CreateAttachmentFromLocalFile      (service.svc?action=…&app=Mail also answers)
+X-OWA-UrlPostData: CreateAttachmentJsonRequest → CreateAttachmentRequest {
+  ParentItemId {Id, ChangeKey}, IncludeContentIdInResponse: true,
+  Attachments: [{FileAttachment, Content: "", ContentType, IsInline, Name, Size, AttachmentId?}],
+  SliceNumber, TotalSlices, CancellationId }
+body: the slice's raw bytes
+```
 
-**Upload replies and listed sizes** (live 2026-11-03, one synthetic self-draft, never sent, then moved to
-Deleted Items; files of random bytes):
+- Outlook Web cuts a file into 14 MiB (`0xE00000`) slices (Source). Each slice after the first carries the
+  previous answer's `AttachmentId`.
+- A `CancellationId` string is required; without it the first slice answered HTTP 500 `ArgumentNullException`.
+- Each answer's `Attachments[0].AttachmentId` is an object `{Id, RootItemId, RootItemChangeKey}`, with no
+  top-level change key; the last slice adds `ContentId` and `LastModifiedTime`. Passing the whole object back,
+  with that change key on `ParentItemId`, chained the slices (2026-11-03).
+- A 34 MiB file went up in three slices and read back with the same SHA-256.
+- **Listed size.** Graph lists an uploaded file above its byte count: 192 to 238 bytes more for files from
+  1,000 bytes to 15 MiB, while downloads match byte for byte (2026-11-03).
 
-- **Route.** `POST /owa/service.svc/CreateAttachmentFromLocalFile` (the path form Outlook Web uses) and
-  `service.svc?action=CreateAttachmentFromLocalFile&app=Mail` both answered 200 with `Success`.
-- **Reply.** Each slice returns `Attachments[0].AttachmentId` as an object `{Id, RootItemId,
-  RootItemChangeKey}`; there is no top-level `RootItemChangeKey`. The last slice also returns `ContentId` and
-  `LastModifiedTime`. Passing the whole object back on the next slice, with that change key on
-  `ParentItemId`, chained a 15 MiB file in two slices.
-- **Listed size.** Graph listed each uploaded file above its byte count: 1,000 bytes as 1,192, 14 MiB as
-  14,680,256 (+192), 15 MiB as 15,728,858 (+218). Each download matched the file byte for byte. A size
-  check must allow that overhead. The connector's own `create_draft` then uploaded a 15 MiB file, listed
-  at +238, confirmed it and moved the draft to Deleted Items.
-- **Selected-calendar paging** through the connector's `list_calendar_events` followed three pages of a
-  secondary calendar (§3.8).
+**Size limits.**
+
+- **Stored size.** Adding 20 MiB to a 21.3 MiB draft failed with `ErrorMessageSizeExceeded`, and the draft kept
+  its earlier state; 35.3 MiB in total saved. Graph `POST /me/getMailTips` with `maxMessageSize` returns
+  37,748,736 bytes (36 MiB) for the user's own address, matching this stored-size limit.
+- **Send.** A draft stored at 35,655,221 bytes (a 34 MiB file) was delivered. One stored at 37,023,315 bytes
+  (35.3 MiB of files) was accepted by `UpdateItem`/`SendAndSaveCopy` at once, and two seconds later a
+  non-delivery report said "The limit is 35 MB. Your message is 36 MB.", with a copy left in Sent Items. The send
+  limit is learned from that later report, not from the send call. "35 MB" fits 35 MiB (an inference).
 
 ## 5. Native signatures (Outlook Cloud Settings)
 
@@ -692,16 +654,12 @@ establish the behavior for this account.
 
 ### 5.4 Corporate signature add-in (not used)
 
-Browser and Source, 2026-10-07. The organization's officeatwork Mail Signature add-in supplies its own signature
-in the compose client: the HTML is in Outlook Web's first `CreateItem` request, and OWS does not generate it.
-The add-in renders a Nunjucks template package (`.ofawmsig` from a SharePoint library) from the sender's
-profile, language, audience and recipients, uploads its images with `CreateAttachmentFromLocalFile` (§4.3), and
-inserts the result with Office.js `body.setSignatureAsync`. Its selected template is stored in add-in roaming
-settings (`SaveExtensionSettings`), not as native signature HTML, and `UserConfigurations` writes in the same
-capture held unrelated add-in preferences. Because its output depends on recipients, it has no stored
-equivalent; drafts created by the connector are not changed by it (owner, 2026-10-07). A `GetItem`
-`NormalizedBody` shows images as 42-byte placeholder GIFs, so attachments, not that body, are the source of
-image bytes.
+Browser and Source, 2026-10-07. A corporate signature add-in inserts its own signature in the compose client
+with Office.js `body.setSignatureAsync`, rendered from a template, the sender's profile and the recipients; OWS
+does not generate it, and its choice is stored in add-in settings, not as native signature HTML. Because its
+output depends on recipients, it has no stored equivalent, and it does not change drafts the connector creates
+(owner, 2026-10-07). A `GetItem` `NormalizedBody` shows its images as 42-byte placeholder GIFs, so attachments
+are the source of image bytes.
 
 ## 6. Search v2 (Substrate)
 
@@ -741,9 +699,8 @@ The `teams.microsoft.com` host answered 405 for this path.
 - **`Total` is unreliable for recurring events:** one series returned ten occurrence rows over two pages while
   each response said `Total=1`.
 - **`HasAttachments` is unreliable:** rows said `false` for an event whose `GetItem` returned an attachment.
-- `Source.ItemId.Id` hydrates through OWS `GetItem` (§4.3), which returns the agenda, attendees, attachment
-  metadata and a Teams join URL, but no Teams chat id. It also hydrates through Graph (§3.8), and the join
-  URL's thread id matched the meeting chat id in 54 of 56 cases.
+- `Source.ItemId.Id` and `ImmutableId` hydrate through Graph (§3.8), and through OWS `GetItem` (§4.3). Neither
+  returns a Teams chat id; the join URL's thread id matched the meeting chat id in 54 of 56 cases.
 - A minimal `AnswerEntityRequests` for events answered 500.
 
 ### 6.3 Mail conversations (parked)

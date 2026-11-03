@@ -29,7 +29,7 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.graph import MAX_DOWNLOAD_BYTES, Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS, CalendarSearchPage
+from outlook_connector.remote.results import MAX_CONCURRENT_REQUESTS, CalendarSearchPage
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.calendar import Calendar
 from outlook_connector.service.conversations import Conversations
@@ -39,7 +39,6 @@ from outlook_connector.service.export.orchestrator import Exports
 from outlook_connector.service.files import Files
 from outlook_connector.service.localfiles import kept_dir
 from outlook_connector.service.mailbox import Mailbox
-from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeAttachment, FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 
@@ -87,9 +86,7 @@ def exports(fake: FakeGraph, tmp_path: Path) -> Exports:
     transport = Transport(
         StaticTokens(), client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep
     )
-    return Exports(
-        Conversations(Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp")))
-    )
+    return Exports(Conversations(Mailbox(GraphMailReader(Graph(transport)))))
 
 
 def zip_names(path: str) -> list[str]:

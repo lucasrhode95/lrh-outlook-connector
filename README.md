@@ -1,4 +1,4 @@
-![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/connector-overview.svg)
+![Local MCP clients and the Outlook connector, with a screenshot of the browser UI using synthetic mailbox data.](https://raw.githubusercontent.com/lucasrhode95/lrh-outlook-connector/main/docs/diagrams/connector-overview.svg)
 
 A local MCP server and browser UI for one user’s Exchange Online mailbox.
 
@@ -128,10 +128,7 @@ systems. Set `OUTLOOK_CONNECTOR_HOME` to override it.
 
 ## MCP tools
 
-Conversation reads include Deleted Items and Junk even with an empty or partial scope object;
-pass `scope={"deleted_items": false}` to exclude them.
-
-The MCP server exposes the tools below. Each one's inputs, results and caveats are in [architecture §8](docs/architecture.md#8-surfaces-tools-and-endpoints).
+The MCP server exposes the tools below. Their behavior and caveats are in [architecture §8](docs/architecture.md#8-surfaces-tools-and-endpoints).
 
 | MCP tool | Service module | Behavior |
 |---|---|---|
@@ -155,8 +152,6 @@ The MCP server exposes the tools below. Each one's inputs, results and caveats a
 | `set_read_state`, `set_flag`, `move_messages`, `delete_messages` | [`service/mutations.py`](src/outlook_connector/service/mutations.py) | Change read state, flags and message locations |
 
 ## Microsoft 365 connectors
-
-Event reads publish each attachment's `file_name`; pass that name to `download_attachment(event_id=...)`.
 
 This repository is part of the `lrh-*` **Microsoft 365** connectors: local tools that give MCP agents
 access to a common corporate environment, its mail and calendar, chats and meetings, and files. Each

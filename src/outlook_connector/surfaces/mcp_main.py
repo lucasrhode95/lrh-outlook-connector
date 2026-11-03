@@ -496,7 +496,7 @@ def build_server(context: AppContext) -> FastMCP:
 
         A .txt or .jsonl, or a .zip when there are several files or attachments. Copies of one message
         are exported once. Sent/meeting scope narrows only folder/date-window selections.
-        Conversation selections follow scope.deleted_items, which defaults to false for exports.
+        Conversation selections include Deleted Items and Junk unless scope.deleted_items is given.
         get_conversation itself includes Deleted Items and Junk by default. Explicit message ids are
         authoritative.
         Full bodies including quoted history and attachment files are included by default. Set

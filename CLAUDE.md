@@ -101,11 +101,11 @@ A local connector for one user's Exchange Online mailbox: an MCP server for agen
 - What Microsoft allows (evidence): `docs/api-research.md`
 - Work register and status: `docs/roadmap.md`
 
-Layers: `surfaces/` (MCP, web) → `service/` (every domain decision) → `remote/` (Graph, OWS; the only code that knows wire formats and ids) and `store/` (SQLite). The service depends on the ports in `remote/ports.py`, never on a concrete adapter.
+Layers: `surfaces/` (MCP, web) → `service/` (every domain decision) → `remote/` (Graph, OWS; the only code that knows wire formats and ids). Services take the adapters directly; add an interface only when a second adapter exists.
 
 ## Process and cache
 
-The MCP server lives for one agent session (stdio); the web UI stays on `127.0.0.1` until closed or idle; `auth` runs for one sign-in. Weeks can pass between runs, and several processes may use the same local store and token cache. The folder cache is fresh for 10 minutes; otherwise the call waits for refresh. Do not use stale-while-revalidate or background refresh that only helps a later process.
+The MCP server lives for one agent session (stdio); the web UI stays on `127.0.0.1` until closed or idle; `auth` runs for one sign-in. Weeks can pass between runs, and several processes may use the same token cache. Each process keeps the folder list in memory for 10 minutes; otherwise the call waits for refresh. Do not use stale-while-revalidate or background refresh that only helps a later process.
 
 ## Checks
 
@@ -132,3 +132,4 @@ research offline checks when changing probe behavior.
 - Never send mail or change the real mailbox without the user's explicit request. Live tests use self-sends and messages the user names.
 - Never log or commit mail content, addresses, tokens, or real identifiers. Tokens stay in the encrypted cache.
 - When behavior changes, update the affected README, architecture, requirements, and roadmap docs. Record live findings in the roadmap and research docs with their date.
+- State each fact once, in the document whose scope it is, and link to it from the others. Requirements hold what and the dated decision; architecture holds how; research holds the evidence; tool schemas and descriptions hold parameters. The MCP instructions and tool descriptions are the one deliberate repeat, because agents read nothing else.

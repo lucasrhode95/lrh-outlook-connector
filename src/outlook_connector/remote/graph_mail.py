@@ -1,4 +1,4 @@
-"""MailReader over Microsoft Graph (research §3)."""
+"""Mail reads over Microsoft Graph (research §3)."""
 
 from __future__ import annotations
 
@@ -19,13 +19,7 @@ from outlook_connector.remote.graph import (
     raise_for_failures,
     relative,
 )
-from outlook_connector.remote.ports import (
-    BodyFormat,
-    FetchedMessages,
-    FetchedSummaries,
-    FolderCount,
-    MailReader,
-)
+from outlook_connector.remote.results import BodyFormat, FetchedMessages, FetchedSummaries, FolderCount
 from outlook_connector.remote.transport import operation
 
 WELL_KNOWN = (
@@ -72,8 +66,8 @@ def _named(name: str) -> Callable[[F], F]:
     return wrap
 
 
-class GraphMailReader(MailReader):
-    """Implements ``MailReader`` over Microsoft Graph.
+class GraphMailReader:
+    """Mail reads over Microsoft Graph.
 
     Assumes (not re-checked here): ids, folder ids, page sizes and windows come from the service, which
     validated them or took them from this connector's own results. This class maps Graph's answers; it
@@ -121,6 +115,8 @@ class GraphMailReader(MailReader):
         page: str | None,
         skip: int = 0,
     ) -> tuple[list[MessageSummary], str | None]:
+        """One page of messages, newest first. ``page`` is an opaque continuation from a previous
+        call; without one, ``skip`` leaves out that many of the newest messages first."""
         if page:
             items, link = await self._graph.page(page)
         else:
@@ -183,6 +179,7 @@ class GraphMailReader(MailReader):
 
     @_named("listing a conversation")
     async def conversation(self, conversation_id: str) -> list[MessageSummary]:
+        """Every message of the conversation in every folder (unsorted)."""
         # $orderby cannot be combined with this filter (InefficientFilter, research §3.5): sort locally.
         params = {
             "$filter": f"conversationId eq {_odata_string(conversation_id)}",
@@ -196,6 +193,8 @@ class GraphMailReader(MailReader):
     async def conversation_folders(
         self, conversation_ids: list[str]
     ) -> dict[str, tuple[list[tuple[str | None, str | None]], bool]]:
+        """Per conversation: (folder id, Internet message id) of each message, and whether there are
+        more than listed."""
         requests = {
             str(index): relative(
                 "/me/messages",
@@ -264,6 +263,7 @@ class GraphMailReader(MailReader):
 
     @_named("reading draft state")
     async def draft_state(self, message_id: str) -> Message:
+        """Read draft status, version, folder and MAPI stored size, without bodies or attachments."""
         data = await self._graph.get(
             f"/me/messages/{message_id}",
             {
@@ -277,6 +277,7 @@ class GraphMailReader(MailReader):
     async def get_messages(
         self, message_ids: list[str], *, body_format: BodyFormat = "text"
     ) -> FetchedMessages:
+        """Batch fetch with bodies. Per-item failures are reported, not raised."""
         prefer = (PREFER_TEXT_BODY,) if body_format == "text" else ()
         requests = {
             mid: relative(f"/me/messages/{mid}", {"$select": mapping.MESSAGE_FIELDS}) for mid in message_ids
@@ -294,6 +295,7 @@ class GraphMailReader(MailReader):
 
     @_named("reading message state")
     async def get_summaries(self, message_ids: list[str]) -> FetchedSummaries:
+        """Batch lookup of message summaries (folder, read state, flag)."""
         requests = {
             mid: relative(f"/me/messages/{mid}", {"$select": mapping.SUMMARY_FIELDS}) for mid in message_ids
         }
@@ -318,6 +320,7 @@ class GraphMailReader(MailReader):
     async def list_attachments_many(
         self, message_ids: list[str]
     ) -> tuple[dict[str, list[Attachment]], dict[str, Failure]]:
+        """Attachments per message, and why listing failed for the others (per item, not raised)."""
         requests = {
             mid: relative(f"/me/messages/{mid}/attachments", {"$select": mapping.ATTACHMENT_FIELDS})
             for mid in message_ids
@@ -344,6 +347,7 @@ class GraphMailReader(MailReader):
 
     @_named("reading your profile")
     async def profile(self) -> UserProfile:
+        """The signed-in user's display name and address."""
         data = await self._graph.get("/me", {"$select": "displayName,mail,userPrincipalName"})
         return UserProfile(
             display_name=data.get("displayName"), email=data.get("mail") or data.get("userPrincipalName")

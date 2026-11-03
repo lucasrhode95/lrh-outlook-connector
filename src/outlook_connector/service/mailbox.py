@@ -1,6 +1,6 @@
 """Folders, message listing, message content and search (requirements §8–§10).
 
-Remote first: every call asks Outlook (Graph). The local store caches the folder list only; no
+Remote first: every call asks Outlook (Graph). Each process keeps the folder list in memory only; no
 message data is kept locally, so a message deleted on the server is gone here too.
 
 Scope filters list, search, conversation reads, sizes and folder/date-window exports. Conversation reads
@@ -53,11 +53,11 @@ from outlook_connector.domain.models import (
     UserProfile,
 )
 from outlook_connector.domain.time import optional_utc
-from outlook_connector.remote.ports import FolderCount, MailReader
+from outlook_connector.remote.graph_mail import GraphMailReader
+from outlook_connector.remote.results import FolderCount
 from outlook_connector.service import cursors, markers
 from outlook_connector.service.concurrency import gather_cancel_on_error
 from outlook_connector.service.scope import validate_scope
-from outlook_connector.store.db import Store
 
 FOLDER_TTL_SECONDS = 600
 DELETED_OR_JUNK_FOLDERS = ("deleteditems", "junkemail")
@@ -79,9 +79,8 @@ COMPACT_DROP = {
 
 
 class Mailbox:
-    def __init__(self, reader: MailReader, store: Store) -> None:
+    def __init__(self, reader: GraphMailReader) -> None:
         self.reader = reader
-        self.store = store
         self._folders: dict[str, Folder] | None = None
         self._categories: dict[str, ExclusionReason] = {}
         self._folders_at = 0.0  # time.monotonic() when _folders was last loaded
@@ -95,17 +94,16 @@ class Mailbox:
     async def folders(self, *, refresh: bool = False) -> list[Folder]:
         """The visible folders (hidden folders are out of reach and not listed).
 
-        The cached list is used only while it is fresh (younger than FOLDER_TTL_SECONDS, whichever
-        process saved it); an older or empty cache, or ``refresh=True``, waits for the server (a
-        full refresh takes under a second). Processes are short-lived and often start after days
-        idle, so a stale list is never used: it would miss folders created meanwhile.
+        The list is kept in memory and used only while it is fresh (younger than
+        FOLDER_TTL_SECONDS); an older or empty one, or ``refresh=True``, waits for the server (a full
+        refresh takes under a second). A stale list is never used: it would miss folders created
+        meanwhile.
         """
         async with self._folder_lock:
-            cached, age = self.store.folders()
-            if refresh or not cached or age is None or age > FOLDER_TTL_SECONDS:
-                cached = await self._fetch_folders()
-            else:
-                self._keep(cached)
+            if refresh or not self._folders or time.monotonic() - self._folders_at > FOLDER_TTL_SECONDS:
+                await self._fetch_folders()
+            assert self._folders is not None
+            cached = list(self._folders.values())
         categories = self._categories
         visible = [f for f in cached if categories.get(f.id) != "hidden"]
         return sorted(visible, key=lambda f: f.path.lower())
@@ -116,7 +114,6 @@ class Mailbox:
 
     async def _fetch_folders(self) -> list[Folder]:
         fresh = _with_paths(await self.reader.list_folders())
-        self.store.save_folders(fresh)
         self._keep(fresh)
         return fresh
 

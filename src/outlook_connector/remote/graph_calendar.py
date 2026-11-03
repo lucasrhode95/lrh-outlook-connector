@@ -26,7 +26,7 @@ from outlook_connector.remote.calendar_mapping import (
 )
 from outlook_connector.remote.graph import PREFER_TEXT_BODY, Graph
 from outlook_connector.remote.graph_mapping import attachment as map_attachment
-from outlook_connector.remote.ports import CalendarViewPage
+from outlook_connector.remote.results import CalendarViewPage
 from outlook_connector.remote.transport import operation
 from outlook_connector.remote.urls import GRAPH_ROOT
 
@@ -66,7 +66,7 @@ ITEM_TYPE_NAMES = {  # Graph's event type -> the CalendarItemType that Exchange 
 
 
 class GraphCalendarView:
-    """Implements ``CalendarViewReader`` over Graph's calendar view."""
+    """The user's calendars and their event views, read from Graph."""
 
     def __init__(self, graph: Graph) -> None:
         self._graph = graph
@@ -101,6 +101,7 @@ class GraphCalendarView:
         return CalendarViewPage(events=[_event(item) for item in items], next_link=link)
 
     async def list_calendars(self) -> list[CalendarInfo]:
+        """List calendar ids and names, including which one is the default."""
         with operation("listing calendars"):
             items, _ = await self._graph.collect(
                 "/me/calendars", {"$select": "id,name,isDefaultCalendar"}, max_items=None

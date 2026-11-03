@@ -15,13 +15,12 @@ from outlook_connector.remote.graph import Graph
 from outlook_connector.remote.graph_mail import GraphMailReader
 from outlook_connector.remote.ows import Ows
 from outlook_connector.remote.ows_mail import OwsMailWriter
-from outlook_connector.remote.ports import MAX_CONCURRENT_REQUESTS
+from outlook_connector.remote.results import MAX_CONCURRENT_REQUESTS
 from outlook_connector.remote.transport import Transport
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.mutations import Mutations
 from outlook_connector.service.signatures import Signatures
 from outlook_connector.service.writes import Writes
-from outlook_connector.store.db import Store
 from tests.fakes.graph_fake import FakeGraph, FakeMessage, StaticTokens, sample_mailbox
 
 ME = Account(tenant_id="tenant-x", object_id="user-x", username="me@example.com")
@@ -39,7 +38,7 @@ def fake() -> FakeGraph:
 def make(fake: FakeGraph, tmp_path: Path, account: Account = ME) -> Mutations:
     tokens = StaticTokens()
     transport = Transport(tokens, client=httpx.AsyncClient(transport=fake.transport()), sleep=_no_sleep)
-    mailbox = Mailbox(GraphMailReader(Graph(transport)), Store(tmp_path / "m.sqlite3", "fp"))
+    mailbox = Mailbox(GraphMailReader(Graph(transport)))
     writer = OwsMailWriter(Ows(transport, tokens))
     signatures = Signatures(CloudSettings(transport, tokens), account)
     return Mutations(mailbox, writer, Writes(mailbox, writer, account, signatures).check_account)

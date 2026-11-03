@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from outlook_connector.domain.errors import AccountMismatch, Upstream
-from outlook_connector.remote.ports import SignatureContents, SignatureSettings
+from outlook_connector.remote.results import SignatureContents, SignatureSettings
 from outlook_connector.remote.transport import TokenSource, Transport, operation
 
 BASE_URL = "https://outlook.cloud.microsoft/ows/v1/OutlookCloudSettings/settings/"

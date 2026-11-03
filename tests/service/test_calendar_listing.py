@@ -13,7 +13,7 @@ from outlook_connector.domain.errors import (
     Upstream,
 )
 from outlook_connector.domain.models import CalendarEvent, CalendarInfo, Recipient
-from outlook_connector.remote.ports import CalendarViewPage
+from outlook_connector.remote.results import CalendarViewPage
 from outlook_connector.service import cursors
 from outlook_connector.service.calendar_listing import (
     CURSOR_KIND,

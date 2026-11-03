@@ -31,7 +31,6 @@ from outlook_connector.service.mutations import Mutations
 from outlook_connector.service.rules import Rules
 from outlook_connector.service.signatures import Signatures
 from outlook_connector.service.writes import Writes
-from outlook_connector.store.db import Store, store_path
 
 
 @dataclass
@@ -92,8 +91,7 @@ class AppContext:
         # shared across account switches, but an old service can never inherit the new token source.
         self._transport = Transport(account_tokens, client=self._http_client)
         reader = GraphMailReader(Graph(self._transport))
-        store = Store(store_path(account.fingerprint), account.fingerprint)
-        mailbox = Mailbox(reader, store)
+        mailbox = Mailbox(reader)
         conversations = Conversations(mailbox)
         ows = Ows(self._transport, account_tokens)
         calendar_items = GraphCalendarItems(Graph(self._transport, profile=config.CALENDAR_PROFILE))
