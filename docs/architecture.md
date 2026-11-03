@@ -84,10 +84,10 @@ The only id converter: a Graph immutable id becomes an OWS ItemId by swapping th
 - A conversation listing cannot use `$orderby` with the `conversationId` filter, so the service sorts; Graph pages it, and the connector reads every page (research §3.5).
 - `count_messages` returns per-folder counts in one `$batch` (`$count`, `ConsistencyLevel: eventual`); a failed folder is left out instead of hiding the others.
 - `$search` returns regular ids; one `translateExchangeIds` call per page converts them to immutable ids (if it fails, the page keeps its search ids).
+- Message text reads use Graph's `body` or `uniqueBody` with `Prefer: outlook.body-content-type="text"`; the conversion and its placeholders pass through unchanged. Raw HTML remains available for explicit HTML reads and reply-history verification.
 - Attachments are listed even when `hasAttachments=false`, so inline-only images appear. Downloads stream and retry from scratch like other GETs; the local 150 MiB guard stops larger ones.
 - `GraphCalendarView` reads `/me/calendars` and calendar windows; selected calendars use `/me/calendars/{id}/calendarView`, and a cursor is accepted when its next link names the same calendar in either path form Graph uses (`/calendars/{id}` or `/calendars('{id}')`). `GraphCalendarItems` hydrates `/me/events/{id}` and always reads its `/attachments` collection, with event downloads on `/me/events/{id}/attachments/{attachment-id}/$value` under `outlook.calendar` (research §3.8).
 - [`graph_mapping.py`](../src/outlook_connector/remote/graph_mapping.py) is the only file that knows Graph field names: unknown fields are ignored, missing optional fields become None.
-- [`html_body.py`](../src/outlook_connector/remote/html_body.py) maps HTML bodies to ordered text and image parts ([`domain/body.py`](../src/outlook_connector/domain/body.py)); attachment rendering is described in §8.6.
 
 ### 5.5 Outlook Web: [`ows.py`](../src/outlook_connector/remote/ows.py), [`ows_mail.py`](../src/outlook_connector/remote/ows_mail.py), [`ows_mapping.py`](../src/outlook_connector/remote/ows_mapping.py)
 
@@ -125,7 +125,7 @@ One SQLite database per account fingerprint: the account binding and the folder 
 - **Scope categories** (the contract is §8.1) are derived once per folder map from each folder and its parents, in precedence hidden (also Sync Issues) > deleted_or_junk > outgoing. A folder deleted in Outlook sits in Deleted Items, so it counts as deleted. Meeting mail is filtered per message, so a meeting-only conversation disappears and one with real replies shows through.
 - **Out of reach:** hidden folders and items outside the mail folders (e.g. Teams meeting records) drop as `excluded.hidden`. An unknown folder id refreshes the folder list once; ids still unknown are remembered as outside. Sync Issues is recognized by its well-known folder alias, since Graph does not always mark it hidden. Of several copies, a received copy is kept.
 - **Mailbox-wide listing** picks a method on every first page. When the folders the scope leaves out hold at least two thirds of the mailbox (`PER_FOLDER_SHARE`, from cached counts), it lists **folder by folder**: one `$count` batch picks the in-scope folders with mail in the window, first reads are sized by each folder's share, every eligible folder gets a current head read before the merge, and the newest `limit` win. The same batch counts the window's Deleted Items and Junk, reported on the first page only and only when every excluded folder was counted. Otherwise it lists `/me/messages` and filters after paging, skipping (bounded) pages that filter to nothing. Both give the same messages in the same order; the cursor keeps the method.
-- `get_message` with `max_chars=None` returns the whole body without continuation (the web reader). Messages with inline files also read their source HTML for body order, in batches.
+- `get_message` with `max_chars=None` returns the whole body without continuation (the web reader). Attachment listings are fetched in batches and inline-image markers follow the Exchange text.
 - Search asks KQL for a day more on each side (KQL takes dates only), then filters to the exact `since`/`until`.
 
 **[`conversations.py`](../src/outlook_connector/service/conversations.py)** fetches, sorts oldest first, and hydrates bodies in `$batch`; a body that fails becomes that message's `export_error`.
@@ -295,7 +295,7 @@ Server-side search of mail (Graph `$search`). `query` takes words or KQL terms, 
 
 #### `get_message`
 
-Returns one message's body and its attachment metadata. `body` is `full` (default, including quoted reply history), `unique` (without quoted history) or `html`. The body comes in pieces: `offset` is a character offset, and `max_chars` (1–200,000, default 20,000) bounds each piece. `total_chars` gives the full length, and `next_offset` says where to continue.
+Returns one message's body and its attachment metadata. `body` is `full` (default, including quoted reply history), `unique` (without quoted history) or `html`. Full and unique use Exchange's own text conversion; its `[cid:…]` and `[alt text]` placeholders stay as written, and inline images follow the body as `[Image: name]`. `body="html"` returns Graph's HTML unchanged. The body comes in pieces: `offset` is a character offset, and `max_chars` (1–200,000, default 20,000) bounds each piece. `total_chars` gives the full length, and `next_offset` says where to continue.
 
 - An id that cannot be read returns `NotFound`, which does not guess the cause: the message may be deleted or moved out of reach, or the id may be wrong.
 - Attachments are listed even when Graph reports `hasAttachments=false`, so inline-only images still appear.
@@ -313,13 +313,13 @@ Returns a whole conversation across all folders, oldest first (sorted locally), 
 
 ### 8.6 Attachments and saved files
 
-Inline images read `[Image: name]` within the body. Files, forwarded messages and cloud links follow it as `[File: name]`, `[Message: name.eml]` and `[Link: name]`. Names come from attachment metadata, made safe and unique within the message (`report.pdf`, `report (2).pdf`); exports use the final stored name.
+Inline images read `[Image: name]` after the body, like other attachments. Files, forwarded messages and cloud links follow it as `[File: name]`, `[Message: name.eml]` and `[Link: name]`. Names come from attachment metadata, made safe and unique within the message (`report.pdf`, `report (2).pdf`); exports use the final stored name.
 
-Exchange's HTML-to-text conversion, requested with `Prefer: outlook.body-content-type="text"`, is the reading-text baseline; its output patterns and losses are recorded in [research §3.6](api-research.md#html-to-text-body). Inline markers take identity from attachment metadata and placement from source HTML references; Exchange's textual placeholders alone are insufficient because encoding, alt text and ordinary prose can change or duplicate them. The choice between retaining Exchange's text with source-validated placement and rendering structured body parts locally remains open; the branch's HTML renderer is not a settled design.
+Full and unique message text uses Exchange's HTML-to-text conversion, requested with `Prefer: outlook.body-content-type="text"`; its output patterns and losses are recorded in [research §3.6](api-research.md#html-to-text-body). Exchange's placeholders and text are returned unchanged. Inline-image markers are appended after the body from attachment metadata; text placeholders, CIDs and source HTML are not used to infer image position or identity. Every listed inline file is included in exports when attachments are enabled. The local HTML-to-text renderer and ordered body parts are removed (built 2026-11-02). The reply-history check still reads Graph HTML to verify the quoted original.
 
 #### `list_attachments`
 
-Lists a message's attachments: `id`, `name`, `file_name` (the name the text and `download_attachment` use), `content_type`, `size`, `is_inline` and `kind`, which is `file`, `item` (a forwarded message), `reference` (a cloud link) or `unknown`. Inline images also carry a `content_id`, which matches the `cid:` reference in the body.
+Lists a message's attachments: `id`, `name`, `file_name` (the name the text and `download_attachment` use), `content_type`, `size`, `is_inline` and `kind`, which is `file`, `item` (a forwarded message), `reference` (a cloud link) or `unknown`. Inline images also carry a `content_id`; it may correspond to a `cid:` placeholder in the body, but that placeholder is preserved as Exchange returned it.
 
 - Inline-only attachments are listed even when Graph reports no attachments.
 
@@ -352,7 +352,7 @@ The output is one `.txt` or `.jsonl` file, or a `.zip` when there are several fi
 - Explicit message ids are authoritative: they are exported wherever Graph can read them, hidden folders included. If any cannot be read, the export fails before writing a file: `NotFound` if they are gone, `Throttled` if they stay throttled after retries, `Upstream` otherwise. The error gives the count and the first ids.
 - A copy of one message is exported once, and `also_in` names the other folders.
 - Body and attachment gaps do not stop the export. They are marked `[EXPORT ERROR]` in TXT and carried as `export_error` in JSONL.
-- Regular files and forwarded messages are included; inline files follow the selection rules in §8.6.
+- Every listed file attachment is included when `include_attachments=true`, including all inline files; forwarded messages are also included. Cloud links are listed but never downloaded.
 - Each message's text names the files selected by §8.6, whether or not file bytes are included. A file the export wrote is named by its final name in the folder, unique within the output file. JSONL without file bytes still carries every known attachment's metadata, including inline files absent from the selected body.
 - Identical attachment files, such as a signature logo on every message, are stored once per output file.
 - Attachments over 150 MiB are marked and must be downloaded from Outlook.

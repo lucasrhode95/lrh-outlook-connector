@@ -1,17 +1,14 @@
-"""Attachment selection policy and safe file names (requirements §11, research §3.6).
+"""Attachment listing policy and safe file names (requirements §11, research §3.6).
 
-- File and item attachments (forwarded mail) are exported. Inline files follow typed source image
-  references; unknown source structure or content ids retain the file with no assumed body position.
+- File and item attachments (forwarded mail), including every listed inline file, are exportable.
 - Reference (cloud) attachments are listed, never downloaded.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
 from pathlib import PurePath
 
-from outlook_connector.domain.body import BodyPart, ImagePart
 from outlook_connector.domain.models import Attachment
 
 _UNSAFE = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -24,21 +21,6 @@ _RESERVED = {
     *(f"{port}{digit}" for port in ("com", "lpt") for digit in "0123456789¹²³"),
 }
 MAX_NAME = 120
-
-
-def wanted(attachment: Attachment, *, parts: Sequence[BodyPart] | None) -> bool:
-    """Whether source metadata and typed body references include this file.
-
-    Assumes (not re-checked here): ``parts`` comes from the selected source body of the same message.
-    Unavailable structure or a missing content id cannot establish absence, so the file is kept.
-    """
-    if attachment.kind == "item":
-        return True
-    if attachment.kind != "file":
-        return False
-    if not attachment.is_inline or not attachment.content_id or parts is None:
-        return True
-    return any(isinstance(part, ImagePart) and part.content_id == attachment.content_id for part in parts)
 
 
 def listed(attachment: Attachment) -> bool:

@@ -16,7 +16,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from outlook_connector.domain.body import BodyPart
 from outlook_connector.domain.errors import ConnectorError, InvalidRequest, NotFound, Throttled, Upstream
 from outlook_connector.domain.models import (
     EXCLUSION_TEXT,
@@ -97,14 +96,10 @@ class Exports:
             )
         bodies, missing = await self.conversations.bodies(summaries, known=selection.known)
         found, attachment_failures = await self._attachments(summaries, skip=set(missing))
-        await self.mailbox.inline_body_parts(bodies, found)
         fetched = Fetched(bodies, missing, found, attachment_failures)
         workdir = Path(tempfile.mkdtemp(prefix="outlook-export-"))
         try:
-            parts = {mid: page.parts(request.body) for mid, page in bodies.items()}
-            downloads = (
-                await self._download(summaries, found, parts, workdir) if request.include_attachments else {}
-            )
+            downloads = await self._download(summaries, found, workdir) if request.include_attachments else {}
             failed_files = [p for items in downloads.values() for _, p in items if isinstance(p, ExportError)]
             summary = error_summary(list(missing.values()), failed_files, list(attachment_failures.values()))
             files = self._render(summaries, fetched, downloads, request, selection, summary)
@@ -253,19 +248,18 @@ class Exports:
         self,
         summaries: list[MessageSummary],
         found: dict[str, list[Attachment]],
-        parts: dict[str, list[BodyPart] | None],
         workdir: Path,
     ) -> dict[str, Downloaded]:
         """Download the attachments the policy wants, each to its own file in ``workdir``; a failed download
         becomes an ExportError.
 
         Assumes (not re-checked here): ``summaries`` is the final selection and ``found`` the attachment
-        listing from ``_attachments`` for it. ``parts`` carries the same messages' selected source bodies.
+        listing from ``_attachments`` for it.
         """
         jobs: list[tuple[str, Attachment, Path]] = []
         for index, summary in enumerate(summaries):
             for position, attachment in enumerate(found.get(summary.id, [])):
-                if policy.wanted(attachment, parts=parts.get(summary.id)):
+                if attachment.kind in ("file", "item"):
                     jobs.append((summary.id, attachment, workdir / f"{index}-{position}"))
 
         async def fetch(message_id: str, attachment: Attachment, target: Path) -> Path | ExportError:
@@ -376,7 +370,6 @@ class Exports:
             else markers.with_markers(
                 fetched.bodies[message.id].body(request.body),
                 listed,
-                parts=fetched.bodies[message.id].parts(request.body),
                 names=names,
             ).strip("\r\n")
             or "(No text content.)"

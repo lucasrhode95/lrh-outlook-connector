@@ -168,6 +168,7 @@ async def test_get_message_lists_inline_attachments_when_graph_flag_is_false(fak
             "Inline image",
             "f-inbox",
             "2026-09-30T13:00:00Z",
+            text="Exchange conversion [cid:image001] [chart]",
             attachments=[
                 FakeAttachment(
                     "inline-image",
@@ -182,9 +183,10 @@ async def test_get_message_lists_inline_attachments_when_graph_flag_is_false(fak
         )
     )
 
-    message = await reader_for(fake).get_message("m-inline-only", body_format="html")
+    message = await reader_for(fake).get_message("m-inline-only")
 
     assert message.has_attachments is False
+    assert message.body_text == "Exchange conversion [cid:image001] [chart]"
     assert [
         (attachment.name, attachment.is_inline, attachment.content_id) for attachment in message.attachments
     ] == [("image001.png", True, "image001")]
