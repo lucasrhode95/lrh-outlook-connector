@@ -20,7 +20,7 @@ A local MCP server and browser UI for one user’s Exchange Online mailbox.
      `Install and configure https://github.com/lucasrhode95/lrh-outlook-connector following its README Setup section.`
      The agent handles preparation and configuration below, then guides you through sign-in.
    - **Manually:** install [Git](https://git-scm.com/downloads) and
-     [uv](https://docs.astral.sh/uv/getting-started/installation/). uv supplies Python 3.12+ if needed.
+     [uv](https://docs.astral.sh/uv/getting-started/installation/). uv supplies Python 3.14+ if needed.
      Find uv's full path with `(Get-Command uv -CommandType Application).Source` on Windows or
      `command -v uv` on macOS/Linux. If PATH cannot find it, check the installer's destination.
      Test that executable with `--version`, then clone and install:

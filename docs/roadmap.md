@@ -14,7 +14,7 @@ Work is split by what it needs:
 Each item opens with a fictional example of the problem today, then says what the item changes, decides
 or checks.
 
-Snapshot **2026-11-02**.
+Snapshot **2026-11-10**.
 
 ## Implementation
 
@@ -24,7 +24,17 @@ None open.
 
 ### Improvements
 
-None open.
+#### Cut what Python 3.14 makes unnecessary
+
+The project requires Python 3.14 since 2026-11-10. Review the code and remove what that leaves
+unneeded:
+
+- **Future imports:** `from __future__ import annotations` is in 89 files; 3.14 evaluates
+  annotations lazily.
+- **Old workarounds:** fallbacks or guards for standard-library behavior older Pythons had, for
+  example `HTMLParser` raising on malformed markup.
+- **Ruff:** set `target-version = "py314"` and apply its formatting (for example `except A, B:` without parentheses).
+- **Reference:** the Teams connector did this in [lrh-teams-connector#51](https://github.com/lucasrhode95/lrh-teams-connector/pull/51).
 
 ### Enhancements
 
