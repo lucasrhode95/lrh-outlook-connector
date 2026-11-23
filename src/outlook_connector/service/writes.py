@@ -24,6 +24,7 @@ from outlook_connector.domain.models import (
     ADDRESS_PATTERN,
     MAX_BODY_CHARS,
     MAX_RECIPIENTS,
+    MAX_SEND_BYTES,
     Attachment,
     DraftMessage,
     DraftResult,
@@ -36,14 +37,12 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.ows_mail import OwsMailWriter
 from outlook_connector.service.conversations import base_subject
+from outlook_connector.service.inline_images import body_images
 from outlook_connector.service.mailbox import Mailbox
 from outlook_connector.service.passive_html import passive_start_tags
 from outlook_connector.service.signatures import Signatures
 
 ADDRESS = re.compile(ADDRESS_PATTERN)
-# Stored size (Integer 0x0E08). A draft stored at 35,655,221 bytes was delivered; one at 37,023,315 bounced
-# with "The limit is 35 MB" (research §4.6, live 2026-10-15 and 2026-11-03).
-MAX_SEND_BYTES = 35 * 1024 * 1024
 # Graph lists a file attachment's size above its byte count: 192 to 238 bytes more for uploaded files
 # (research §4.6, live 2026-11-03). Read-back accepts that overhead, never less than the file.
 ATTACHMENT_SIZE_OVERHEAD = 64 * 1024
@@ -136,6 +135,7 @@ class Writes:
     async def _resolve(self, message: OutgoingMessage) -> tuple[DraftMessage, Message | None]:
         """Assumes (not re-checked here): called only by create_draft; validates its outgoing input."""
         page = _body(message.text_body, message.html_body)
+        page, inline_images = body_images(page)
         to, cc, bcc = (
             _addresses(message.to, "to"),
             _addresses(message.cc, "cc"),
@@ -154,7 +154,6 @@ class Writes:
         elif message.reply_all:
             raise InvalidRequest("reply_all needs reply_to_message_id.")
         _validate_envelope(to, cc, bcc, subject)
-        inline_images: list[InlineImage] = []
         local_attachments = _local_attachments(message.attachments)
         if message.include_signature:
             selected = await self.signatures.resolve_for_draft(
@@ -162,9 +161,10 @@ class Writes:
             )
             if selected:
                 page += selected.html
-                inline_images = selected.images
+                inline_images += selected.images
                 if len(page) > MAX_BODY_CHARS:
                     raise InvalidRequest(f"Body must be at most {MAX_BODY_CHARS} characters.")
+        _validate_send_total(inline_images, local_attachments)
         draft = DraftMessage(
             to=to,
             cc=cc,
@@ -212,21 +212,21 @@ class Writes:
                             for attachment in attachments
                             if attachment.is_inline and attachment.content_id
                         }
-                        with tempfile.TemporaryDirectory(prefix="outlook-signature-check-") as folder:
+                        with tempfile.TemporaryDirectory(prefix="outlook-inline-image-check-") as folder:
                             for index, image in enumerate(expected):
                                 attachment = by_cid.get(image.content_id)
                                 if attachment is None:
-                                    findings.append(
-                                        "The server draft is missing an expected signature image."
-                                    )
+                                    findings.append("The server draft is missing an expected inline image.")
                                     continue
+                                if f"cid:{image.content_id}" not in (page.body_html or ""):
+                                    findings.append("The server draft body lost an inline image reference.")
                                 target = Path(folder) / str(index)
                                 await self.mailbox.reader.download_attachment(draft_id, attachment.id, target)
                                 if (
                                     hashlib.sha256(target.read_bytes()).digest()
                                     != hashlib.sha256(image.content).digest()
                                 ):
-                                    findings.append("A signature image changed in the server draft.")
+                                    findings.append("An inline image changed in the server draft.")
                     if expected_local:
                         unmatched = [attachment for attachment in attachments if not attachment.is_inline]
                         for local in expected_local:
@@ -359,6 +359,18 @@ def _local_attachments(paths: list[str]) -> list[LocalAttachment]:
             f"The attachments total {total:,} bytes; a draft over 35 MiB cannot be sent, so none was created."
         )
     return out
+
+
+def _validate_send_total(inline_images: list[InlineImage], local_attachments: list[LocalAttachment]) -> None:
+    """Refuse a draft whose files and inline images together exceed the send limit, before it is saved."""
+    total = sum(len(image.content) for image in inline_images) + sum(
+        local.size for local in local_attachments
+    )
+    if total > MAX_SEND_BYTES:
+        raise InvalidRequest(
+            f"The attachments and inline images total {total:,} bytes; a draft over 35 MiB cannot "
+            "be sent, so none was created."
+        )
 
 
 def _reply_recipients(original: Message, *, me: str, reply_all: bool) -> tuple[list[str], list[str]]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,20 @@ def message(**changes: Any) -> OutgoingMessage:
 
 def reply(**changes: Any) -> OutgoingMessage:
     return OutgoingMessage.model_validate({"reply_to_message_id": "m3", "text_body": "Thanks"} | changes)
+
+
+# A synthetic PNG: the connector detects an image file from these bytes, not from its name.
+IMAGE = b"\x89PNG\r\n\x1a\nsynthetic screenshot bytes"
+
+
+def _image_file(folder: Path, name: str = "step1.png") -> Path:
+    path = folder / name
+    path.write_bytes(IMAGE)
+    return path
+
+
+def _data_uri(data: bytes = IMAGE) -> str:
+    return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
 
 
 @pytest.mark.parametrize(
@@ -314,6 +329,144 @@ async def test_active_html_rejected(writes: Writes, fake: FakeGraph, page: str) 
 async def test_unfinished_html_is_refused_before_anything_is_sent(writes: Writes, fake: FakeGraph) -> None:
     with pytest.raises(InvalidRequest, match="ends inside"):
         await writes.create_draft(message(text_body=None, html_body="<p>hi</p><img src=x onerror=alert(1)//"))
+    assert not fake.ows_calls
+
+
+async def test_body_data_uri_image_becomes_one_inline_attachment(writes: Writes, fake: FakeGraph) -> None:
+    draft = await writes.create_draft(
+        message(text_body=None, html_body=f'<p>Step 1</p><img src="{_data_uri()}">')
+    )
+
+    assert draft.verified and not draft.findings
+    (attachment,) = fake.messages[draft.id].attachments
+    assert attachment.inline and attachment.data == IMAGE
+    assert attachment.content_type == "image/png" and attachment.content_id.startswith("body-")
+    page = draft.html_body or ""
+    assert "data:image" not in page and f'src="cid:{attachment.content_id}"' in page
+
+
+@pytest.mark.parametrize("as_url", [False, True])
+async def test_body_local_file_image_becomes_one_inline_attachment(
+    writes: Writes, fake: FakeGraph, tmp_path: Path, as_url: bool
+) -> None:
+    path = _image_file(tmp_path)
+    source = "file:///" + str(path).replace("\\", "/") if as_url else str(path)
+
+    draft = await writes.create_draft(
+        message(text_body=None, html_body=f'<p>Click Filters, then Asset Type</p><img src="{source}">')
+    )
+
+    assert draft.verified and not draft.findings
+    (attachment,) = fake.messages[draft.id].attachments
+    assert attachment.inline and attachment.data == IMAGE and attachment.name == "step1.png"
+    assert attachment.content_type == "image/png" and attachment.content_id.startswith("body-")
+    page = draft.html_body or ""
+    assert source not in page and f'src="cid:{attachment.content_id}"' in page
+
+
+async def test_body_and_signature_images_are_both_inline_with_distinct_content_ids(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    signature_image = b"signature logo bytes"
+    fake.signature_contents["Logo"] = {
+        "htm": f'<p>Team</p><img src="{_data_uri(signature_image)}">',
+        "txt": "Team",
+    }
+    fake.signature_new_default = "Logo"
+    path = _image_file(tmp_path)
+
+    draft = await writes.create_draft(message(text_body=None, html_body=f'<p>Step 1</p><img src="{path}">'))
+
+    assert draft.verified and not draft.findings
+    assert [(a.inline, a.data) for a in fake.messages[draft.id].attachments] == [
+        (True, IMAGE),
+        (True, signature_image),
+    ]
+    body_image, logo = fake.messages[draft.id].attachments
+    assert body_image.content_id != logo.content_id
+    page = draft.html_body or ""
+    assert page.index(f"cid:{body_image.content_id}") < page.index('id="Signature"')
+    assert page.index(f"cid:{logo.content_id}") > page.index('id="Signature"')
+
+
+async def test_reply_body_image_is_inline_and_the_quoted_originals_images_are_unchanged(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    path = _image_file(tmp_path)
+    quoted = {a.content_id: a.data for a in fake.messages["m3"].attachments if a.inline}
+
+    draft = await writes.create_draft(
+        OutgoingMessage(reply_to_message_id="m3", html_body=f'<p>See the shot</p><img src="{path}">')
+    )
+
+    assert draft.verified and not draft.findings and draft.history_intact is True
+    inline = {a.content_id: a.data for a in fake.messages[draft.id].attachments if a.inline}
+    assert any(data == IMAGE for data in inline.values())
+    for content_id, data in quoted.items():
+        assert inline.get(content_id) == data
+    page = draft.html_body or ""
+    assert page.index("See the shot") < page.index("Follow-up with numbers")
+
+
+async def test_body_image_errors_name_the_file_and_save_no_draft(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    missing = tmp_path / "missing.png"
+    with pytest.raises(InvalidRequest, match="Cannot read body image") as error:
+        await writes.create_draft(message(text_body=None, html_body=f'<p>x</p><img src="{missing}">'))
+    assert str(missing) in str(error.value)
+
+    notes = tmp_path / "notes.txt"
+    notes.write_bytes(b"plain words, not an image")
+    with pytest.raises(InvalidRequest, match="not a recognized image") as error:
+        await writes.create_draft(message(text_body=None, html_body=f'<p>x</p><img src="{notes}">'))
+    assert str(notes) in str(error.value)
+    assert not fake.ows_calls
+
+
+async def test_files_and_inline_images_over_the_send_limit_together_are_refused_before_saving(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    big = tmp_path / "big.bin"
+    with big.open("wb") as handle:
+        handle.truncate(30 * 1024 * 1024)  # under the limit alone
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(IMAGE[:8] + b"\x00" * (6 * 1024 * 1024))
+
+    with pytest.raises(InvalidRequest, match="35 MiB"):
+        await writes.create_draft(
+            message(
+                attachments=[str(big)],
+                text_body=None,
+                html_body=f'<p>x</p><img src="{shot}">',
+            )
+        )
+    assert not fake.ows_calls
+
+
+async def test_listed_attachments_stay_non_inline_beside_body_images(
+    writes: Writes, fake: FakeGraph, tmp_path: Path
+) -> None:
+    image = _image_file(tmp_path)
+    report = tmp_path / "report.txt"
+    report.write_bytes(b"synthetic report")
+
+    draft = await writes.create_draft(
+        message(attachments=[str(report)], text_body=None, html_body=f'<p>x</p><img src="{image}">')
+    )
+
+    assert draft.verified and not draft.findings
+    saved = fake.messages[draft.id].attachments
+    assert {a.name: a.inline for a in saved} == {"report.txt": False, "step1.png": True}
+
+
+async def test_body_data_uri_sources_must_be_quoted_without_whitespace(
+    writes: Writes, fake: FakeGraph
+) -> None:
+    with pytest.raises(InvalidRequest, match="quoted src"):
+        await writes.create_draft(
+            message(text_body=None, html_body='<p>x</p><img src="data:image/png;base64,YWJj ">')
+        )
     assert not fake.ows_calls
 
 

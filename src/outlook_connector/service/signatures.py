@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import re
-import uuid
 from dataclasses import dataclass
-from html import escape, unescape
+from html import escape
 from html.parser import HTMLParser
 from typing import Literal
-from urllib.parse import unquote_to_bytes
 
 from m365_auth import Account
 
@@ -25,23 +21,8 @@ from outlook_connector.domain.models import (
 )
 from outlook_connector.remote.cloud_settings import CloudSettings
 from outlook_connector.remote.results import SignatureContents, SignatureSettings
-from outlook_connector.service.passive_html import StartTag, passive_start_tags
-
-_DATA_IMAGE = re.compile(
-    r"""(?P<prefix>\bsrc\s*=\s*)(?P<quote>["'])(?P<uri>data:image/[^"'<> \t\r\n]+)(?P=quote)""",
-    re.IGNORECASE,
-)
-_HTML_ATTRIBUTE = re.compile(r"""(?P<name>[^\s/=>]+)\s*=\s*(?P<value>"[^"]*"|'[^']*'|[^\s>]+)""")
-_IMAGE_EXTENSIONS = {
-    "image/jpeg": "jpg",
-    "image/png": "png",
-    "image/gif": "gif",
-    "image/bmp": "bmp",
-    "image/webp": "webp",
-    "image/tiff": "tif",
-    "image/svg+xml": "svg",
-    "image/x-icon": "ico",
-}
+from outlook_connector.service.inline_images import check_image_sources, data_uri_images
+from outlook_connector.service.passive_html import passive_start_tags
 
 
 @dataclass(frozen=True)
@@ -151,7 +132,7 @@ class Signatures:
         await self._unchanged(settings, {selected: contents})
         html, _text = _readable_contents(contents)
         validated = _validate_html(html)
-        block, images = _inline_images(validated)
+        block, images = data_uri_images(validated, "signature")
         signature = f'<div id="Signature" data-signature-name="{escape(selected, quote=True)}">{block}</div>'
         return ResolvedSignature(signature, images)
 
@@ -214,7 +195,7 @@ def _validate_html(value: str) -> str:
         raise InvalidRequest("A native signature cannot be empty.")
     if len(value) > MAX_BODY_CHARS:
         raise InvalidRequest(f"A native signature must be at most {MAX_BODY_CHARS} characters.")
-    _check_image_sources(passive_start_tags(value))
+    check_image_sources(passive_start_tags(value), "signature")
     return value
 
 
@@ -234,60 +215,6 @@ def _keep_spaces(line: str) -> str:
     line = line.replace("\t", "&nbsp;" * 4)
     line = re.sub(r" {2,}", lambda run: "&nbsp;" * (len(run.group()) - 1) + " ", line)
     return "&nbsp;" + line[1:] if line.startswith(" ") else line
-
-
-def _inline_images(value: str) -> tuple[str, list[InlineImage]]:
-    images: list[InlineImage] = []
-
-    def replace(match: re.Match[str]) -> str:
-        uri = unescape(match.group("uri"))
-        header, separator, payload = uri[5:].partition(",")
-        media_type, *parameters = header.split(";")
-        if not separator or not media_type.lower().startswith("image/"):
-            raise InvalidRequest("A native signature contains an invalid image data URI.")
-        try:
-            data = (
-                base64.b64decode(payload, validate=True)
-                if any(parameter.lower() == "base64" for parameter in parameters)
-                else unquote_to_bytes(payload)
-            )
-        except (ValueError, binascii.Error):
-            raise InvalidRequest("A native signature contains an invalid image data URI.") from None
-        if not data:
-            raise InvalidRequest("A native signature contains an empty image.")
-        normalized_type = media_type.lower()
-        extension = _IMAGE_EXTENSIONS.get(normalized_type, "img")
-        cid = f"signature-{uuid.uuid4().hex}@outlook-connector"
-        images.append(
-            InlineImage(
-                name=f"signature-image-{len(images) + 1}.{extension}",
-                content_type=normalized_type,
-                content_id=cid,
-                content=data,
-            )
-        )
-        return f"{match.group('prefix')}{match.group('quote')}cid:{cid}{match.group('quote')}"
-
-    converted = _DATA_IMAGE.sub(replace, value)
-    return converted, images
-
-
-def _check_image_sources(tags: list[StartTag]) -> None:
-    """Inline conversion needs a quoted data URI. HTMLParser accepts unquoted ones, so the source text
-    is read; whole attribute values are matched, so text inside another quoted attribute is not a src."""
-    for tag in tags:
-        for attribute in _HTML_ATTRIBUTE.finditer(tag.source):
-            if attribute.group("name").lower() != "src":
-                continue
-            source = attribute.group("value")
-            decoded = unescape(source.strip("\"'"))
-            if (
-                decoded.strip().lower().startswith("data:image/")
-                and _DATA_IMAGE.fullmatch(f"src={source}") is None
-            ):
-                raise InvalidRequest(
-                    "Signature image data URIs must use a quoted src attribute without whitespace."
-                )
 
 
 class _TextFromHtml(HTMLParser):
