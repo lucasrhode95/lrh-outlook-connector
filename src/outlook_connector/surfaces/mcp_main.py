@@ -158,7 +158,11 @@ image with a data:image URI containing those bytes, then save the resulting HTML
 signature. create_draft freshly resolves and inserts the default for new mail or replies;
 signature selects a named signature and include_signature=false suppresses all signatures.
 - Drafts: create_draft accepts exactly one of text_body or html_body, for new mail and replies.
-attachments is a list of local file paths. A replacement draft carries only the files listed on that call.
+attachments is a list of local file paths. In html_body, an <img> whose src is a data:image URI, an
+absolute local file path or a file:/// URL is read before saving, attached inline, and referenced by
+cid: in the saved draft; images with other sources pass through as written, and a missing, unreadable
+or non-image file is an error before anything is saved. A replacement draft carries only the files
+listed on that call.
 Drafts are composed once, never edited. To change one, create a replacement with the full intended
 content (use the same reply_to_message_id and reply_all choice for a reply), check its server read-back,
 then delete the old draft with delete_messages and use the new id. Never delete first. The old version
@@ -617,9 +621,15 @@ def build_server(context: AppContext) -> FastMCP:
         suppress all signatures. A missing or unreadable selected signature raises instead of falling back.
         ``attachments`` accepts local file paths. Files upload after the draft is saved, in 14 MiB
         slices, and Graph confirms each file by name and size (Graph lists a little more than the
-        file's bytes). Files totaling over 35 MiB are refused before any draft is saved. If an upload or
-        confirmation fails,
-        the partial draft moves to Deleted Items and the error names the file.
+        file's bytes). Files and inline images totaling over 35 MiB are refused before any draft is
+        saved. If an upload or confirmation fails, the partial draft moves to Deleted Items and the
+        error names the file.
+        In ``html_body``, an ``<img>`` whose ``src`` is a ``data:image/...;base64`` URI, an absolute
+        local file path (``C:\\shots\\step1.png``) or a ``file:///`` URL is read before the draft is
+        saved, attached as an inline image, and referenced by ``cid:`` in the saved body; images with
+        other sources pass through as written. A path that is missing, unreadable or not a recognized
+        image raises before any draft is saved, naming the file. In a reply, the quoted original's own
+        inline images are kept unchanged.
         Drafts are composed once. To change one, create a full replacement (using the same
         ``reply_to_message_id`` and ``reply_all`` choice for a reply), verify its read-back, then delete
         the old draft with

@@ -399,6 +399,9 @@ class ExportArtifact(Compact):
 
 MAX_RECIPIENTS = 100
 MAX_BODY_CHARS = 100_000
+# Stored size (Integer 0x0E08). A draft stored at 35,655,221 bytes was delivered; one at 37,023,315
+# bounced with "The limit is 35 MB" (research §4.6, live 2026-10-15 and 2026-11-03).
+MAX_SEND_BYTES = 35 * 1024 * 1024
 ADDRESS_PATTERN = r"^[^@\s<>,;\"]+@[^@\s<>,;\"]+\.[^@\s<>,;\"]+$"
 
 

@@ -117,6 +117,7 @@ There is no local database (decided 2026-11-03). Each process keeps its folder l
 
 **[`writes.py`](../src/outlook_connector/service/writes.py)**
 - HTML bodies and signatures pass one checker, [`passive_html.py`](../src/outlook_connector/service/passive_html.py) (rules in §8.10). Text bodies become escaped minimal HTML that keeps whitespace.
+- Body and signature images pass one inline conversion, [`inline_images.py`](../src/outlook_connector/service/inline_images.py) (§8.10): data URIs and the body's local image files become cid-referenced IsInline attachments before the draft is saved.
 - Each local file gets a narrow draft-state read for the current version; final read-back fetches text with attachment metadata once and HTML once, so N files cost N + 3 Graph requests before signature or reply-history checks. Failed files are carried as structured results; error strings are presentation only.
 - An ambiguous send reads the exact id: a Sent Items copy proves it was sent, otherwise the result is `unknown`.
 
@@ -218,7 +219,7 @@ The MCP server exposes 30 tools; the [README](../README.md#mcp-tools) lists them
 | `export_messages` | `limit` 1–2,000, 2,000; a larger selection is refused with its count |
 | `list_calendar_events` | window at most 366 days; `limit` 1–200, 50; `contains` 1–20 terms of up to 200 characters |
 | `search_calendar_events` | query up to 512 characters; `limit` 1–25, 25 |
-| `create_draft` | body up to 100,000 characters; up to 100 distinct addresses across `to`, `cc` and `bcc`; a new message needs a subject of up to 255 characters; local files up to 35 MiB together |
+| `create_draft` | body up to 100,000 characters; up to 100 distinct addresses across `to`, `cc` and `bcc`; a new message needs a subject of up to 255 characters; local files and inline images up to 35 MiB together |
 | Change tools | up to 100 message ids |
 | Downloads and MIME saves | 150 MiB per file |
 
@@ -273,6 +274,7 @@ Outlook owns the event, its schedule, invitees and join link; `lrh-teams-connect
 - Drafts are composed once and never edited. To change one, create a full replacement (same `reply_to_message_id` and `reply_all`, every intended file listed), check its read-back, then delete the old draft. Never delete first. Outlook edits and attachments to the old draft are not carried over.
 - **Passive HTML.** Outlook stores and sends active content unchanged, so this check is the only protection; in testing, recipients' clients still submitted forms ([research §4.5](api-research.md#45-what-outlook-keeps-of-saved-html)). Refused: declarations, scripts, frames, form controls, event-handler attributes, `javascript:` and `vbscript:` URLs, `base`, elements that change how the rest is read (`plaintext`, `title`, `xmp`, `noembed`, `noframes`, `noscript`) and markup left open at the end, so the appended signature can neither complete the body's markup nor render as text.
 - **Signatures** are resolved fresh for each draft; a missing or unreadable selected signature is an error, not a fallback, and a text-only one is escaped.
+- **Inline images.** A body's own `<img>` sources — `data:image` URIs, absolute local paths (Windows drive, UNC or `file:///`) and nothing else — are read before `CreateItem`, saved as IsInline attachments and referenced by `cid:` in the saved body; other sources pass through as written. One conversion ([`inline_images.py`](../src/outlook_connector/service/inline_images.py)) serves bodies and signatures, so their content ids never collide. A missing, unreadable or unrecognized image, or files and inline images together over 35 MiB, fails before a draft exists, naming the file; the read-back verifies each expected inline image's reference, attachment and bytes. A reply keeps the quoted original's inline images unchanged.
 - **Replies** report `history_intact` and `history_problem`: whether the quoted original kept its full text, its structure (lists, tables, emphasis, links, image references) and its inline images.
 - **Local files** are checked before `CreateItem`; files totaling over 35 MiB are refused there. After the uploads, Graph must list each file by name at its size or up to 64 KiB more (Graph adds a small overhead; research §4.6). A failed upload or confirmation moves the draft to Deleted Items and names the file.
 - **`send_draft`** takes only an id. It refuses a stored size over 35 MiB, Outlook's send limit (research §4.6), and sends a draft whose size Graph does not report, since Outlook still bounces an oversized one. A draft changed since it was read is refused and nothing is sent. `unknown` means check Sent Items and Outbox before any other send.
@@ -288,7 +290,7 @@ None is read-only by annotation, so clients ask before each call; move and delet
 
 ### 8.12 Native signatures
 
-Names are exact, case-sensitive and comma-free. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace, and are attached inline when a draft uses the signature. Outlook may keep a deleted name as a default, so set a valid default afterwards. To rename, create, delete the old one and reset its defaults. To copy a signature from a draft, replace each `cid:` reference with a `data:image` URI of that image's bytes.
+Names are exact, case-sensitive and comma-free. Embedded images must be `data:image/...` URIs in a quoted `src` attribute with no whitespace, and are attached inline when a draft uses the signature — through the one conversion that also inlines a draft body's own images (§8.10). Outlook may keep a deleted name as a default, so set a valid default afterwards. To rename, create, delete the old one and reset its defaults. To copy a signature from a draft, replace each `cid:` reference with a `data:image` URI of that image's bytes.
 
 ### 8.13 Inbox rules
 
