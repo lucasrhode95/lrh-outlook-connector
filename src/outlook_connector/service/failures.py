@@ -5,8 +5,6 @@ code, message, request id), the likely cause, whether retrying can help, and wha
 rendered the same way everywhere: ``error_block`` for text, the model itself for JSONL and MCP.
 """
 
-from __future__ import annotations
-
 from collections import Counter
 from collections.abc import Sequence
 

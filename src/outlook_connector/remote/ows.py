@@ -17,8 +17,6 @@ This module is the client (envelope, headers, results); ``ows_mapping`` builds r
 ``ows_mail`` writes mail with them.
 """
 
-from __future__ import annotations
-
 import json
 import re
 import uuid

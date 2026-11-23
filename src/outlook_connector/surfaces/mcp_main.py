@@ -6,8 +6,6 @@ Reads never change the mailbox (not even read state). The write tools save draft
 messages named by id (§12.2), each with a result per message.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from inspect import Parameter
 from inspect import Signature as FunctionSignature

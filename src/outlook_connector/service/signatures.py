@@ -1,7 +1,5 @@
 """Native signature domain behavior and fresh default resolution (W8)."""
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from html import escape

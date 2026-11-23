@@ -1,7 +1,5 @@
 """``OwsMailWriter`` over Outlook Web (OWS): drafts, send and mailbox changes (architecture §5.5)."""
 
-from __future__ import annotations
-
 import mimetypes
 import uuid
 from pathlib import Path

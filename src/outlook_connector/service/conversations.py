@@ -6,8 +6,6 @@ Graph cannot sort that query, so messages are sorted here. Copies of one message
 Bodies are optional and bounded, with a cursor.
 """
 
-from __future__ import annotations
-
 import re
 from typing import Literal
 

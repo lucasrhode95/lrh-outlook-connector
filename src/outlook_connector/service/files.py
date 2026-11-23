@@ -4,8 +4,6 @@ Agents receive raw files and read them with their own tools (requirements §10).
 markers and downloads share file names. Files are kept for a week, like exports.
 """
 
-from __future__ import annotations
-
 import hashlib
 import os
 import tempfile

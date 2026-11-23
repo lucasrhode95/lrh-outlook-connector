@@ -6,8 +6,6 @@ IsInline attachments. Source rules and error wording are stated here once for bo
 write itself stays in ``writes.py`` and ``ows_mapping.py``.
 """
 
-from __future__ import annotations
-
 import base64
 import binascii
 import mimetypes
@@ -138,7 +136,7 @@ def _decode_data_uri(uri: str, kind: Kind) -> tuple[bytes, str]:
             if any(parameter.lower() == "base64" for parameter in parameters)
             else unquote_to_bytes(payload)
         )
-    except (ValueError, binascii.Error):
+    except ValueError, binascii.Error:
         raise InvalidRequest(f"{_SUBJECT[kind]} contains an invalid image data URI.") from None
     if not data:
         raise InvalidRequest(f"{_SUBJECT[kind]} contains an empty image.")

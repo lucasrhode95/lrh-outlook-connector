@@ -16,8 +16,6 @@ R4  internetMessageHeaders per message
 Output: counts and distributions only.
 """
 
-from __future__ import annotations
-
 import argparse
 import re
 import statistics

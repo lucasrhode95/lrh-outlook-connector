@@ -15,8 +15,6 @@ saves the deltaLinks plus a salted-hash -> folder map to .local/probe-delta-stat
 works and where the message now lives. Counts and aliases only.
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json

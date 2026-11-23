@@ -6,8 +6,6 @@ nothing is parsed into another form here. A connector's policy on top of these r
 a Teams message may carry, lives in that connector's own modules.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from html import unescape

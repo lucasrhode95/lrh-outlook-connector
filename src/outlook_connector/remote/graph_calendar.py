@@ -6,8 +6,6 @@ UTC, and an answer in any other zone is refused rather than guessed. Ids are con
 Web form, so ``get_calendar_event`` can hydrate them.
 """
 
-from __future__ import annotations
-
 import re
 from collections.abc import Iterable
 from datetime import UTC, datetime

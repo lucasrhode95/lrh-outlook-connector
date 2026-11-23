@@ -9,8 +9,6 @@ Read-only (profile 'graph'). Scans recent messages with attachments and reports:
 Attachment bytes stay in memory and are discarded. Names are never printed.
 """
 
-from __future__ import annotations
-
 import argparse
 import statistics
 from collections import Counter

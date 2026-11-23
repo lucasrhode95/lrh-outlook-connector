@@ -1,7 +1,5 @@
 """Native roaming signatures over Outlook Cloud Settings (research §5.2–5.3)."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 import time

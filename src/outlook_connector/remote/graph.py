@@ -3,8 +3,6 @@
 Every request asks for immutable ids. Continuation links pass through unchanged after Graph-root validation.
 """
 
-from __future__ import annotations
-
 import asyncio
 import sys
 from collections.abc import Mapping
@@ -177,7 +175,7 @@ class Graph:
         for response in data.get("responses", []):
             try:
                 key = keys[int(response.get("id"))]
-            except (TypeError, ValueError, IndexError):
+            except TypeError, ValueError, IndexError:
                 raise Upstream("Graph batch response has an unknown request id.") from None
             body_part = response.get("body")
             headers = response.get("headers")

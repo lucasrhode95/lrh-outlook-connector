@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import pytest
 
 from outlook_connector.domain.errors import InvalidRequest

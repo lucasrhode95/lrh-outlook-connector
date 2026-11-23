@@ -8,8 +8,6 @@ is doing it. An expired file is renamed to a private name before it is deleted, 
 one whose age was checked. A file held open elsewhere is kept.
 """
 
-from __future__ import annotations
-
 import contextlib
 import os
 import sys
@@ -97,7 +95,7 @@ def _remove_expired(directory: Path, cutoff: float) -> None:
                 _remove_if_expired(old, cutoff)
         # Removed by another process, or open elsewhere (Windows): kept for a later cleanup.
         # Any other error is a real problem and still propagates.
-        except (FileNotFoundError, PermissionError):
+        except FileNotFoundError, PermissionError:
             continue
 
 

@@ -5,8 +5,6 @@ Otherwise one .zip: text files at the root, each text file's attachments in a si
 named after it.
 """
 
-from __future__ import annotations
-
 import time
 import zipfile
 from dataclasses import dataclass, field

@@ -1,7 +1,5 @@
 """Graph JSON → domain models. The only module that knows Graph mail field names."""
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -151,7 +149,7 @@ def _message_size(data: dict[str, Any]) -> int | None:
         if isinstance(prop, dict) and prop.get("id") == MESSAGE_SIZE_PROPERTY:
             try:
                 return int(prop["value"])
-            except (KeyError, TypeError, ValueError):
+            except KeyError, TypeError, ValueError:
                 return None
     return None
 

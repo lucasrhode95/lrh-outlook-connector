@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from outlook_connector.domain.models import Attachment
 from outlook_connector.service.markers import file_names, named, with_markers
 

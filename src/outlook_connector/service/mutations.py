@@ -14,8 +14,6 @@ Deleting moves to Deleted Items; a message already in Deleted Items is left alon
 there would remove it from the folder view), so there is never a hard delete.
 """
 
-from __future__ import annotations
-
 from collections import Counter
 from collections.abc import Awaitable, Callable
 

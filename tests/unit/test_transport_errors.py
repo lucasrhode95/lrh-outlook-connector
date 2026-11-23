@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from outlook_connector.remote.transport import request_id, service_error
 
 

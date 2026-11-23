@@ -1,7 +1,5 @@
 """Shared primitive normalizers for Search v2, OWS and Graph calendar responses."""
 
-from __future__ import annotations
-
 import re
 from datetime import UTC, datetime
 from typing import Any

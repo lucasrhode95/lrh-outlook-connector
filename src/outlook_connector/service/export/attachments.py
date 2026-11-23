@@ -4,8 +4,6 @@
 - Reference (cloud) attachments are listed, never downloaded.
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import PurePath
 

@@ -1,7 +1,5 @@
 """Concurrent reads that finish or are cancelled before their caller returns."""
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Awaitable
 

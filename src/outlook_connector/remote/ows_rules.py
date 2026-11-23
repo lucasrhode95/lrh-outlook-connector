@@ -1,7 +1,5 @@
 """Inbox-rule contracts proven in API research §4.4; only this adapter knows OWS fields."""
 
-from __future__ import annotations
-
 import hashlib
 import json
 from typing import Any

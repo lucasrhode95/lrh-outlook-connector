@@ -5,8 +5,6 @@ attachments (policy, markers) → grouping (per conversation / all / none) →
 TXT or JSONL rendering → packaging.
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import shutil
