@@ -4,8 +4,6 @@ The listing reads the default calendar's occurrences for a window, in time order
 reported as it is; there is no other service to answer instead.
 """
 
-from __future__ import annotations
-
 import unicodedata
 from datetime import UTC, datetime, timedelta
 from typing import Any

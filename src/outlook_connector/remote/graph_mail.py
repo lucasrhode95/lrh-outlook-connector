@@ -1,7 +1,5 @@
 """Mail reads over Microsoft Graph (research §3)."""
 
-from __future__ import annotations
-
 import asyncio
 import functools
 from collections.abc import Callable, Coroutine

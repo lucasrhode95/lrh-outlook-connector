@@ -3,8 +3,6 @@
 Imported only by the `ui` command, so MCP processes never load the web stack.
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import secrets

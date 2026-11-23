@@ -12,8 +12,6 @@ compared in memory and only overlap counts are printed. Query strings are echoed
 because they are the operator's own test input; result content is not.
 """
 
-from __future__ import annotations
-
 import argparse
 import uuid
 from typing import Any

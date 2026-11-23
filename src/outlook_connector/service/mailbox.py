@@ -22,8 +22,6 @@ A folder counts with its parents:
   are on) are shown once; ``also_in`` names the folders of the other copies.
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import time

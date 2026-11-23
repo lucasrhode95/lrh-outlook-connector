@@ -23,8 +23,6 @@ Output: OWS status codes and Graph-observed state (folder alias, isRead, flag, c
 count). No subjects beyond the case labels, no ids.
 """
 
-from __future__ import annotations
-
 import argparse
 from typing import Any
 

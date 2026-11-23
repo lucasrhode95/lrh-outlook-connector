@@ -6,8 +6,6 @@ $batch, attachments and $value downloads. It also answers the OWS write actions 
 on the same mailbox, so a write can be read back through Graph. All data is synthetic.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import json

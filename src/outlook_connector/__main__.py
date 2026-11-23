@@ -4,8 +4,6 @@ Top-down: ``main`` first, then one handler per command, then the parser and the 
 Handlers import their dependencies lazily, so that ``mcp`` never loads the web stack.
 """
 
-from __future__ import annotations
-
 import argparse
 import contextlib
 import functools

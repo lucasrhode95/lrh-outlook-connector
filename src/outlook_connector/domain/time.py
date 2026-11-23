@@ -3,8 +3,6 @@
 Entry points that accept times call these once, so no two layers normalize the same value.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 
 

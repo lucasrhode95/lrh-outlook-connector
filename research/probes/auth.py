@@ -9,8 +9,6 @@
 so a second sign-in is usually unnecessary.
 """
 
-from __future__ import annotations
-
 import argparse
 
 from common import PROFILES, SignInRequired, claims, device_code_sign_in, emit, get_token, token_status

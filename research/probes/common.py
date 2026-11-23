@@ -10,8 +10,6 @@ salted short hashes of identifiers. Never print tokens, bodies, subjects,
 addresses, or raw identifiers.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import json

@@ -1,7 +1,5 @@
 """Draft-first mail: explicit bodies, mandatory Graph read-back, existing-draft sending."""
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import re

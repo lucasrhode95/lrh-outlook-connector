@@ -4,8 +4,6 @@ Exchange's text stays intact and attachment markers follow it. Attachment identi
 source listing; plain text and rendered markers are never searched to recover it.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 
 from outlook_connector.domain.models import Attachment, CalendarAttachment

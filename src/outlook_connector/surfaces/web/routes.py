@@ -5,8 +5,6 @@ token and a localhost Host header (blocks other local pages and DNS rebinding). 
 untrusted; the page renders it as text only.
 """
 
-from __future__ import annotations
-
 import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime

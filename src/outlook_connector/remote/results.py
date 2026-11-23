@@ -1,8 +1,6 @@
 """Values the remote adapters and the service exchange: result pages, counts, signature settings,
 move targets and the shared request cap. Wire formats stay in the adapters."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal

@@ -1,7 +1,5 @@
 """Rendering of exported messages (requirements §11): TXT for people, JSONL for agents."""
 
-from __future__ import annotations
-
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field

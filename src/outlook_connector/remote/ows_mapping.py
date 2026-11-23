@@ -3,8 +3,6 @@
 Pure functions, no I/O: ``ows_mail`` sends what they build through ``ows.Ows``.
 """
 
-from __future__ import annotations
-
 import base64
 from typing import Any
 

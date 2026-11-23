@@ -4,8 +4,6 @@ A Graph immutable REST id is URL-safe base64; OWS takes the same id in standard 
 (``-``→``/``, ``_``→``+``). Conversation ids map the same way. Verified live 2026-10-02.
 """
 
-from __future__ import annotations
-
 _TO_OWS = str.maketrans("-_", "/+")
 _TO_GRAPH = str.maketrans("/+", "-_")
 

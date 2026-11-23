@@ -4,8 +4,6 @@ Transport validates every outbound URL against the host allowlist. Graph continu
 additionally constrained to the versioned Graph root before they reach transport.
 """
 
-from __future__ import annotations
-
 from urllib.parse import urlsplit
 
 from outlook_connector.domain.errors import InvalidRequest

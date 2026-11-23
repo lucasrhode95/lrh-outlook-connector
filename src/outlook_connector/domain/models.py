@@ -4,8 +4,6 @@ These never mirror a Microsoft wire format. remote/graph_mapping.py converts Gra
 them, and nothing else knows Graph field names.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from typing import Any, Literal
 

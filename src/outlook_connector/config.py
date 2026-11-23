@@ -6,8 +6,6 @@ tenant with different Graph availability, change the profiles here; see
 docs/architecture.md §6.
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 

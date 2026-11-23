@@ -1,7 +1,5 @@
 """Domain errors. Each surface maps these to its own protocol (CLI exit codes, MCP tool errors, HTTP)."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from m365_auth import (

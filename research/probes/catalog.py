@@ -12,8 +12,6 @@ Read-only (profile 'graph'). Reports:
 Output: counts, timings and sizes only.
 """
 
-from __future__ import annotations
-
 import argparse
 import time
 

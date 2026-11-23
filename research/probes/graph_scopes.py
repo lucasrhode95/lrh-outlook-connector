@@ -4,8 +4,6 @@ Uses each client's stored refresh token to request additional Graph scopes. Reco
 Denials configured for the current environment are skipped; none are skipped by default. Output: granted/denied, audience, mail scope names.
 """
 
-from __future__ import annotations
-
 from common import GRAPH_RESOURCE, GRAPH_CLIENT, OUTLOOK_CLIENT, emit, try_scope
 
 GRAPH = GRAPH_RESOURCE + "/"

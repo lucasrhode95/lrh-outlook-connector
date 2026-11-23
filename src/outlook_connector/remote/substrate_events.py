@@ -1,7 +1,5 @@
 """Exchange event discovery through the standalone-proven Outlook Search v2 route."""
 
-from __future__ import annotations
-
 from typing import Any
 
 from outlook_connector.domain.models import CalendarEvent, Recipient
